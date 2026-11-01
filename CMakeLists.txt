@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21)
 project(hotd_m2 VERSION 1.0.1 LANGUAGES C CXX)
 # Light Gun Edition: its own build number on top of the ReWrithe version (v1.0.1-lg1): raise it for each release of
 # this edition; the release tag must match (git tag v1.0.1-lg1)
-set(HOTD_LG_EDITION "lg6")
+set(HOTD_LG_EDITION "lg7")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

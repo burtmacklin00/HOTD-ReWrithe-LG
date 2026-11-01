@@ -11835,7 +11835,7 @@ int main(int argc, char* argv[])
                 else if (e.button.button == SDL_BUTTON_RIGHT) g.reload = true;
                 else if (e.button.button == SDL_BUTTON_MIDDLE && e.button.which == SDL_PEN_MOUSEID)
                     g.reload = true;   // edgereload: the pen's barrel button (SDL: button 2) = reload, as its eraser (3)
-                else if (e.button.button == SDL_BUTTON_MIDDLE) { if (gNet) netStart = true; else rt.player_join(p); }   // that mouse's start button
+                else if (e.button.button == SDL_BUTTON_MIDDLE) g.reload = true;   // Light Gun Edition: reload (the trigger is Start)
             } else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) {
                 // the players' aim keys, held (from the events: SDL_GetKeyboardState misses injected events);
                 // keybind: each player's own keys (cfg.keys, game/keybinds.h)
@@ -12227,6 +12227,20 @@ int main(int argc, char* argv[])
         if (paused && !step)   // a click while paused does not fire when the game goes on (N: it fires on that frame)
             for (Gun& g : guns)
                 g.trigger = g.reload = false;
+        // Light Gun Edition: the trigger is Start too, whatever the player aims with (gun, mouse, keys, pad): a player not
+        // in play (9 waiting, 4 out of lives) joins / continues with it, as the set's other light gun games
+        // (online: this PC's seats, through the lockstep's start bits)
+        if (!paused)
+            for (int p = 0; p < rt.seat_count(); ++p)
+                if (guns[p].trigger && cfg.seatBot[p & 3] == 0) {
+                    const int st = gNet ? (p == 0 ? gNet->localPlayer() : p == 1 ? gNet->secondSeat() : -1) : p;
+                    if (st < 0 || st >= rt.seat_count()) continue;
+                    const int32_t s = rt.mem.at<port::a::Player>(rt.player_rec(st)).state;
+                    if (s != 9 && s != 4) continue;
+                    if (!gNet) rt.player_join(p);
+                    else if (p == 0) netStart = true;
+                    else netStart2 = true;
+                }
         // the game logic at exactly the game speed's rate (rate: arcade 57.524 Hz, or 60), whatever the display / render
         // rate: a fixed time step with an accumulator (`next` = when the next tick is due, advanced by one period per
         // tick), never one tick per rendered frame. A render may run 0, 1 or (catching up) up to 4 ticks; a longer

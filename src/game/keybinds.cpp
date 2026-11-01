@@ -107,9 +107,10 @@ KeyBinds defaultKeys(int player)
     KeyBinds b;
     auto set = [&](int a, SDL_Scancode k0, SDL_Scancode k1 = SDL_SCANCODE_UNKNOWN) { b.k[a][0] = k0; b.k[a][1] = k1; };
     switch (player) {
-    case 0:   // the mouse aims, fires and reloads; 1 = start; P (and Esc, fixed) = the pause
-        set(kActStart, SDL_SCANCODE_1);
-        set(kActPause, SDL_SCANCODE_P);
+    case 0:   // the mouse aims, fires and reloads; P (and Esc, fixed) = the pause
+        // Light Gun Edition: 1 opens the pause menu too (the light gun cabinets' Start key), and has no Start of its
+        // own: the trigger (a gun's or the mouse's) joins and continues (main.cpp)
+        set(kActPause, SDL_SCANCODE_P, SDL_SCANCODE_1);
         break;
     case 1:
         set(kActUp, SDL_SCANCODE_UP);

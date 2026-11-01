@@ -162,7 +162,7 @@ void BindTest::after(int i, Ctx& c)
     if (i == kFirst) {
         // the defaults: today's keys (main.cpp's before the bindings)
         const KeyBinds d1 = defaultKeys(0), d2 = defaultKeys(1), d3 = defaultKeys(2), d4 = defaultKeys(3);
-        c.expect(d1.has(kActStart, SDL_SCANCODE_1) && d1.has(kActPause, SDL_SCANCODE_P) && !d1.k[kActFire][0] &&
+        c.expect(!d1.has(kActStart, SDL_SCANCODE_1) && d1.has(kActPause, SDL_SCANCODE_1) && d1.has(kActPause, SDL_SCANCODE_P) && !d1.k[kActFire][0] &&
                      d2.has(kActFire, SDL_SCANCODE_SPACE) && d2.has(kActFire, SDL_SCANCODE_RCTRL) &&
                      d2.has(kActReload, SDL_SCANCODE_RSHIFT) && d2.has(kActReload, SDL_SCANCODE_RETURN) &&
                      d2.has(kActLeft, SDL_SCANCODE_LEFT) && d2.has(kActStart, SDL_SCANCODE_2) &&

@@ -182,7 +182,7 @@ void LightGuns::buttons(uint64_t id, unsigned flags)
             d.eTrigger = true;
     }
     if (flags & 0x4) d.eReload = true;
-    if (flags & 0x10) d.eStart = true;
+    if (flags & 0x10) d.eReload = true;   // Light Gun Edition: the middle button reloads (the trigger is Start)
 }
 
 #ifdef _WIN32
