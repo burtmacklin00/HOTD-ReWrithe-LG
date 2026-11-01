@@ -12,6 +12,10 @@ name: release
 on:
   push:
     tags: ["v*"]
+    # Light Gun Edition: every change pushed to main builds the Windows package by itself (a test build: Actions ->
+    # the run -> Artifacts -> windows-x64); README-only changes build nothing
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
 
 permissions:
@@ -107,6 +111,7 @@ jobs:
 
   linux:
     name: Linux x64 / SteamOS
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')   # (Light Gun Edition: not on every push)
     runs-on: ubuntu-latest
     # Valve's Steam Runtime 3 "sniper" SDK (Debian 11, glibc 2.31): the binary then runs on SteamOS 3 and older desktop
     # distributions too (docs/porting.md "SteamOS package")
@@ -172,6 +177,7 @@ jobs:
 
   macos:
     name: macOS universal
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')   # (Light Gun Edition: not on every push)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
