@@ -1038,11 +1038,13 @@ static bool skipRingSpot(const game::Runtime& rt, int ww, int wh, float pictureX
 // players 1-4 offline, online this PC's first / second seat (so a gun set up as Player 1 always gets its own
 // recoil); a CPU teammate's seat sends nothing.
 game::GameOutputs gOutputs;
-void outputsStart(const game::LaunchConfig& cfg)
+void outputsStart(const game::LaunchConfig& cfg, const std::string& settingsDir)
 {
     if (!cfg.outputs) return;
     game::GameOutputsConfig oc;
     oc.port = cfg.outputsPort;
+    if (const char* l = std::getenv("HOTD_OUTPUTS_LOG"); l && *l && *l != '0')   // the debug launcher
+        oc.logFile = settingsDir + "outputs.log";
     std::string err;
     if (gOutputs.start(oc, &err)) SDL_Log("outputs: on, port %d (Hook of the Reaper: game hotdrw)", oc.port);
     else SDL_Log("outputs: off: %s", err.c_str());
@@ -4478,7 +4480,7 @@ int main(int argc, char* argv[])
     gl::prepareWindow(cfg.renderer);   // (angle: ANGLE sets the window up for EGL)
     int backend = cfg.renderer;
     if (cfg.updateCheck && !automated) util::updateCheckStart(HOTD_VERSION_TEXT);   // Options > System > Check for Updates
-    if (!automated) outputsStart(cfg);   // Light Gun Edition: Hook of the Reaper's outputs
+    if (!automated) outputsStart(cfg, cacheDir());   // Light Gun Edition: Hook of the Reaper's outputs
     SDL_Window* window = SDL_CreateWindow("The House of the Dead: ReWrithe", w, h,
                                           SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (automated ? SDL_WINDOW_HIDDEN : 0));
     if (!window && backend == gl::kBackendAngle) {   // angle: ANGLE's window surface failed (Direct3D 10.0 / 9): OpenGL

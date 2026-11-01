@@ -44,6 +44,9 @@ struct GameOutputsConfig {
     int port = 8000;
     int recoilOnMs = 40, recoilOffMs = 40;   // one recoil pulse (DemulShooter's custom recoil defaults)
     int damagedMs = 200;                     // length of the Damaged pulse
+    // the outputs log (the debug launcher: HOTD_OUTPUTS_LOG=1): every message sent, the tools connecting / leaving,
+    // with the time since the start (ms); "" none. The start lamps' blinking is left out (it is constant).
+    std::string logFile;
 };
 
 class GameOutputs {
@@ -82,6 +85,9 @@ private:
     std::vector<uintptr_t> clients_;
     std::vector<Output> outputs_;
     bool wsa_ = false;
+    void* log_ = nullptr;        // FILE* (the outputs log)
+    uint64_t logT0_ = 0;
+    void logLine(const std::string& text);
 
     static constexpr int kSeats = 4;
     int recoil_[kSeats] = {-1, -1, -1, -1}, damaged_[kSeats] = {-1, -1, -1, -1}, dead_[kSeats] = {-1, -1, -1, -1},

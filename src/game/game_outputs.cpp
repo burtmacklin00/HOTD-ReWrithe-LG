@@ -26,7 +26,9 @@ static bool wouldBlock() { return errno == EWOULDBLOCK || errno == EAGAIN; }
 
 #include "game/game_outputs.h"
 
+#include <chrono>
 #include <cstddef>
+#include <cstdio>
 
 namespace hotd::game {
 
@@ -95,6 +97,12 @@ bool GameOutputs::start(const GameOutputsConfig& config, std::string* error)
     }
     listener_ = static_cast<uintptr_t>(s);
     setNonBlocking(listener_);
+    if (!config_.logFile.empty() && !log_) {
+        log_ = std::fopen(config_.logFile.c_str(), "w");
+        logT0_ = uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+        logLine("outputs on, port " + std::to_string(config_.port) + ", game hotdrw (recoil pulse " + std::to_string(config_.recoilOnMs) +
+                " ms on / " + std::to_string(config_.recoilOffMs) + " ms off, damaged " + std::to_string(config_.damagedMs) + " ms)");
+    }
 
     outputs_.clear();
     for (int i = 0; i < kSeats; ++i) {
@@ -114,8 +122,21 @@ bool GameOutputs::start(const GameOutputsConfig& config, std::string* error)
     return true;
 }
 
+void GameOutputs::logLine(const std::string& text)
+{
+    if (!log_) return;
+    const uint64_t now = uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+    std::fprintf(static_cast<FILE*>(log_), "%9.3f  %s\n", double(now - logT0_) / 1000.0, text.c_str());
+    std::fflush(static_cast<FILE*>(log_));
+}
+
 void GameOutputs::stop()
 {
+    if (log_) {
+        logLine("outputs off (mame_stop sent to " + std::to_string(clients_.size()) + " tool(s))");
+        std::fclose(static_cast<FILE*>(log_));
+        log_ = nullptr;
+    }
     for (uintptr_t c : clients_) {
         sendTo(c, line("mame_stop", 1));
         closeSock(c);
@@ -173,6 +194,8 @@ void GameOutputs::set(int output, int value)
     if (o.value == value) return;
     o.value = value;
     sendAll(line(o.name, value));
+    if (log_ && o.name.find("LmpStart") == std::string::npos)
+        logLine(o.name + " = " + std::to_string(value) + "   (" + std::to_string(clients_.size()) + " tool(s) connected)");
 }
 
 void GameOutputs::acceptClients()
@@ -190,14 +213,19 @@ void GameOutputs::acceptClients()
         setsockopt(c, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&one), sizeof(one));
         std::string hello = line("mame_stop", 1) + "mame_start = " + kRomName + "\r";
         for (const Output& o : outputs_) hello += line(o.name, o.value);
-        if (sendTo(client, hello)) clients_.push_back(client);
-        else closeSock(client);
+        if (sendTo(client, hello)) {
+            clients_.push_back(client);
+            logLine("a tool connected (Hook of the Reaper / MAMEHooker ...): " + std::to_string(clients_.size()) + " now");
+        } else {
+            closeSock(client);
+        }
     }
     // Drain anything the tools send (MAMEHooker-style requests are not needed) and notice closed connections.
     for (size_t i = 0; i < clients_.size();) {
         char buf[256];
         const int n = static_cast<int>(recv(static_cast<socket_t>(clients_[i]), buf, sizeof(buf), 0));
         if (n == 0 || (n < 0 && !wouldBlock())) {
+            logLine("a tool disconnected: " + std::to_string(clients_.size() - 1) + " left");
             closeSock(clients_[i]);
             clients_.erase(clients_.begin() + static_cast<std::ptrdiff_t>(i));
         } else {
