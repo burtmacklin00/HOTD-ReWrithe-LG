@@ -177,7 +177,7 @@ void menuReset(LaunchConfig& c, int page)
     case kCatVideo:
         c.models = d.models, c.aspect = d.aspect, c.menuStyle = d.menuStyle, c.liveBackground = d.liveBackground;
         c.fullscreen = d.fullscreen, c.exclusive = d.exclusive, c.frameRate = d.frameRate, c.menuFps = d.menuFps, c.vsync = d.vsync, c.smooth = d.smooth;
-        c.hitSparks = d.hitSparks, c.muzzleFlash = d.muzzleFlash, c.bloodParticles = d.bloodParticles;
+        c.crosshairs = d.crosshairs, c.hitSparks = d.hitSparks, c.muzzleFlash = d.muzzleFlash, c.bloodParticles = d.bloodParticles;
         c.resFullW = d.resFullW, c.resFullH = d.resFullH, c.resWinW = d.resWinW, c.resWinH = d.resWinH;
         c.crt = d.crt;
         break;
@@ -339,6 +339,9 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "The CRT filter's own page: the Custom preset's scanlines, mask, curvature, bloom, brightness"});
         // menufb (user 2026-10-26: "clicking crosshairs takes them to a new page / firing range"): every player's own
         // crosshair on the Firing Range page (menuRangeRows), tried out on its targets
+        // Light Gun Edition: the crosshairs in play on / off (launcher.ini crosshairs=)
+        r.push_back({"Show Crosshairs", [&c]() { return onOff(c.crosshairs); }, [&c, save]() { c.crosshairs = !c.crosshairs; save(); },
+                     "Off: no crosshairs in the game (as the arcade with light guns); the Firing Range still shows them"});
         r.push_back({"Crosshairs", []() { return page("Firing Range"); }, [h]() { if (h.rangePage) h.rangePage(); },
                      "Each player's crosshair (style, colour, size, thickness), tried out on a firing range"});
         break;

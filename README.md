@@ -20,6 +20,11 @@ What this edition adds:
   `P4_Lightgun_HID`), so each gun goes to the right player at every start and their input is set to Light Gun; a
   blank file asks again. If no listed gun is connected, the mouse plays. Controls > Light Guns (Assign) updates the
   file too.
+- **Quick settings as programs** (no console windows, as the Lost World Native LG): `2 - Display - 4x3.exe`,
+  `2 - Display - 16x9.exe`, `2 - Crosshairs - On.exe`, `2 - Crosshairs - Off.exe` in the game's folder (close the game
+  first; they take effect at its next start). The Display ones put the lines of `4x3\launcher.ini` / `16x9\launcher.ini`
+  into `settings\launcher.ini` (add lines there to change them only in that mode). New in the game: Options > Video >
+  **Show Crosshairs** (launcher.ini `crosshairs=`).
 - **No update pop-ups**: the in-game update check is off (launcher.ini `lgupdatecheck=1` turns it on; it then asks
   this edition's releases, not the original's), so a front-end such as LaunchBox is never interrupted.
 

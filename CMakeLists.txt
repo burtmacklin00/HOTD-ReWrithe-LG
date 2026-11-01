@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21)
 project(hotd_m2 VERSION 1.0.1 LANGUAGES C CXX)
 # Light Gun Edition: its own build number on top of the ReWrithe version (v1.0.1-lg1): raise it for each release of
 # this edition; the release tag must match (git tag v1.0.1-lg1)
-set(HOTD_LG_EDITION "lg3")
+set(HOTD_LG_EDITION "lg4")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -256,6 +256,15 @@ if(WIN32)   # the package's game exe stub (util/game_exe.h): no DLLs (static run
     add_executable(hotd_launch WIN32 src/launch/launch_main.cpp)
     set_property(TARGET hotd_launch PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
     add_dependencies(hotd hotd_launch)
+    # Light Gun Edition: the quick settings as silent programs (src/presets/presets.cpp), copied by the packaging under
+    # each setting's name ("2 - Display - 4x3.exe" ...); no DLLs (static runtime)
+    add_executable(hotd_presets WIN32 src/presets/presets.cpp)
+    set_property(TARGET hotd_presets PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
+    if(MSVC)
+        target_compile_definitions(hotd_presets PRIVATE _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
+        target_compile_options(hotd_presets PRIVATE /utf-8)
+    endif()
+    add_dependencies(hotd hotd_presets)
 endif()
 add_executable(hotd_viewer src/viewer/main.cpp src/game/files_check.cpp)   # files_check: a package's ROM zip -> regions
 target_link_libraries(hotd_viewer PRIVATE hotd_engine)

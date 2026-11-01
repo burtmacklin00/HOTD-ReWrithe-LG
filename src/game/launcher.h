@@ -285,6 +285,9 @@ struct LaunchConfig {
     // Light Gun Edition: outputs for Hook of the Reaper and the like (game/game_outputs.h); launcher.ini outputs= (1 on,
     // 0 off) and outputsport= (the TCP port, 8000 as MAME / DemulShooter)
     bool outputs = true;
+    // Light Gun Edition: the players' crosshairs in the game (Options > Video > Show Crosshairs; launcher.ini
+    // crosshairs=1 / 0; "2 - Crosshairs - On / Off.exe"). Off: none drawn in play (the menus' Firing Range still shows them)
+    bool crosshairs = true;
     int outputsPort = 8000;
     bool attractGore = true;     // Gameplay "Attract Gore": the attract demo blows parts off as the 1998 PC (port::gAttractGore)
     bool scoreDisplay = false;   // scoredisp: the arcade's score line (title code LLLRR's SCORE:%05d) in every offline game

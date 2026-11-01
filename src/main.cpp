@@ -12538,6 +12538,7 @@ int main(int argc, char* argv[])
             aim[p][1] = guns[p].y * wh / std::max(lh, 1);
         }
         for (int p = 0; p < 4; ++p) {   // computer teammates: their own crosshair (the bot's aim), a CPU tag
+            hud.drawCross[p] = cfg.crosshairs;   // Light Gun Edition: Show Crosshairs (launcher.ini crosshairs=)
             hud.cpu[p] = teamSeatShown(p);
             if (hud.cpu[p] && view) {
                 float ax, ay, x, y;
