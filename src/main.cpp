@@ -247,7 +247,7 @@ static bool SDLCALL rawMouseHook(void*, MSG* msg)
             const bool penOrTouch = (ri.data.mouse.ulExtraInformation & 0xFFFFFF00u) == 0xFF515700u;   // MI_WP_SIGNATURE
             if ((ri.data.mouse.lLastX || ri.data.mouse.lLastY || buttons) && !penOrTouch)
                 mouseUsed(SDL_MouseID(reinterpret_cast<uintptr_t>(ri.header.hDevice)));   // SDL's raw-input mouse ID
-            if (gLightGuns && (gLightGuns->active() || gLightGuns->assigning() >= 0 || gLightGuns->capturing()))   // (ipolish: the Assign page; Light Gun Edition: LightgunHID.ini's set-up)
+            if (gLightGuns && (gLightGuns->active() || gLightGuns->assigning() >= 0 || gLightGuns->capturing() || gLightGuns->menuGunOn()))   // (ipolish: the Assign page; Light Gun Edition: LightgunHID.ini's set-up)
                 gLightGuns->winRawInput(&ri, msg->hwnd);
         }
     }
@@ -5948,6 +5948,7 @@ int main(int argc, char* argv[])
         pads.reset(guns, lw, lh);
         lightGuns.configure(cfg);
         lightGuns.reset();
+        lightGuns.setMenuGun("");   // Light Gun Edition: in play every gun is its player's again (the menus' P1-only off)
         gunFlash.reset();
         if (cfg.calibrateNext && lightGuns.active()) {   // padpass: Controls > Calibrate Light Guns: At Next Start
             lightGuns.startCalibration();
@@ -9794,10 +9795,39 @@ int main(int argc, char* argv[])
                 fe.setViewAspect(float(lw) / float(lh));
             float sc, fx0, fy0;   // (the picture fitted inside the window: Hud::drawPicture)
             game::Hud::pictureRect(fe.canvasWidth(), game::Frontend::kHeight, float(lw), float(lh), sc, fx0, fy0);
+            // Light Gun Edition: Player 1's gun set up and plugged in: the menus follow that gun only (read through raw
+            // input; the Windows pointer, which every gun moves, is hidden and its moves / clicks ignored; the keyboard
+            // and pads work as before). Not online, not while a gun set-up / Assign waits for a pull.
+            const bool p1Menu = !gNet && !gHid.active && lightGuns.assigning() < 0 && !lightGuns.capturing() &&
+                                menu.cfg.p1Input == 3 && !menu.cfg.gunDev[0].empty() && lightGuns.connected(menu.cfg.gunDev[0]);
+            {
+                static bool was = false;
+                static Uint64 regAt = 0;
+                if (p1Menu) {
+                    if (!was) {
+                        lightGuns.configure(menu.cfg);
+                        SDL_Log("menus: Player 1's gun only (%s)", menu.cfg.gunName[0].c_str());
+                    }
+                    lightGuns.setMenuGun(menu.cfg.gunDev[0]);
+                    if (!was || SDL_GetTicks() - regAt >= 1000) {   // (raw input kept on: a set-up / Assign may turn it off)
+                        rawMiceWatch(window, true);
+                        regAt = SDL_GetTicks();
+                    }
+                    if (SDL_CursorVisible()) SDL_HideCursor();
+                } else if (was) {
+                    lightGuns.setMenuGun("");
+                    if (!rawWatch && lightGuns.assigning() < 0 && !lightGuns.capturing()) rawMiceWatch(window, false);
+                    SDL_ShowCursor();
+                }
+                was = p1Menu;
+            }
             SDL_Event e;
             while (SDL_PollEvent(&e)) {
                 if (bindEvent && bindEvent(e))   // keybind: the Keys & Buttons page waits for a key / button
                     continue;
+                if (p1Menu && (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                               e.type == SDL_EVENT_MOUSE_BUTTON_UP))
+                    continue;   // Light Gun Edition: the menus follow Player 1's gun only (below)
                 if (gunAssignEvent && gunAssignEvent(e))   // ipolish: a seat waits for a light gun's trigger pull
                     continue;
                 if (hidSetupEvent && hidSetupEvent(e))   // Light Gun Edition: LightgunHID.ini's set-up
@@ -10324,6 +10354,22 @@ int main(int argc, char* argv[])
                 fe.handAlpha = 1.0f;
                 if (cclick) in.press = in.anyKey = in.click = true;
             }
+            bool p1MenuHeld = false;
+            if (p1Menu) {   // Light Gun Edition: Player 1's gun as the menus' mouse (trigger = click, right button = right click)
+                bool moved, pull, alt;
+                float mx, my;
+                lightGuns.takeMenu(lw, lh, moved, mx, my, pull, p1MenuHeld, alt);
+                if (moved) {
+                    gCrt.toSource(mx, my, lw, lh);
+                    in.mouseMoved = true, in.pad = false;
+                    in.mouseX = int((mx - fx0) / sc);
+                    in.mouseY = int((my - fy0) / sc);
+                    fe.hideHand = false;
+                    fe.handAlpha = 1.0f;
+                }
+                if (pull) in.press = in.anyKey = in.click = true;
+                if (alt) in.anyKey = in.alt = true;
+            }
             in.ctrl = in.ctrl || (SDL_GetModState() & SDL_KMOD_CTRL) != 0;   // (DIK 0x1D / 0x9D held)
             {   // HOTD_MENU_TYPE="N:TEXT[;M:X,Y]" (developer, pc_cheats): at the menu's N-th frame TEXT typed with Ctrl held;
                 // at frame M a click at (X, Y) (640 x 480): for HOTD_MENU_SHOT pictures of the secret screens
@@ -10404,7 +10450,7 @@ int main(int argc, char* argv[])
             // player on a mouse / gun), each pad player's aim and trigger (its crosshair from the middle when the page
             // opens), a rumble on a hit
             // (the input test's injected button: from its events; SDL's state never sees a pushed event)
-            in.mouseHeld = inputTest ? feLeftHeld : (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0;
+            in.mouseHeld = inputTest ? feLeftHeld : p1Menu ? p1MenuHeld : (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0;
             fe.artSeat = gRangeSeat;
             fe.rangeFlash = menu.cfg.teamFlash;
             fe.rangeMouseSeat = menu.cfg.p1Input == 0 || menu.cfg.p1Input == 3 ? 0 : menu.cfg.p2Input == 0 || menu.cfg.p2Input == 3 ? 1 : 0;

@@ -20,6 +20,11 @@ What this edition adds:
   `P4_Lightgun_HID`), so each gun goes to the right player at every start and their input is set to Light Gun; a
   blank file asks again. If no listed gun is connected, the mouse plays. Controls > Light Guns (Assign) updates the
   file too.
+- **Light gun controls as in the other games of the set:** the trigger shoots, and for a player not in the game
+  (waiting, or out of lives) it is Start as well (join / continue); right button / pump or a shot off the screen
+  reloads. With Player 1's gun set up and plugged in, **the menus follow Player 1's gun only** (trigger = select,
+  right button = right click; the Windows pointer, which every gun moves, is hidden there); the keyboard still works.
+  Crosshairs are drawn only for players in the game.
 - **Quick settings as programs** (no console windows, as the Lost World Native LG): `2 - Display - 4x3.exe`,
   `2 - Display - 16x9.exe`, `2 - Crosshairs - On.exe`, `2 - Crosshairs - Off.exe` in the game's folder (close the game
   first; they take effect at its next start). The Display ones put the lines of `4x3\launcher.ini` / `16x9\launcher.ini`

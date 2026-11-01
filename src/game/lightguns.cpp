@@ -108,6 +108,10 @@ void LightGuns::place(Dev& d)
 void LightGuns::absolute(uint64_t id, float u, float v)
 {
     Dev& d = dev(id);
+    if (!menuKey_.empty() && !capture_ && assignSeat_ < 0) {   // Light Gun Edition: the menus follow Player 1's gun only
+        if (d.key == menuKey_) menu_.u = u, menu_.v = v, menu_.moved = true;
+        return;
+    }
     if (!d.absolute) {
         d.absolute = true;
         if (d.player >= 0 && !want[d.player] && (d.key.empty() || pin[d.player] != d.key))
@@ -139,6 +143,14 @@ void LightGuns::buttons(uint64_t id, unsigned flags)
                 d.name = d.absolute ? "Light Gun" : "Mouse";
             captured = Captured{true, d.key, d.name};
             capture_ = false;
+        }
+        return;
+    }
+    if (!menuKey_.empty() && assignSeat_ < 0) {   // Light Gun Edition: the menus follow Player 1's gun only
+        if (d.key == menuKey_) {
+            if (flags & 0x1) menu_.trigger = menu_.held = true;
+            if (flags & 0x2) menu_.held = false;
+            if (flags & 0x4) menu_.alt = true;
         }
         return;
     }
@@ -330,12 +342,35 @@ void LightGuns::apply(Runtime& rt, GunState guns[], bool paused, int lw, int lh)
         }
         d.dx = d.dy = 0;
         if (!paused && !calibrating()) {
-            if (d.eTrigger) g.trigger = true;
+            if (d.eTrigger) {
+                g.trigger = true;
+                // Light Gun Edition: the trigger is Start too for a player not in play (9 waiting, 4 out of lives:
+                // join / continue), as the other light gun games of the set; in play it only shoots
+                if (triggerStarts && p < rt.seat_count()) {
+                    const int32_t st = rt.mem.at<port::a::Player>(rt.player_rec(p)).state;
+                    if (st == 9 || st == 4) { if (onJoin) onJoin(p); else rt.player_join(p); }
+                }
+            }
             if (d.eReload) g.reload = true;
             if (d.eStart) { if (onJoin) onJoin(p); else rt.player_join(p); }
         }
         d.eTrigger = d.eReload = d.eStart = false;
     }
+}
+
+bool LightGuns::takeMenu(int lw, int lh, bool& moved, float& x, float& y, bool& trigger, bool& held, bool& alt)
+{
+    moved = menu_.moved, trigger = menu_.trigger, held = menu_.held, alt = menu_.alt;
+    menu_.moved = menu_.trigger = menu_.alt = false;
+    float u = menu_.u, v = menu_.v;
+    const float* c = cal[0];   // Player 1's calibration, as in play
+    if (std::abs(c[2] - c[0]) > 0.05f && std::abs(c[3] - c[1]) > 0.05f) {
+        u = 0.1f + (u - c[0]) * 0.8f / (c[2] - c[0]);
+        v = 0.1f + (v - c[1]) * 0.8f / (c[3] - c[1]);
+    }
+    x = std::clamp(u, 0.0f, 1.0f) * float(lw);
+    y = std::clamp(v, 0.0f, 1.0f) * float(lh);
+    return moved || trigger || alt;
 }
 
 uint64_t LightGuns::deviceOf(int p) const

@@ -320,6 +320,15 @@ public:
     void stopCapture() { capture_ = false; }
     bool capturing() const { return capture_; }
     Captured captured;
+    // Light Gun Edition: the menus follow Player 1's gun only (its key: the device path; "" off): its position and
+    // buttons are kept for takeMenu, every other device's input is dropped (the game's own placement waits)
+    void setMenuGun(const std::string& key) { if (key != menuKey_) { menuKey_ = key; menu_ = MenuGun{}; } }
+    bool menuGunOn() const { return !menuKey_.empty(); }
+    // the menu gun's input since the last call: its window position (calibrated, pixels of lw x lh) when it moved, a
+    // trigger pull (the click), whether the trigger is held, a right-button press; false: nothing new
+    bool takeMenu(int lw, int lh, bool& moved, float& x, float& y, bool& trigger, bool& held, bool& alt);
+    // Light Gun Edition: a trigger pull of a player not in play (waiting / out of lives) is their Start as well
+    bool triggerStarts = true;
 private:
     struct Dev {
         uint64_t id = 0;
@@ -334,6 +343,8 @@ private:
     int calPlayer_ = -1, calStep_ = 0;
     int assignSeat_ = -1;
     bool capture_ = false;   // (Light Gun Edition) startCapture()
+    std::string menuKey_;    // (Light Gun Edition) setMenuGun()
+    struct MenuGun { bool moved = false, trigger = false, held = false, alt = false; float u = 0.5f, v = 0.5f; } menu_;
     std::vector<std::string> listed_;   // connected(): the raw-input mice listed (device paths), and when
     uint64_t listedAt_ = 0;
     bool listedOnce_ = false;
