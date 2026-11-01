@@ -61,7 +61,7 @@ Copy-One (Join-Path $rel "hotd_launch.exe") "bin\hotd_launch.exe"   # the game e
 Copy-One (Join-Path $rel "hotd_viewer.exe") "bin\hotd_viewer.exe"   # the Model Viewer (src/viewer/main.cpp)
 # Light Gun Edition: the quick settings (src/presets/presets.cpp): one program under each setting's name, beside the
 # folders whose settings lines the Display ones put into settings\launcher.ini (add lines there to change them only in
-# that mode); the Hook of the Reaper game file; a blank LightgunHID.ini (the game asks for the guns at its first start)
+# that mode); the Hook of the Reaper game file (no LightgunHID.ini: the game asks for the guns at its first start and writes it)
 foreach ($n in "2 - Display - 4x3", "2 - Display - 16x9", "2 - Crosshairs - On", "2 - Crosshairs - Off") {
     Copy-One (Join-Path $rel "hotd_presets.exe") "$n.exe"
 }
@@ -72,7 +72,7 @@ New-Item -ItemType Directory -Force (Join-Path $Out "4x3"), (Join-Path $Out "16x
     Set-Content -LiteralPath (Join-Path $Out "16x9\launcher.ini") -Encoding ascii
 Copy-One (Join-Path $repo "setup\Hook of the Reaper\defaultLG\hotdrw.txt") "Hook of the Reaper\defaultLG\hotdrw.txt"
 Copy-One (Join-Path $repo "setup\Launch HOTD ReWrithe.ahk") "Launch HOTD ReWrithe.ahk"   # the AutoHotkey 1.1 launcher (Esc quits; 1 is the game's pause)
-"[Lightguns]`r`nP1_Lightgun_HID =`r`nP2_Lightgun_HID =" | Set-Content -LiteralPath (Join-Path $Out "LightgunHID.ini") -Encoding ascii
+# (no LightgunHID.ini: the game writes it after its set-up, so an update never replaces the player's guns)
 Copy-One (Join-Path $rel "SDL3.dll") "bin\SDL3.dll"
 # angle (docs/renderer_backends.md): ANGLE (BSD; built by vcpkg's "angle" port from Google's sources) beside the exe:
 # Video > Renderer's DirectX for graphics without OpenGL 3.3. d3dcompiler_47.dll is part of Windows 8.1 / 10 / 11 (not
