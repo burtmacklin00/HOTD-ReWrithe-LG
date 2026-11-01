@@ -250,7 +250,9 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "autoreload") autoReload = n != 0;
         else if (k == "scoredisplay") scoreDisplay = n != 0;
         else if (k == "attractgore") attractGore = n != 0;
-        else if (k == "updatecheck") updateCheck = n != 0;
+        else if (k == "lgupdatecheck") updateCheck = n != 0;
+        else if (k == "outputs") outputs = n != 0;
+        else if (k == "outputsport") outputsPort = n > 0 && n < 65536 ? n : 8000;
         else if (k == "holdskip") holdSkip = n != 0;
         else if (k == "gamespeed") gameSpeed = v == "auto" || v == "0" ? -1 : v == "arcade" ? 0 : n == 1 || v == "60" ? 1 : -1;   // (the old 0: the default then -> auto)
         else if (k == "continues") continues = std::clamp(n, 0, 9);
@@ -382,7 +384,7 @@ void LaunchConfig::save(const std::string& file) const
     std::ofstream& f = c.f;
     f << "arcade=" << toBase(arcade, base) << "\npc=" << toBase(pc, base) << "\nmodels=" << models << "\nsound=" << sound << "\nplayers=" << players << "\np2input=" << p2Input
       << "\ndifficulty=" << difficulty << "\nlives=" << lives << "\nblood=" << blood << "\ncuts=" << (cuts ? 1 : 0) << "\ntitle=" << (title ? 1 : 0) << "\nfbi=" << (fbi ? 1 : 0) << "\npcsplash=" << (pcSplash ? 1 : 0) << "\ngametext=" << gameText << "\nlang=" << language
-      << "\naspect=" << aspect << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nupdatecheck=" << (updateCheck ? 1 : 0) << "\nholdskip=" << (holdSkip ? 1 : 0)
+      << "\naspect=" << aspect << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nholdskip=" << (holdSkip ? 1 : 0)
       << "\ndisplaymode=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? (exclusive ? 2 : 1) : 0)
       << "\nexclusive=" << (exclusive ? 1 : 0)
       << "\nresolution_fullscreen=" << util::sizeKey({resFullW, resFullH}) << "\nresolution_window=" << util::sizeKey({resWinW, resWinH})

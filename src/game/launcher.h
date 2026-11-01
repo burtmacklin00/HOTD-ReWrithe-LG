@@ -279,7 +279,13 @@ struct LaunchConfig {
     // scenecast= (empty: every part its own)
     std::string sceneCast;
     bool autoReload = false;     // hud3: an empty gun reloads by itself (as a shot off the screen; not in the originals)
-    bool updateCheck = true;     // Options > System > Check for Updates (util/update_check.h)
+    bool updateCheck = false;    // Options > System > Check for Updates (util/update_check.h). Light Gun Edition: off
+                                 // by default and its own key (lgupdatecheck=), so an old updatecheck=1 never pops up
+                                 // in a front-end; when on it asks the Light Gun Edition's releases, not the original's
+    // Light Gun Edition: outputs for Hook of the Reaper and the like (game/game_outputs.h); launcher.ini outputs= (1 on,
+    // 0 off) and outputsport= (the TCP port, 8000 as MAME / DemulShooter)
+    bool outputs = true;
+    int outputsPort = 8000;
     bool attractGore = true;     // Gameplay "Attract Gore": the attract demo blows parts off as the 1998 PC (port::gAttractGore)
     bool scoreDisplay = false;   // scoredisp: the arcade's score line (title code LLLRR's SCORE:%05d) in every offline game
     // skipfix (user 2026-10-27): the cut-scenes' hold-to-skip (main.cpp; only scenes the arcade cannot skip, the bars

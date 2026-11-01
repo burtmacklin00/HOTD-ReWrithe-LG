@@ -1,3 +1,25 @@
+# The House of the Dead: ReWrithe - Light Gun Edition
+
+Unofficial build of [The House of the Dead: ReWrithe](https://github.com/TawhidI-602/The-House-of-the-Dead-ReWrithe)
+for light gun setups. Based on ReWrithe **v1.0.1**; new ReWrithe releases are only merged in when they are worth it,
+so a working setup is never broken by upstream changes. Not made by, or supported by, ReWrithe's author: please report
+problems with this edition here, not on the original's page.
+
+What this edition adds:
+
+- **Outputs for Hook of the Reaper** (and MAMEHooker, QMamehook, OutputHooker): the MAME network outputs on
+  127.0.0.1:8000, game name `hotdrw`. Recoil fires once for every bullet that leaves the gun (never for a reload, an
+  off-screen pull or an empty gun); ammo, clip, life, damage (not on the killing hit, so death lights are not blocked),
+  dead and start lamps for P1 / P2. Copy `setup\Hook of the Reaper\defaultLG\hotdrw.txt` into Hook of the Reaper's
+  `defaultLG` folder. The output names are the same as the HOTD2RE Light Gun Edition's.
+  launcher.ini: `outputs=0` turns them off, `outputsport=` changes the port.
+- **No update pop-ups**: the in-game update check is off (launcher.ini `lgupdatecheck=1` turns it on; it then asks
+  this edition's releases, not the original's), so a front-end such as LaunchBox is never interrupted.
+
+The original README follows.
+
+---
+
 # The House of the Dead: ReWrithe
 
 *A rewrite of the arcade game and its PC port, combined.*

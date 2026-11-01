@@ -31,7 +31,7 @@ std::string fetchLatest()
     if (!s) return body;
     WinHttpSetTimeouts(s, 3000, 3000, 3000, 5000);
     HINTERNET c = WinHttpConnect(s, L"api.github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
-    HINTERNET r = c ? WinHttpOpenRequest(c, L"GET", L"/repos/TawhidI-602/The-House-of-the-Dead-ReWrithe/releases/latest",
+    HINTERNET r = c ? WinHttpOpenRequest(c, L"GET", L"/repos/burtmacklin00/HOTD-ReWrithe-LG/releases/latest",
                                          nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
                     : nullptr;
     if (r && WinHttpSendRequest(r, L"Accept: application/vnd.github+json\r\n", DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&

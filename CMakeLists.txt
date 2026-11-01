@@ -69,6 +69,7 @@ add_executable(hotd
     src/game/pause.cpp
     src/game/pads.cpp
     src/game/lightguns.cpp
+    src/game/game_outputs.cpp
     src/game/pads_test.cpp
     src/game/keybinds.cpp
     src/game/pad_prompts.cpp

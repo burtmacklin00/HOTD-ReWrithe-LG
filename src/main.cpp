@@ -89,6 +89,7 @@
 #include "game/keybinds_test.h"
 #include "game/menu_cursor.h"
 #include "game/pad_prompts.h"
+#include "game/game_outputs.h"
 #include "game/launcher.h"
 #include "game/lang.h"
 #include "game/view.h"
@@ -1031,6 +1032,40 @@ static bool skipRingSpot(const game::Runtime& rt, int ww, int wh, float pictureX
     }
     return false;
 }
+
+// Light Gun Edition: the outputs for Hook of the Reaper (game/game_outputs.h). P1 / P2 outputs = this PC's seats:
+// players 1 / 2 offline, online this PC's first / second seat (so a gun set up as Player 1 always gets its own
+// recoil); a CPU teammate's seat sends nothing.
+game::GameOutputs gOutputs;
+void outputsStart(const game::LaunchConfig& cfg)
+{
+    if (!cfg.outputs) return;
+    game::GameOutputsConfig oc;
+    oc.port = cfg.outputsPort;
+    std::string err;
+    if (gOutputs.start(oc, &err)) SDL_Log("outputs: on, port %d (Hook of the Reaper: game hotdrw)", oc.port);
+    else SDL_Log("outputs: off: %s", err.c_str());
+}
+void outputsFrame(game::Runtime& rt, const game::LaunchConfig& cfg)
+{
+    if (!gOutputs.running()) return;
+    game::OutputFrame f;
+    f.gameMode = rt.mem.at<int16_t>(game::A::G::game_mode);
+    const int seats[2] = {gNet ? gNet->localPlayer() : 0, gNet ? gNet->secondSeat() : 1};
+    for (int out = 0; out < 2; ++out) {
+        const int p = seats[out];
+        game::OutputSeat& o = f.seat[out];
+        if (p < 0 || p >= rt.seat_count() || cfg.seatBot[p & 3] != 0) continue;
+        const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
+        o.valid = true;
+        o.state = pl.state;
+        o.fired = (pl.flags & 2u) != 0;
+        o.lives = pl.lives;
+        o.rounds = pl.rounds;
+    }
+    gOutputs.onFrame(f, true, SDL_GetTicks());
+}
+
 
 // launcher "Auto reload" (hud3, off by default; one setting for every seat, players 3 / 4 of the 4P mode too): a player
 // in play whose gun is empty (the last round fired: rounds 0, empty set) pulls the trigger off the screen on the next
@@ -4387,6 +4422,7 @@ int main(int argc, char* argv[])
     gl::prepareWindow(cfg.renderer);   // (angle: ANGLE sets the window up for EGL)
     int backend = cfg.renderer;
     if (cfg.updateCheck && !automated) util::updateCheckStart(HOTD_VERSION_TEXT);   // Options > System > Check for Updates
+    if (!automated) outputsStart(cfg);   // Light Gun Edition: Hook of the Reaper's outputs
     SDL_Window* window = SDL_CreateWindow("The House of the Dead: ReWrithe", w, h,
                                           SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (automated ? SDL_WINDOW_HIDDEN : 0));
     if (!window && backend == gl::kBackendAngle) {   // angle: ANGLE's window surface failed (Direct3D 10.0 / 9): OpenGL
@@ -9406,6 +9442,7 @@ int main(int argc, char* argv[])
             util::crashHandlerCheck();                                         // (an overlay / a driver may replace it)
             crashCheckAt = SDL_GetTicks() + 1000;
         }
+        gOutputs.tick(SDL_GetTicks());   // Light Gun Edition: the outputs' pulses, lamps and connections (every loop)
         if (screen != Screen::Game && SDL_GetWindowMouseGrab(window))
             SDL_SetWindowMouseGrab(window, false);   // the mouse is kept in the window during play only
         if (screen != Screen::Game && screen != Screen::Menu && !SDL_CursorVisible())
@@ -12211,6 +12248,8 @@ int main(int argc, char* argv[])
             rt.frame();
             if (gNet)
                 gNet->after(rt);
+            if (!gScene.active())   // Light Gun Edition: the outputs (not in the cut-scene viewer)
+                outputsFrame(rt, cfg);
             if (gScene.active()) {   // the cut-scene viewer: the scene's end (the ticks stop there)
                 gScene.afterFrame(rt);
                 if (gScene.phase == game::SceneView::Phase::Over) {
@@ -12685,6 +12724,7 @@ int main(int argc, char* argv[])
     if (audioOn)
         audio.shutdown();
     leaveGame();
+    gOutputs.stop();   // Light Gun Edition: "mame_stop" to the tools, the port closed
     if (util::fullscreenLive() >= 0 && !automated) {   // the game opens the way it was left (F11 in play)
         game::LaunchConfig keep;
         keep.base = cfg.base;

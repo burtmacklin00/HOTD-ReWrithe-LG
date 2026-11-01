@@ -8,7 +8,7 @@
 
 namespace hotd::util {
 
-constexpr const char* kReleasesPage = "https://github.com/TawhidI-602/The-House-of-the-Dead-ReWrithe/releases/latest";
+constexpr const char* kReleasesPage = "https://github.com/burtmacklin00/HOTD-ReWrithe-LG/releases/latest";
 
 // starts the request in the background (once; later calls do nothing)
 void updateCheckStart(const char* currentVersion);
