@@ -71,6 +71,7 @@ New-Item -ItemType Directory -Force (Join-Path $Out "4x3"), (Join-Path $Out "16x
 "; 2 - Display - 16x9.exe puts these lines into settings\launcher.ini (add more to change them only in 16:9)`r`naspect=0" |
     Set-Content -LiteralPath (Join-Path $Out "16x9\launcher.ini") -Encoding ascii
 Copy-One (Join-Path $repo "setup\Hook of the Reaper\defaultLG\hotdrw.txt") "Hook of the Reaper\defaultLG\hotdrw.txt"
+Copy-One (Join-Path $repo "setup\Launch HOTD ReWrithe.ahk") "Launch HOTD ReWrithe.ahk"   # the AutoHotkey 1.1 launcher (Esc quits; 1 is the game's pause)
 "[Lightguns]`r`nP1_Lightgun_HID =`r`nP2_Lightgun_HID =" | Set-Content -LiteralPath (Join-Path $Out "LightgunHID.ini") -Encoding ascii
 Copy-One (Join-Path $rel "SDL3.dll") "bin\SDL3.dll"
 # angle (docs/renderer_backends.md): ANGLE (BSD; built by vcpkg's "angle" port from Google's sources) beside the exe:

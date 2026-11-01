@@ -33,6 +33,9 @@ What this edition adds:
 - **Bezel in 4:3:** the game draws `4x3\bezel.png` (or `4x3\bezel-default.png`) over the side bars in 4:3 mode: a
   1920 x 1080 picture with the art in the outer 240 px each side and the middle transparent, scaled to the window's
   height and centred. No separate overlay program.
+- **Launcher** `Launch HOTD ReWrithe.ahk` (AutoHotkey 1.1): starts the game with no pop-ups; **Esc** closes it
+  completely; **1** is the game's pause menu; Hook of the Reaper is closed (cleanly) when the game closes. Optional
+  argument `4x3` / `16x9`. `IgnorePads := true` at its top makes the game ignore gamepads (light guns only).
 - **No update pop-ups**: the in-game update check is off (launcher.ini `lgupdatecheck=1` turns it on; it then asks
   this edition's releases, not the original's), so a front-end such as LaunchBox is never interrupted.
 
