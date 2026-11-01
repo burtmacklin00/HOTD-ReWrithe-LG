@@ -18,7 +18,9 @@ public:
     // Rebuilds the texture only when the text or scale changes.
     void setText(const std::vector<std::string>& lines, int scale);
     // setup (game/launcher.cpp): a ready RGBA picture (w x h, rows top first), drawn 1:1 instead of text
-    void setImage(const std::vector<uint8_t>& rgba, int w, int h);
+    void setImage(const std::vector<uint8_t>& rgba, int w, int h, bool smooth = false);
+    // Light Gun Edition (the 4:3 bezel): the picture scaled into the window rectangle (x, y, w, h; pixels, top-left)
+    void drawIn(int windowWidth, int windowHeight, float x, float y, float w, float h);
     void draw(int windowWidth, int windowHeight);
     // centred on a window pixel instead of the top-left corner (crosshairs)
     void drawAt(int windowWidth, int windowHeight, float x, float y);

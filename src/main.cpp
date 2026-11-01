@@ -4614,7 +4614,35 @@ int main(int argc, char* argv[])
     // pillarboxed: black bars over the sides (the guns there are off the screen: |x| >= 248, the shot reloads);
     // aspect1610: 16:10 = hor+ up to a 16:10 picture (a 16:10 window: the same as widescreen; wider: thin bars, the guns
     // there off the screen: |x| >= 307.2)
-    auto pillarbox = [&](int ww, int wh) { drawPillarbox(cfg.aspect, ww, wh); };
+    // Light Gun Edition: the 4:3 bezel: the game folder's 4x3\bezel.png (your own) or 4x3\bezel-default.png, a 16:9
+    // picture (1920 x 1080: art at the sides, the middle transparent) over the bars, as high as the window, centred
+    Overlay bezel;
+    int bezelState = 0;   // 0 not looked for, 1 loaded, -1 none
+    auto pillarbox = [&](int ww, int wh) {
+        drawPillarbox(cfg.aspect, ww, wh);
+        if (cfg.aspect != 1 || wh <= 0 || ww <= int(double(wh) * 496.0 / 384.0) + 2)
+            return;
+        if (bezelState == 0) {
+            bezelState = -1;
+            const std::string dir = !packageFolder().empty() ? packageFolder() : root;
+            for (const char* n : {"/4x3/bezel.png", "/4x3/bezel-default.png"}) {
+                int bw = 0, bh = 0;
+                std::vector<uint8_t> px;
+                std::string e;
+                if (!std::filesystem::exists(dir + n) || !readPngRgba(dir + n, bw, bh, px, e)) continue;
+                std::string ie;
+                if (!bezel.init(ie)) break;
+                bezel.setImage(px, bw, bh, true);
+                bezelState = 1;
+                SDL_Log("bezel: %s (%d x %d)", (dir + n).c_str(), bw, bh);
+                break;
+            }
+        }
+        if (bezelState == 1) {
+            const float bw = float(wh) * 16.0f / 9.0f;
+            bezel.drawIn(ww, wh, (float(ww) - bw) * 0.5f, 0.0f, bw, float(wh));
+        }
+    };
     struct Timing { uint64_t ticks = 0, renders = 0, ns = 0, start = 0, lastLog = 0, ticksAtLog = 0, rendersAtLog = 0; } timing;
     SDL_Cursor* cross = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_CROSSHAIR);
     SDL_Cursor* arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);

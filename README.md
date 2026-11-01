@@ -30,6 +30,9 @@ What this edition adds:
   first; they take effect at its next start). The Display ones put the lines of `4x3\launcher.ini` / `16x9\launcher.ini`
   into `settings\launcher.ini` (add lines there to change them only in that mode). New in the game: Options > Video >
   **Show Crosshairs** (launcher.ini `crosshairs=`).
+- **Bezel in 4:3:** the game draws `4x3\bezel.png` (or `4x3\bezel-default.png`) over the side bars in 4:3 mode: a
+  1920 x 1080 picture with the art in the outer 240 px each side and the middle transparent, scaled to the window's
+  height and centred. No separate overlay program.
 - **No update pop-ups**: the in-game update check is off (launcher.ini `lgupdatecheck=1` turns it on; it then asks
   this edition's releases, not the original's), so a front-end such as LaunchBox is never interrupted.
 

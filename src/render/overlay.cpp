@@ -175,7 +175,7 @@ void Overlay::setTextTtf(const std::vector<std::string>& lines, const render::Tt
     gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR);
 }
 
-void Overlay::setImage(const std::vector<uint8_t>& rgba, int w, int h)
+void Overlay::setImage(const std::vector<uint8_t>& rgba, int w, int h, bool smooth)
 {
     lines_.clear();   // (the next setText builds its texture again)
     if (w <= 0 || h <= 0 || rgba.size() < size_t(w) * size_t(h) * 4) { texW_ = 0; return; }
@@ -186,8 +186,26 @@ void Overlay::setImage(const std::vector<uint8_t>& rgba, int w, int h)
     gl::BindTexture(gl::TEXTURE_2D, texture_);
     gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
     gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, w, h, 0, gl::RGBA, gl::UNSIGNED_BYTE, rgba.data());
-    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST);
-    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST);
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, smooth ? gl::LINEAR : gl::NEAREST);
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, smooth ? gl::LINEAR : gl::NEAREST);
+}
+
+void Overlay::drawIn(int w, int h, float x, float y, float pw, float ph)
+{
+    if (!texW_ || w <= 0 || h <= 0) return;
+    gl::Viewport(0, 0, w, h);
+    gl::Disable(gl::DEPTH_TEST);
+    gl::Enable(gl::BLEND);
+    gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+    gl::UseProgram(program_);
+    gl::Uniform4f(uRect_, -1.0f + 2.0f * x / float(w), 1.0f - 2.0f * (y + ph) / float(h), 2.0f * pw / float(w), 2.0f * ph / float(h));
+    gl::ActiveTexture(gl::TEXTURE0);
+    gl::BindTexture(gl::TEXTURE_2D, texture_);
+    gl::BindVertexArray(vao_);
+    gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+    gl::BindVertexArray(0);
+    gl::Disable(gl::BLEND);
+    gl::Enable(gl::DEPTH_TEST);
 }
 
 void Overlay::draw(int w, int h)

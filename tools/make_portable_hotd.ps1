@@ -66,7 +66,7 @@ foreach ($n in "2 - Display - 4x3", "2 - Display - 16x9", "2 - Crosshairs - On",
     Copy-One (Join-Path $rel "hotd_presets.exe") "$n.exe"
 }
 New-Item -ItemType Directory -Force (Join-Path $Out "4x3"), (Join-Path $Out "16x9") | Out-Null
-"; 2 - Display - 4x3.exe puts these lines into settings\launcher.ini (add more to change them only in 4:3)`r`naspect=1" |
+"; 2 - Display - 4x3.exe puts these lines into settings\launcher.ini (add more to change them only in 4:3)`r`n; The bezel: put it in this folder as bezel.png (1920 x 1080, art in the outer 240 px each side, the middle transparent)`r`naspect=1" |
     Set-Content -LiteralPath (Join-Path $Out "4x3\launcher.ini") -Encoding ascii
 "; 2 - Display - 16x9.exe puts these lines into settings\launcher.ini (add more to change them only in 16:9)`r`naspect=0" |
     Set-Content -LiteralPath (Join-Path $Out "16x9\launcher.ini") -Encoding ascii
