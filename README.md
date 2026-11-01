@@ -35,10 +35,12 @@ What this edition adds:
   height and centred. No separate overlay program.
 - **Launcher** `Launch HOTD ReWrithe.ahk` (AutoHotkey 1.1): starts the game with no pop-ups; **Esc** closes it
   completely; **1** is the game's pause menu; Hook of the Reaper is closed (cleanly) when the game closes. Optional
-  argument `4x3` / `16x9`. `IgnorePads := true` at its top makes the game ignore gamepads (light guns only).
-- **Debug launcher** `setup\Launch HOTD ReWrithe - Debug.ahk` (not in the package; copy it beside the game for testing
-  or for someone sending logs): the same launcher, plus `settings\launcher.log` (its steps) and `settings\outputs.log`
-  (every message sent to Hook of the Reaper, timed; the game writes it when `HOTD_OUTPUTS_LOG=1`).
+  argument `4x3` / `16x9`. Your settings in `Launch HOTD ReWrithe.ini` beside it (never in the package, so updates keep
+  them): `[Launcher]` `IgnorePads=1` (light guns only, no gamepads), `CloseHotr=0`, `Debug=1`. Other launchers set
+  their own values and `#Include` it, so they always get its changes: `setup\Launch HOTD ReWrithe - Debug.ahk` (not in
+  the package: copy it beside the game for testing or for someone sending logs) writes `settings\launcher.log` and
+  `settings\outputs.log` (every message sent to Hook of the Reaper, timed; the game writes it when
+  `HOTD_OUTPUTS_LOG=1`).
 - **No update pop-ups**: the in-game update check is off (launcher.ini `lgupdatecheck=1` turns it on; it then asks
   this edition's releases, not the original's), so a front-end such as LaunchBox is never interrupted.
 
