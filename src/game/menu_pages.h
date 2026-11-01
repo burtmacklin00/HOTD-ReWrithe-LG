@@ -68,6 +68,8 @@ struct MenuHooks {
     // ipolish: Controls > Light Guns' Assign page; a seat waiting for a trigger pull (and the seconds it has left);
     // whether an assigned device is plugged in
     std::function<void()> gunPage;
+    // Light Gun Edition: Controls > Light Gun Setup: each player pulls their gun's trigger, LightgunHID.ini written
+    std::function<void()> gunSetup;
     // fix28: a comparison picture "<kind>_<choice>" (models / blood: Frontend::Extra::preview): "mem:<key>" when it
     // can be drawn (Frontend::previewImage), else "" (its render asked for, menus3: in-process); "": "x" while
     // pictures can be made, "" not

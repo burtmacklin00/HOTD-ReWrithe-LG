@@ -522,6 +522,9 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // padpass: every seat's light gun (players 3 / 4 were missing), the gun's kind and its screen aids, and the
         // calibration from the menu (before: F9 in the game only)
         // ipolish (Light Guns: Assign): which gun / mouse is whose seat (before: the order first used only)
+        // Light Gun Edition: the set-up that also runs at a start with a blank LightgunHID.ini
+        r.push_back({"Light Gun Setup", []() { return std::string("Start"); }, [h]() { if (h.gunSetup) h.gunSetup(); },
+                     "Each player pulls their light gun's trigger in turn; saved in LightgunHID.ini and used at every start"});
         r.push_back({"Light Guns", []() { return page("Assign"); }, [h]() { if (h.gunPage) h.gunPage(); },
                      "Give each player their own light gun or mouse: pull its trigger when the player's row waits"});
         experimental(r);

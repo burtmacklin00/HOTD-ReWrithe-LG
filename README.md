@@ -13,11 +13,13 @@ What this edition adds:
   dead and start lamps for P1-P4 (players 3 / 4 in the 4-player mode). Copy `setup\Hook of the Reaper\defaultLG\hotdrw.txt` into Hook of the Reaper's
   `defaultLG` folder. The output names are the same as the HOTD2RE Light Gun Edition's.
   launcher.ini: `outputs=0` turns them off, `outputsport=` changes the port.
-- **LightgunHID.ini** in the game's folder (the same file "1 - Light Gun Setup.exe" writes): each player's gun by
-  hardware ID (`P1_Lightgun_HID = VID_xxxx&PID_xxxx`, up to `P4_Lightgun_HID`), so every gun goes to the right player
-  on any PC and their input is set to Light Gun. If no listed gun is connected, the mouse plays.
-  **Blank or missing file:** the game asks over the menu: "Player 1: pull your light gun's trigger", then Player 2,
-  3 and 4 (with only two guns, pull Player 1's trigger again or wait 15 seconds; Esc finishes) and writes the file.
+- **Light gun setup built into the game** (no separate setup app): the first start asks over the menu, "Player 1:
+  pull your light gun's trigger", then Player 2, 3 and 4 (with only two guns, pull Player 1's trigger again or wait
+  15 seconds; Esc finishes). Options > Controls > **Light Gun Setup** runs it again any time. The guns are saved by
+  hardware ID in **LightgunHID.ini** in the game's folder (`P1_Lightgun_HID = VID_xxxx&PID_xxxx`, up to
+  `P4_Lightgun_HID`), so each gun goes to the right player at every start and their input is set to Light Gun; a
+  blank file asks again. If no listed gun is connected, the mouse plays. Controls > Light Guns (Assign) updates the
+  file too.
 - **No update pop-ups**: the in-game update check is off (launcher.ini `lgupdatecheck=1` turns it on; it then asks
   this edition's releases, not the original's), so a front-end such as LaunchBox is never interrupted.
 

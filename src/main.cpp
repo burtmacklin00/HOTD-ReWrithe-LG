@@ -8838,6 +8838,11 @@ int main(int argc, char* argv[])
             // Light Gun Edition: LightgunHID.ini's set-up (blank file): over the menu, each player pulls their gun's trigger
             // (players 1 / 2; players 3 / 4 too, or a gun already set pulls to finish, or 15 s pass); Esc ends it. The
             // file is written and the guns are the players' at once.
+            hooks.gunSetup = [&]() {   // Light Gun Edition: Controls > Light Gun Setup: the set-up again (next menu frame)
+                if (gHid.file.empty() || gHid.active) return;
+                lightGuns.cancelAssign();
+                gHid.pending = true;
+            };
             hidSetupLines = [&]() {
                 std::vector<std::string> l;
                 if (!gHid.active) return l;
@@ -8944,6 +8949,17 @@ int main(int argc, char* argv[])
                     menu.cfg.gunDev[a.seat] = a.key;
                     menu.cfg.gunName[a.seat] = a.name;
                     saveCfg();
+                    if (!gHid.file.empty() && a.seat >= 0 && a.seat < 4) {   // Light Gun Edition: LightgunHID.ini too (it
+                        game::LightgunHid hid;                               // decides at the next start)
+                        hid.load(gHid.file);
+                        const std::string id = game::LightgunHid::idOfPath(a.key);
+                        for (int q = 0; q < 4; ++q)
+                            if (q != a.seat && !id.empty() && hid.id[q] == id && hid.resolve(game::rawMousePaths())[size_t(q)] == a.key)
+                                hid.id[q].clear();   // (that gun was another player's)
+                        hid.id[a.seat] = id.empty() ? game::LightgunHid::normalise(a.key) : id;
+                        if (hid.save(gHid.file))
+                            SDL_Log("LightgunHID.ini: player %d: %s (Assign)", a.seat + 1, hid.id[a.seat].c_str());
+                    }
                     gunRaw(false);
                     gunEatUntil = t + 400;
                     if (gunPageShown()) fe.screenExtras();
