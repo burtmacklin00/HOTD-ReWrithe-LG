@@ -310,6 +310,16 @@ public:
         std::string key, name;
     };
     Assigned assigned;   // a pull took a seat (the host saves gunDev / gunName and clears it)
+    // Light Gun Edition (game/lightgun_hid.h, LightgunHID.ini's set-up): the next trigger pull from any raw-input gun /
+    // mouse is only noted (no seat taken, no shot, no button), for the set-up to decide
+    struct Captured {
+        bool got = false;
+        std::string key, name;
+    };
+    void startCapture() { capture_ = true; captured = Captured{}; }
+    void stopCapture() { capture_ = false; }
+    bool capturing() const { return capture_; }
+    Captured captured;
 private:
     struct Dev {
         uint64_t id = 0;
@@ -323,6 +333,7 @@ private:
     std::vector<Dev> devs_;
     int calPlayer_ = -1, calStep_ = 0;
     int assignSeat_ = -1;
+    bool capture_ = false;   // (Light Gun Edition) startCapture()
     std::vector<std::string> listed_;   // connected(): the raw-input mice listed (device paths), and when
     uint64_t listedAt_ = 0;
     bool listedOnce_ = false;

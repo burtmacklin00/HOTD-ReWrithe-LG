@@ -10,9 +10,14 @@ What this edition adds:
 - **Outputs for Hook of the Reaper** (and MAMEHooker, QMamehook, OutputHooker): the MAME network outputs on
   127.0.0.1:8000, game name `hotdrw`. Recoil fires once for every bullet that leaves the gun (never for a reload, an
   off-screen pull or an empty gun); ammo, clip, life, damage (not on the killing hit, so death lights are not blocked),
-  dead and start lamps for P1 / P2. Copy `setup\Hook of the Reaper\defaultLG\hotdrw.txt` into Hook of the Reaper's
+  dead and start lamps for P1-P4 (players 3 / 4 in the 4-player mode). Copy `setup\Hook of the Reaper\defaultLG\hotdrw.txt` into Hook of the Reaper's
   `defaultLG` folder. The output names are the same as the HOTD2RE Light Gun Edition's.
   launcher.ini: `outputs=0` turns them off, `outputsport=` changes the port.
+- **LightgunHID.ini** in the game's folder (the same file "1 - Light Gun Setup.exe" writes): each player's gun by
+  hardware ID (`P1_Lightgun_HID = VID_xxxx&PID_xxxx`, up to `P4_Lightgun_HID`), so every gun goes to the right player
+  on any PC and their input is set to Light Gun. If no listed gun is connected, the mouse plays.
+  **Blank or missing file:** the game asks over the menu: "Player 1: pull your light gun's trigger", then Player 2,
+  3 and 4 (with only two guns, pull Player 1's trigger again or wait 15 seconds; Esc finishes) and writes the file.
 - **No update pop-ups**: the in-game update check is off (launcher.ini `lgupdatecheck=1` turns it on; it then asks
   this edition's releases, not the original's), so a front-end such as LaunchBox is never interrupted.
 

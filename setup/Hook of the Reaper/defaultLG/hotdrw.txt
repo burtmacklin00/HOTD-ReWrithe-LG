@@ -1,7 +1,9 @@
 Players
-2
+4
 P1
 P2
+P3
+P4
 Recoil & Reload
 Ammo_Value 1 Ammo_Value
 Recoil 1 Reload_Value
@@ -55,5 +57,43 @@ End Options
 :P2_Dead
 :P2_Life
 *P2
+>Death_Value
+>Display_Life
+:P3_Ammo
+*P3
+#Ammo_Value
+#Reload_Value
+>Display_Ammo
+:P3_Clip
+:P3_CtmLmpStart
+:P3_CtmRecoil
+*P3
+#Recoil
+#Recoil_Value
+:P3_Damaged
+*P3
+>Damage
+:P3_Dead
+:P3_Life
+*P3
+>Death_Value
+>Display_Life
+:P4_Ammo
+*P4
+#Ammo_Value
+#Reload_Value
+>Display_Ammo
+:P4_Clip
+:P4_CtmLmpStart
+:P4_CtmRecoil
+*P4
+#Recoil
+#Recoil_Value
+:P4_Damaged
+*P4
+>Damage
+:P4_Dead
+:P4_Life
+*P4
 >Death_Value
 >Display_Life

@@ -7,6 +7,7 @@
 // The names are the same as the HOTD2RE Light Gun Edition's, so one Hook of the Reaper game file fits both
 // (setup\Hook of the Reaper\defaultLG\hotdrw.txt).
 //
+//   (P1-P4: players 3 / 4 in the 4-player mode)
 //   P1_CtmRecoil / P2_CtmRecoil     a short pulse for every bullet that leaves the gun (not reloads, not an empty gun)
 //   P1_Damaged   / P2_Damaged       a short pulse when the player loses a life (not the last one: that is death)
 //   P1_Dead      / P2_Dead          1 while the player is dead (continue countdown / game over), else 0
@@ -36,7 +37,7 @@ struct OutputSeat {
 
 struct OutputFrame {
     int gameMode = 0;     // 4 in a game, 5 game over, others: title / attract / menus
-    OutputSeat seat[2];   // P1 / P2 outputs
+    OutputSeat seat[4];   // P1-P4 outputs
 };
 
 struct GameOutputsConfig {
@@ -82,11 +83,13 @@ private:
     std::vector<Output> outputs_;
     bool wsa_ = false;
 
-    int recoil_[2] = {-1, -1}, damaged_[2] = {-1, -1}, dead_[2] = {-1, -1}, ammo_[2] = {-1, -1}, clip_[2] = {-1, -1},
-        life_[2] = {-1, -1}, lamp_[2] = {-1, -1};
-    Pulse recoilPulse_[2], damagedPulse_[2];
-    Track track_[2];
-    bool lampBlink_[2] = {true, true};
+    static constexpr int kSeats = 4;
+    int recoil_[kSeats] = {-1, -1, -1, -1}, damaged_[kSeats] = {-1, -1, -1, -1}, dead_[kSeats] = {-1, -1, -1, -1},
+        ammo_[kSeats] = {-1, -1, -1, -1}, clip_[kSeats] = {-1, -1, -1, -1}, life_[kSeats] = {-1, -1, -1, -1},
+        lamp_[kSeats] = {-1, -1, -1, -1};
+    Pulse recoilPulse_[kSeats], damagedPulse_[kSeats];
+    Track track_[kSeats];
+    bool lampBlink_[kSeats] = {true, true, true, true};
 };
 
 } // namespace hotd::game

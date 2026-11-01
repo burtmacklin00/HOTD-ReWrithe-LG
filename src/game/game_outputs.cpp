@@ -97,8 +97,8 @@ bool GameOutputs::start(const GameOutputsConfig& config, std::string* error)
     setNonBlocking(listener_);
 
     outputs_.clear();
-    for (int i = 0; i < 2; ++i) {
-        const std::string pre = i == 0 ? "P1_" : "P2_";
+    for (int i = 0; i < kSeats; ++i) {
+        const std::string pre = "P" + std::to_string(i + 1) + "_";
         lamp_[i] = add(pre + "CtmLmpStart");
         ammo_[i] = add(pre + "Ammo");
         clip_[i] = add(pre + "Clip");
@@ -237,7 +237,7 @@ void GameOutputs::onFrame(const OutputFrame& f, bool live, uint64_t nowMs)
     if (!running()) return;
     const bool inGame = f.gameMode == kModeGame;
     const bool gameOver = f.gameMode == kModeGameOver;
-    for (int out = 0; out < 2; ++out) {
+    for (int out = 0; out < kSeats; ++out) {
         const OutputSeat& p = f.seat[out];
         Track& t = track_[out];
         const bool playing = p.valid && inGame && p.state == kStatePlaying;
@@ -268,7 +268,7 @@ void GameOutputs::tick(uint64_t nowMs)
 {
     if (!running()) return;
     acceptClients();
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < kSeats; ++i) {
         runPulse(recoilPulse_[i], nowMs);
         runPulse(damagedPulse_[i], nowMs);
         set(lamp_[i], lampBlink_[i] ? static_cast<int>((nowMs / kLampBlinkMs) & 1) : 0);

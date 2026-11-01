@@ -90,6 +90,7 @@
 #include "game/menu_cursor.h"
 #include "game/pad_prompts.h"
 #include "game/game_outputs.h"
+#include "game/lightgun_hid.h"
 #include "game/launcher.h"
 #include "game/lang.h"
 #include "game/view.h"
@@ -246,7 +247,7 @@ static bool SDLCALL rawMouseHook(void*, MSG* msg)
             const bool penOrTouch = (ri.data.mouse.ulExtraInformation & 0xFFFFFF00u) == 0xFF515700u;   // MI_WP_SIGNATURE
             if ((ri.data.mouse.lLastX || ri.data.mouse.lLastY || buttons) && !penOrTouch)
                 mouseUsed(SDL_MouseID(reinterpret_cast<uintptr_t>(ri.header.hDevice)));   // SDL's raw-input mouse ID
-            if (gLightGuns && (gLightGuns->active() || gLightGuns->assigning() >= 0))   // (ipolish: the Assign page)
+            if (gLightGuns && (gLightGuns->active() || gLightGuns->assigning() >= 0 || gLightGuns->capturing()))   // (ipolish: the Assign page; Light Gun Edition: LightgunHID.ini's set-up)
                 gLightGuns->winRawInput(&ri, msg->hwnd);
         }
     }
@@ -1033,8 +1034,8 @@ static bool skipRingSpot(const game::Runtime& rt, int ww, int wh, float pictureX
     return false;
 }
 
-// Light Gun Edition: the outputs for Hook of the Reaper (game/game_outputs.h). P1 / P2 outputs = this PC's seats:
-// players 1 / 2 offline, online this PC's first / second seat (so a gun set up as Player 1 always gets its own
+// Light Gun Edition: the outputs for Hook of the Reaper (game/game_outputs.h). P1-P4 outputs = this PC's seats:
+// players 1-4 offline, online this PC's first / second seat (so a gun set up as Player 1 always gets its own
 // recoil); a CPU teammate's seat sends nothing.
 game::GameOutputs gOutputs;
 void outputsStart(const game::LaunchConfig& cfg)
@@ -1051,8 +1052,9 @@ void outputsFrame(game::Runtime& rt, const game::LaunchConfig& cfg)
     if (!gOutputs.running()) return;
     game::OutputFrame f;
     f.gameMode = rt.mem.at<int16_t>(game::A::G::game_mode);
-    const int seats[2] = {gNet ? gNet->localPlayer() : 0, gNet ? gNet->secondSeat() : 1};
-    for (int out = 0; out < 2; ++out) {
+    // (online: this PC's one or two seats as P1 / P2; offline: players 1-4, 3 / 4 in the 4-player mode)
+    const int seats[4] = {gNet ? gNet->localPlayer() : 0, gNet ? gNet->secondSeat() : 1, gNet ? -1 : 2, gNet ? -1 : 3};
+    for (int out = 0; out < 4; ++out) {
         const int p = seats[out];
         game::OutputSeat& o = f.seat[out];
         if (p < 0 || p >= rt.seat_count() || cfg.seatBot[p & 3] != 0) continue;
@@ -2177,6 +2179,38 @@ static std::function<void()> bindRefresh;
 static std::function<bool(const SDL_Event&)> bindEvent;
 // ipolish: Controls > Light Guns' Assign page: the menu's clicks while a seat waits for a trigger pull, its countdown
 static std::function<void()> gunAssignRefresh;
+// Light Gun Edition: LightgunHID.ini (game/lightgun_hid.h): the file, and its set-up in the menu when it is blank
+struct HidSetup {
+    std::string file;        // <the game's folder>/LightgunHID.ini ("" not a player's run: nothing read or written)
+    bool pending = false;    // blank / missing: the set-up runs once the menu shows
+    bool active = false;
+    int seat = 0;            // the player whose trigger is awaited
+    std::string key[4], name[4];
+    std::string note;        // a line under the prompt ("That gun is Player 1's")
+    Uint64 seatAt = 0, eatUntil = 0;
+};
+static HidSetup gHid;
+static std::function<void()> hidSetupRefresh;
+static std::function<bool(const SDL_Event&)> hidSetupEvent;
+static std::function<std::vector<std::string>()> hidSetupLines;
+// each player with a gun in LightgunHID.ini that is connected: that gun is theirs (gunDev) and their input a light
+// gun; no configured gun connected: the inputs stay as they were (the mouse plays)
+static int hidApply(game::LaunchConfig& c, const std::string (&keys)[4], const std::string (&names)[4])
+{
+    int n = 0;
+    for (int p = 0; p < 4; ++p) {
+        if (keys[p].empty()) continue;
+        for (int q = 0; q < 4; ++q)
+            if (q != p && c.gunDev[q] == keys[p]) c.gunDev[q].clear(), c.gunName[q].clear();
+        if (c.gunDev[p] != keys[p] || c.gunName[p].empty())
+            c.gunName[p] = names[p].empty() ? "Light Gun " + game::LightgunHid::idOfPath(keys[p]) : names[p];
+        c.gunDev[p] = keys[p];
+        int& in = p == 0 ? c.p1Input : p == 1 ? c.p2Input : p == 2 ? c.p3Input : c.p4Input;
+        in = 3;
+        ++n;
+    }
+    return n;
+}
 static std::function<bool(const SDL_Event&)> gunAssignEvent;
 
 // perf (testing, docs/performance.md): HOTD_STARTUP_TIME=1: the window hidden, the launcher's and the menu's first
@@ -2950,6 +2984,28 @@ int main(int argc, char* argv[])
         d.liveBackground = 1;   // compat: the live attract On (its checks; Auto is off on integrated / software graphics: Mesa)
         cfg = d;
         game::LaunchConfig::readOnly = true;
+    }
+    // Light Gun Edition: LightgunHID.ini in the game's folder: the players' guns by hardware ID (a player's window run)
+    if (playerRun && !game::LaunchConfig::readOnly) {
+        const std::string dir = !packageFolder().empty() ? packageFolder() : root;
+        gHid.file = (std::filesystem::path(dir) / "LightgunHID.ini").string();
+        game::LightgunHid hid;
+        const bool had = hid.load(gHid.file);
+        if (!had || hid.blank()) {
+            gHid.pending = true;
+            SDL_Log("LightgunHID.ini: %s: the light gun set-up runs in the menu", had ? "blank" : "not found");
+        } else {
+            const std::vector<std::string> paths = game::rawMousePaths();
+            const std::vector<std::string> found = hid.resolve(paths);
+            std::string keys[4], names[4];
+            for (int p = 0; p < 4; ++p) {
+                keys[p] = found[size_t(p)];
+                if (!hid.id[p].empty())
+                    SDL_Log("LightgunHID.ini: player %d: %s -> %s", p + 1, hid.id[p].c_str(), keys[p].empty() ? "not connected" : keys[p].c_str());
+            }
+            if (hidApply(cfg, keys, names) == 0)
+                SDL_Log("LightgunHID.ini: no configured gun is connected: the inputs stay as set (the mouse plays)");
+        }
     }
     // lang (translations, docs/translating.md): data\lang of the package (or the checkout); --lang for this run, else
     // launcher.ini's lang=, else (not chosen yet, a player's run) Windows' UI language when there is a file for it
@@ -8779,6 +8835,104 @@ int main(int argc, char* argv[])
                 return button || e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP ||
                        e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_UP;
             };
+            // Light Gun Edition: LightgunHID.ini's set-up (blank file): over the menu, each player pulls their gun's trigger
+            // (players 1 / 2; players 3 / 4 too, or a gun already set pulls to finish, or 15 s pass); Esc ends it. The
+            // file is written and the guns are the players' at once.
+            hidSetupLines = [&]() {
+                std::vector<std::string> l;
+                if (!gHid.active) return l;
+                l = {"LIGHT GUN SETUP", "", "Player " + std::to_string(gHid.seat + 1) + ": pull your light gun's trigger"};
+                if (gHid.seat >= 2) {
+                    const int left = std::max(0, 15 - int((SDL_GetTicks() - gHid.seatAt) / 1000));
+                    l.push_back("(only " + std::to_string(gHid.seat) + " guns? pull Player 1's trigger to finish - " + std::to_string(left) + ")");
+                }
+                if (!gHid.note.empty()) l.push_back(gHid.note);
+                l.push_back("");
+                l.push_back(gHid.seat == 0 ? "Esc: skip (play with the mouse)" : "Esc: finish");
+                return l;
+            };
+            auto hidFinish = [&, gunRaw, saveCfg]() {
+                lightGuns.stopCapture();
+                gunRaw(false);
+                gHid.active = gHid.pending = false;
+                gHid.eatUntil = SDL_GetTicks() + 400;   // (the last pull's click is no menu click)
+                game::LightgunHid hid;
+                hid.load(gHid.file);   // (its other lines are kept)
+                int n = 0;
+                for (int p = 0; p < 4; ++p) {
+                    hid.id[p].clear();
+                    if (gHid.key[p].empty()) continue;
+                    const std::string id = game::LightgunHid::idOfPath(gHid.key[p]);
+                    hid.id[p] = id.empty() ? game::LightgunHid::normalise(gHid.key[p]) : id;
+                    ++n;
+                }
+                if (n == 0) {
+                    SDL_Log("LightgunHID.ini: set-up skipped (no gun); asked again at the next start");
+                    return;
+                }
+                if (hid.save(gHid.file))
+                    SDL_Log("LightgunHID.ini: written (%d gun%s): %s", n, n == 1 ? "" : "s", gHid.file.c_str());
+                else
+                    SDL_Log("LightgunHID.ini: could not write %s", gHid.file.c_str());
+                hidApply(menu.cfg, gHid.key, gHid.name);
+                saveCfg();
+                lightGuns.configure(menu.cfg);
+            };
+            hidSetupEvent = [&, hidFinish](const SDL_Event& e) {
+                const bool button = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP;
+                if (!gHid.active)
+                    return button && SDL_GetTicks() < gHid.eatUntil;
+                if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
+                    hidFinish();
+                    return true;
+                }
+                return button || e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP ||
+                       e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_UP;
+            };
+            hidSetupRefresh = [&, gunRaw, hidFinish]() {
+                const Uint64 t = SDL_GetTicks();
+                if (!gHid.active) {
+                    if (!gHid.pending || gHid.file.empty() || online.editing() || lightGuns.assigning() >= 0)
+                        return;
+                    gHid.active = true;
+                    gHid.seat = 0;
+                    gHid.seatAt = t;
+                    gHid.note.clear();
+                    for (int p = 0; p < 4; ++p) gHid.key[p].clear(), gHid.name[p].clear();
+                    gunRaw(true);
+                    lightGuns.startCapture();
+                    SDL_Log("LightgunHID.ini: set-up: player 1, pull your trigger");
+                    return;
+                }
+                if (lightGuns.captured.got) {
+                    const game::LightGuns::Captured c = lightGuns.captured;
+                    lightGuns.captured = {};
+                    int owner = -1;
+                    for (int p = 0; p < gHid.seat; ++p)
+                        if (gHid.key[p] == c.key) owner = p;
+                    if (owner >= 0 && gHid.seat >= 2) {   // a gun already set: that is all the guns
+                        hidFinish();
+                        return;
+                    }
+                    if (owner >= 0) {
+                        gHid.note = "That gun is Player " + std::to_string(owner + 1) + "'s: use another gun";
+                    } else {
+                        gHid.key[gHid.seat] = c.key;
+                        gHid.name[gHid.seat] = c.name;
+                        SDL_Log("LightgunHID.ini: set-up: player %d: %s (%s)", gHid.seat + 1, c.name.c_str(), c.key.c_str());
+                        gHid.note.clear();
+                        if (++gHid.seat >= 4) {
+                            hidFinish();
+                            return;
+                        }
+                        gHid.seatAt = t;
+                    }
+                    lightGuns.startCapture();
+                    return;
+                }
+                if (gHid.seat >= 2 && t - gHid.seatAt >= 15000)
+                    hidFinish();
+            };
             gunAssignRefresh = [&, gunRaw, gunPageShown, saveCfg]() {
                 static Uint64 at = 0;
                 const Uint64 t = SDL_GetTicks();
@@ -9629,6 +9783,8 @@ int main(int argc, char* argv[])
                 if (bindEvent && bindEvent(e))   // keybind: the Keys & Buttons page waits for a key / button
                     continue;
                 if (gunAssignEvent && gunAssignEvent(e))   // ipolish: a seat waits for a light gun's trigger pull
+                    continue;
+                if (hidSetupEvent && hidSetupEvent(e))   // Light Gun Edition: LightgunHID.ini's set-up
                     continue;
                 // padpass: a pad's button: the prompts show that pad's buttons (Xbox / PlayStation / Nintendo names),
                 // whatever the button goes on to do (the Jukebox's, PC Mode's seats ...)
@@ -10484,6 +10640,7 @@ int main(int argc, char* argv[])
             if (aimTestRefresh) aimTestRefresh();   // padfeel: the Aim Test page's readout
             if (bindRefresh) bindRefresh();       // keybind: the Keys & Buttons page's countdown
             if (gunAssignRefresh) gunAssignRefresh();   // ipolish: the Light Guns page's wait / its result
+            if (hidSetupRefresh) hidSetupRefresh();     // Light Gun Edition: LightgunHID.ini's set-up
             // Online Co-op: the network and the page's values; text input on while a field is edited; the game when
             // both PCs are ready (the host pressed Start)
             online.frame(fe);
@@ -10953,6 +11110,13 @@ int main(int argc, char* argv[])
                 }
                 if (tourPage >= 0 && tourFrame >= gMenuTourN)
                     tourFrame = 0;
+            }
+            if (hidSetupLines) {   // Light Gun Edition: LightgunHID.ini's set-up prompt over the menu
+                const std::vector<std::string> hl = hidSetupLines();
+                if (!hl.empty()) {
+                    padNote.setText(hl, wh >= 720 ? 3 : 2);
+                    padNote.drawAt(ww, wh, ww * 0.5f, wh * 0.5f);
+                }
             }
             drawGunAids(menu.cfg, ww, wh, false);   // padpass: a Sinden's white border on the menus too
             SDL_GL_SwapWindow(window);
