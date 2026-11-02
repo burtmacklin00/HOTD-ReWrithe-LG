@@ -26,6 +26,9 @@ public:
     void drawAt(int windowWidth, int windowHeight, float x, float y);
     // with the point (ax, ay) of the panel (fractions: 0 0 = top-left, 1 1 = bottom-right) at window pixel (x, y)
     void drawAnchored(int windowWidth, int windowHeight, float x, float y, float ax, float ay);
+    // the panel's size as drawn (window pixels; 0 before any text)
+    float drawnWidth() const { return float(texW_) * outScale(); }
+    float drawnHeight() const { return float(texH_) * outScale(); }
     // the panel's alpha (0 = text only) and the text colour; set before setText
     void setStyle(int panelAlpha, uint8_t r, uint8_t g, uint8_t b) { panel_ = panelAlpha; color_[0] = r; color_[1] = g; color_[2] = b; texW_ = 0; }
     // lang (game/lang.h): each line goes through the language's lookup (off: the caller translated them: the text

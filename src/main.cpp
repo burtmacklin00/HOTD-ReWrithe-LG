@@ -2190,6 +2190,8 @@ struct HidSetup {
     std::string key[4], name[4];
     std::string note;        // a line under the prompt ("That gun is Player 1's")
     Uint64 seatAt = 0, eatUntil = 0;
+    float done[4] = {0, 0, 0, 0};   // the DONE button as drawn last (window pixels: x, y, w, h; w 0 not shown)
+    int winW = 1, winH = 1;
 };
 static HidSetup gHid;
 static std::function<void()> hidSetupRefresh;
@@ -8903,7 +8905,7 @@ int main(int argc, char* argv[])
                 if (gHid.seat == 0)
                     l.push_back("Pull Player 1's trigger first, then each other gun in turn");
                 else
-                    l.push_back("DONE: Player 1's reload button (right click) or Enter");
+                    l.push_back("DONE: shoot DONE below, Player 1's reload button (right click) or Enter");
                 // (Esc cancels too, nothing saved; not shown: the launcher's Esc closes the game)
                 l.push_back(gHid.seat == 0 ? "Enter: skip for now (play with the mouse; asked again next time)" : "Backspace: start again");
                 return l;
@@ -8988,6 +8990,20 @@ int main(int argc, char* argv[])
                 int owner = -1;
                 for (int p = 0; p < 4; ++p)
                     if (!gHid.key[p].empty() && gHid.key[p] == c.key) owner = p;
+                // the DONE button shot (or clicked) by a gun already set: the set-up ends, saved
+                float px = c.u * float(gHid.winW), py = c.v * float(gHid.winH);
+                if (!c.absolute) {
+                    SDL_GetMouseState(&px, &py);
+                    float sx = 1.0f;   // (window points -> pixels)
+                    if (SDL_Window* w = SDL_GetMouseFocus()) sx = SDL_GetWindowPixelDensity(w);
+                    px *= sx, py *= sx;
+                }
+                const bool onDone = gHid.done[2] > 0 && px >= gHid.done[0] && px <= gHid.done[0] + gHid.done[2] &&
+                                    py >= gHid.done[1] && py <= gHid.done[1] + gHid.done[3];
+                if (!c.reload && onDone && owner >= 0) {
+                    hidFinish(true);
+                    return;
+                }
                 if (c.reload) {   // a reload button: Player 1's ends the set-up, saved
                     if (owner == 0) {
                         hidFinish(true);
@@ -8998,13 +9014,13 @@ int main(int argc, char* argv[])
                 } else if (owner >= 0) {
                     gHid.note = "That gun is already Player " + std::to_string(owner + 1) + "'s";
                 } else if (gHid.seat >= 4) {
-                    gHid.note = "All 4 players are set: press Player 1's reload button (or Enter) to finish";
+                    gHid.note = "All 4 players are set: shoot DONE to finish";
                 } else {
                     gHid.key[gHid.seat] = c.key;
                     gHid.name[gHid.seat] = c.name;
                     SDL_Log("LightgunHID.ini: set-up: player %d: %s (%s)", gHid.seat + 1, c.name.c_str(), c.key.c_str());
                     gHid.note = "Player " + std::to_string(gHid.seat + 1) + " set" +
-                                (gHid.seat < 3 ? ": next gun, or press Player 1's reload button to finish" : ": press Player 1's reload button to finish");
+                                (gHid.seat < 3 ? ": next gun, or shoot DONE to finish" : ": shoot DONE to finish");
                     ++gHid.seat;
                     gHid.seatAt = SDL_GetTicks();
                 }
@@ -11262,7 +11278,28 @@ int main(int argc, char* argv[])
                 const std::vector<std::string> hl = hidSetupLines();
                 if (!hl.empty()) {
                     padNote.setText(hl, wh >= 720 ? 3 : 2);
-                    padNote.drawAt(ww, wh, ww * 0.5f, wh * 0.5f);
+                    padNote.drawAt(ww, wh, ww * 0.5f, wh * 0.45f);
+                    // the DONE button under it, once a gun is set (shoot it with a gun already set, or click it)
+                    gHid.winW = ww, gHid.winH = wh;
+                    gHid.done[2] = 0;
+                    if (gHid.seat > 0) {
+                        static Overlay hidDone;
+                        static bool hidDoneOk = false;
+                        if (!hidDoneOk) {
+                            std::string e;
+                            hidDoneOk = hidDone.init(e);
+                            hidDone.setStyle(230, 120, 255, 120);
+                        }
+                        if (hidDoneOk) {
+                            hidDone.setText({"", "     DONE     ", ""}, wh >= 720 ? 6 : 4);
+                            const float bw = hidDone.drawnWidth(), bh = hidDone.drawnHeight();
+                            const float cy = std::min(wh * 0.45f + padNote.drawnHeight() * 0.5f + bh * 0.5f + wh * 0.03f,
+                                                      wh - bh * 0.5f - 8.0f);
+                            hidDone.drawAt(ww, wh, ww * 0.5f, cy);
+                            gHid.done[0] = ww * 0.5f - bw * 0.5f, gHid.done[1] = cy - bh * 0.5f;
+                            gHid.done[2] = bw, gHid.done[3] = bh;
+                        }
+                    }
                 }
             }
             drawGunAids(menu.cfg, ww, wh, false);   // padpass: a Sinden's white border on the menus too

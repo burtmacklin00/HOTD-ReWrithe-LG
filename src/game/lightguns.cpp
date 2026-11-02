@@ -141,7 +141,7 @@ void LightGuns::buttons(uint64_t id, unsigned flags)
                 d.key = "raw:" + std::to_string(id);
             if (d.name.empty())
                 d.name = d.absolute ? "Light Gun" : "Mouse";
-            captured = Captured{true, d.key, d.name, (flags & 0x1) == 0};
+            captured = Captured{true, d.key, d.name, (flags & 0x1) == 0, d.absolute, d.u, d.v};
             capture_ = false;
         }
         return;

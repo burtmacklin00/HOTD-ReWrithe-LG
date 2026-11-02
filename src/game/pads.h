@@ -316,6 +316,8 @@ public:
         bool got = false;
         std::string key, name;
         bool reload = false;   // the right / middle button (else the trigger)
+        bool absolute = false;  // a light gun (u, v: where it points, window fractions); else a mouse
+        float u = 0.5f, v = 0.5f;
     };
     void startCapture() { capture_ = true; captured = Captured{}; }
     void stopCapture() { capture_ = false; }
