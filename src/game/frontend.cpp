@@ -1159,11 +1159,10 @@ void Frontend::screenPlayers()
         if (k == pickN_)
             b->tint = 0xF8D040;
         b->help = k == 1 ? "1 player" : k == 2 ? "2 players (player 2: a person or the computer)"
-                                               : std::to_string(k) + " players: the 4 players mode (Experimental)";
+                                               : std::to_string(k) + " players: the 4 players mode (players 2-4 join with their trigger)";
         setHandlers(b, [this, k](Widget&) { pickPlayers(k); }, &Frontend::hitRect);
     }
-    if (pickN_ >= 3)
-        text("Experimental: the 4 players mode", 0, 0xC4, 0, 10, 0x800020);
+    // (Light Gun Edition: no "Experimental" tag for the 4 players mode)
     int y = 0xDC;
     for (int p = 1; p < pickN_; ++p) {   // Human / CPU for each seat past player 1 (white 24, centred)
         Widget* s = text(pickSeatText(p), 0, y, 0, 24, 0x20020);

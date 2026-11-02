@@ -43,9 +43,11 @@ std::string capital(const char* s)
 // uxpolish: a row that opens another page ends its value with " >" (Settings >, Open > ...)
 std::string page(const char* s) { return std::string(s) + " >"; }
 bool gunCalibrated(const float* g) { return !(g[0] == 0.1f && g[1] == 0.1f && g[2] == 0.9f && g[3] == 0.9f); }
+// Light Gun Edition: no EXPERIMENTAL tag here: every row that had one is light guns or the 4-player mode, the
+// edition's own features (custom blood and online with 3-4 PCs say so in their help lines)
 X& experimental(std::vector<X>& r, std::function<bool()> when = []() { return true; })
 {
-    r.back().experimental = std::move(when);
+    (void)when;
     return r.back();
 }
 // remakefix (user 2026-10-22): the last row's values in order (exactly as its value() gives them): the Remake style's
@@ -123,7 +125,7 @@ std::vector<Frontend::Extra>& lightGunRow(std::vector<Frontend::Extra>& r, const
                  },
                  "Reset the light gun's calibration (F9 in the game calibrates it again)"});
     r.back().off = [cal]() {
-        return gunCalibrated(cal) ? std::string() : std::string("Experimental: not calibrated yet: press F9 in the game to calibrate the light gun");
+        return gunCalibrated(cal) ? std::string() : std::string("Not calibrated yet: press F9 in the game to calibrate the light gun");
     };
     experimental(r);
     return r;
@@ -391,7 +393,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // (uxpolish: a light gun is experimental: the tag while one is chosen)
         r.push_back({"Player 1 Input", [&c]() { return std::string(c.p1Input == 2 ? "Gamepad" : c.p1Input == 3 ? "Light Gun" : "Mouse"); },
                      [&c, save]() { c.p1Input = c.p1Input == 0 ? 2 : c.p1Input == 2 ? 3 : 0; save(); },
-                     "Player 1 aims with the mouse, a gamepad or a light gun (Experimental)"});
+                     "Player 1 aims with the mouse, a gamepad or a light gun"});
         listed(r, {"Mouse", "Gamepad", "Light Gun"});
         experimental(r, [&c]() { return c.p1Input == 3; });
         r.push_back({"Player 2 Input", [&c]() {

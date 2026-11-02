@@ -388,14 +388,11 @@ void Frontend::remakePlayers()
         b->user = k == pickN_ ? 4 : 3;   // (big; 4: the chosen one)
         b->seed = 700 + k * 7;
         b->help = k == 1 ? "1 player" : k == 2 ? "2 players (player 2: a person or the computer)"
-                                               : std::to_string(k) + " players: the 4 players mode (Experimental)";
+                                               : std::to_string(k) + " players: the 4 players mode (players 2-4 join with their trigger)";
         button(b, [this, k]() { pickPlayers(k); });
     }
     int y = py + 112;
-    if (pickN_ >= 3) {
-        Widget* tag = add(px, y, pw, 16, &Frontend::drawRLabel, "Experimental: the 4 players mode");
-        tag->user = int(tint(0xD03022)), tag->seed = 23;
-    }
+    // (Light Gun Edition: no "Experimental" tag for the 4 players mode)
     y += 22;
     for (int p = 1; p < pickN_; ++p) {
         Widget* s = add(cw_ / 2 - 130, y, 260, 28, &Frontend::drawRStrip, pickSeatText(p));
