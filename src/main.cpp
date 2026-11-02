@@ -8952,18 +8952,10 @@ int main(int argc, char* argv[])
                     e.name = "Player " + std::to_string(p + 1) + (p >= 2 ? " (4P)" : "");
                     e.value = [p, hidGunLabel]() {
                         if (!gHid.key[p].empty()) return hidGunLabel(p);
-                        return std::string(p == gHid.seat ? "Pull this player's trigger" : "-");
+                        return std::string(p == gHid.seat ? "waiting for its trigger" : "-");
                     };
-                    e.click = []() {};
-                    e.help = "Each light gun's trigger pull sets the next player: Player 1 first, then 2, 3, 4 (3 / 4: the 4-player mode)";
-                    e.raw = true;
-                    rows.push_back(e);
-                }
-                {
-                    game::Frontend::Extra e;
-                    e.name = " ";
-                    e.value = []() { return gHid.note; };
-                    e.click = []() {};
+                    e.click = []() {};   // (only shows the gun: the trigger is pulled anywhere on the screen)
+                    e.help = "Pull each gun's trigger in turn, aimed anywhere: Player 1 first, then 2, 3, 4 (3 / 4: the 4-player mode)";
                     e.raw = true;
                     rows.push_back(e);
                 }
@@ -8999,7 +8991,18 @@ int main(int argc, char* argv[])
                 fe.extrasExit = [hidFinish]() { hidFinish(false); };
                 fe.screenExtras();
             };
-            hidSetupLines = []() { return std::vector<std::string>{}; };   // (the page shows it all)
+            // the banner under the page's rows: whose trigger is awaited (any aim), what just happened
+            hidSetupLines = []() {
+                std::vector<std::string> l;
+                if (!gHid.active) return l;
+                if (gHid.seat < 4)
+                    l.push_back("PLAYER " + std::to_string(gHid.seat + 1) + ": PULL YOUR TRIGGER");
+                else
+                    l.push_back("ALL 4 PLAYERS SET");
+                l.push_back(gHid.note.empty() ? std::string(gHid.seat == 0 ? "Aim anywhere on the screen" : " ") : gHid.note);
+                l.push_back(gHid.seat == 0 ? std::string("No light guns? Shoot / click Skip") : std::string("Every gun set? Shoot DONE (or Player 1's reload button)"));
+                return l;
+            };
             hidSetupEvent = [&, hidFinish, hidRestart](const SDL_Event& e) {
                 const bool button = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP;
                 if (!gHid.active)
@@ -11316,6 +11319,21 @@ int main(int argc, char* argv[])
                 }
                 if (tourPage >= 0 && tourFrame >= gMenuTourN)
                     tourFrame = 0;
+            }
+            if (gHid.active && hidSetupLines) {   // Light Gun Edition: the set-up page's banner (under its rows)
+                static Overlay hidBanner;
+                static bool hidBannerOk = false;
+                if (!hidBannerOk) {
+                    std::string e;
+                    if ((hidBannerOk = hidBanner.init(e))) hidBanner.setStyle(210, 255, 70, 60);
+                }
+                const std::vector<std::string> hl = hidSetupLines();
+                if (hidBannerOk && !hl.empty()) {
+                    hidBanner.setText(hl, wh >= 1000 ? 4 : wh >= 700 ? 3 : 2);
+                    float sc = 1, fx0 = 0, fy0 = 0;   // (the page's 640 x 480 units: the free space above Exit, y 0x158)
+                    game::Hud::pictureRect(fe.canvasWidth(), game::Frontend::kHeight, float(ww), float(wh), sc, fx0, fy0);
+                    hidBanner.drawAt(ww, wh, ww * 0.5f, fy0 + 0x158 * sc);
+                }
             }
             drawGunAids(menu.cfg, ww, wh, false);   // padpass: a Sinden's white border on the menus too
             SDL_GL_SwapWindow(window);
