@@ -338,6 +338,16 @@ public:
     struct SeatPress { bool trigger = false, reload = false; };   // reload: the reload button or a pull off the screen
     void setSeatPick(int mode) { if (mode != seatPick_) { seatPick_ = mode; for (SeatPress& s : seatPress) s = {}; } }
     SeatPress seatPress[4];
+    // Light Gun Edition (the gun set-up screen's crosshairs): where each light gun points (window fractions; guns
+    // that have reported a position, on or off the screen)
+    struct Point { std::string key; float u = 0, v = 0; };
+    std::vector<Point> points() const
+    {
+        std::vector<Point> r;
+        for (const Dev& d : devs_)
+            if (d.absolute) r.push_back(Point{d.key, d.u, d.v});
+        return r;
+    }
 private:
     int seatPick_ = 0;
     struct Dev {

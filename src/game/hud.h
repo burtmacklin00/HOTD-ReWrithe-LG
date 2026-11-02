@@ -30,6 +30,9 @@ public:
     bool init(std::string& err);
     // display: draw the player's crosshair (the sight)
     bool drawCross[4] = {true, true, true, true};   // players 3 / 4: the experimental 4P mode
+    // Light Gun Edition: while paused, player 1's crosshair stays (the pause menu's pointer: the Windows pointer is never
+    // shown in the game), whatever Show Crosshairs says
+    bool pauseSight = false;
     // each player's crosshair (firing range, game/sights.h SeatSight: style 0 auto (the model source's), 1 arcade
     // style, 2 the PC's own sight sprites, 3.. the drawn ones, 9 custom; size, thickness, colour) and the crosshairs
     // folders (the custom sets)

@@ -11375,6 +11375,7 @@ int main(int argc, char* argv[])
                 }
                 if (hidOk) {
                     gHid.winW = ww, gHid.winH = wh;
+                    if (SDL_CursorVisible()) SDL_HideCursor();   // (each gun's crosshair instead, drawn last)
                     // a text scale (whole pixels of the 8 x 8 font) whose widest line fits `wFrac` of the window and
                     // whose letters are at most `hFrac` of its height
                     auto fit = [&](size_t cols, float wFrac, float hFrac) {
@@ -11418,6 +11419,53 @@ int main(int argc, char* argv[])
                         } else
                             gHid.btn[k][2] = 0;
                         y -= bh + gap;
+                    }
+                    // a crosshair for every light gun where it points (its player's colour once set, else white); no
+                    // gun yet: one for the mouse pointer
+                    static Overlay hidCross[5];
+                    static bool crossOk = false, crossTried = false;
+                    if (!crossTried) {
+                        crossTried = true;
+                        static const uint8_t kCol[5][3] = {{255, 255, 255}, {255, 60, 60}, {90, 170, 255}, {70, 235, 70}, {255, 225, 40}};
+                        const int N = 64;
+                        crossOk = true;
+                        for (int c = 0; c < 5; ++c) {
+                            std::string e;
+                            crossOk = crossOk && hidCross[c].init(e);
+                            std::vector<uint8_t> px(size_t(N) * N * 4, 0);
+                            for (int yy = 0; yy < N; ++yy)
+                                for (int xx = 0; xx < N; ++xx) {
+                                    const int dx = std::abs(xx * 2 + 1 - N), dy = std::abs(yy * 2 + 1 - N);   // (doubled)
+                                    const int r2 = dx * dx + dy * dy;
+                                    const bool ring = r2 >= (N - 22) * (N - 22) && r2 <= (N - 10) * (N - 10);
+                                    const bool bar = (dx <= 3 && dy >= 14 && dy <= N - 4) || (dy <= 3 && dx >= 14 && dx <= N - 4);
+                                    const bool edge = !ring && !bar && (r2 >= (N - 26) * (N - 26) && r2 <= (N - 6) * (N - 6));
+                                    uint8_t* q = &px[size_t(yy * N + xx) * 4];
+                                    if (ring || bar) q[0] = kCol[c][0], q[1] = kCol[c][1], q[2] = kCol[c][2], q[3] = 255;
+                                    else if (edge) q[3] = 140;   // (a dark outline: seen on light art)
+                                }
+                            hidCross[c].setImage(px, N, N, true);
+                        }
+                    }
+                    if (crossOk) {
+                        const float cs = wh * 0.06f;
+                        bool any = false;
+                        for (const game::LightGuns::Point& pt : lightGuns.points()) {
+                            if (pt.u < 0.0f || pt.u > 1.0f || pt.v < 0.0f || pt.v > 1.0f) continue;   // (off the screen)
+                            int c = 0;
+                            const std::string id = game::LightgunHid::idOfPath(pt.key);
+                            for (int p = 0; p < 4; ++p)
+                                if (!gHid.key[p].empty() && (gHid.key[p] == pt.key || (!id.empty() && game::LightgunHid::idOfPath(gHid.key[p]) == id)))
+                                    c = p + 1;
+                            hidCross[c].drawIn(ww, wh, pt.u * ww - cs * 0.5f, pt.v * wh - cs * 0.5f, cs, cs);
+                            any = true;
+                        }
+                        if (!any) {
+                            float mx = 0, my = 0;
+                            SDL_GetMouseState(&mx, &my);
+                            const float d = SDL_GetWindowPixelDensity(window);
+                            hidCross[0].drawIn(ww, wh, mx * d - cs * 0.5f, my * d - cs * 0.5f, cs, cs);
+                        }
                     }
                 }
             }
@@ -13141,7 +13189,10 @@ int main(int argc, char* argv[])
         // the desktop cursor (player 1's mouse) only where no sight is drawn for player 1 (title, continue, name
         // entry): over the sight it showed as a grey plus (user 2026-10-16)
         // (the cut-scene viewer's Clean View, Trailer Mode: none at all; Trailer Mode's pause: the cursor for its menu)
-        if (const bool hideCursor = hud.drewSight[0] || sceneClean || (trailerNow && !paused);hideCursor == SDL_CursorVisible()) {
+        // Light Gun Edition: the Windows pointer never in the game (the pause menu: player 1's crosshair, Hud::pauseSight);
+        // only Trailer Mode's pause menu keeps it
+        hud.pauseSight = !(trailerNow && paused);
+        if (const bool hideCursor = !(trailerNow && paused); hideCursor == SDL_CursorVisible()) {
             if (hideCursor) SDL_HideCursor();
             else SDL_ShowCursor();
         }

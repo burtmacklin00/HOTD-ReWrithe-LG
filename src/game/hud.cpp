@@ -1666,7 +1666,13 @@ void Hud::drawSights(const Runtime& rt, int ww, int wh, const float aim[4][2])
     for (int p = 0; p < rt.seat_count(); ++p) {   // 4P: players 3 / 4 too (their records in the 4P block)
         drewSight[p] = false;
         const int32_t st = rt.mem.at<Player>(rt.player_rec(p)).state;
-        if (drawCross[p] && !paused && !clean && !ending && (st == 5 || st == 8) && mode == 4) {
+        if (pauseSight && paused && p == 0 && !clean) {   // Light Gun Edition: the pause menu's pointer
+            drewSight[p] = true;
+            if (buildSeatSight(p, rt.pcModels, wh))
+                drawSight(p, ww, wh, aim[p][0], aim[p][1]);
+            else
+                cross_[p].drawAt(ww, wh, aim[p][0], aim[p][1]);
+        } else if (drawCross[p] && !paused && !clean && !ending && (st == 5 || st == 8) && mode == 4) {
             drewSight[p] = true;
             if (buildSeatSight(p, rt.pcModels, wh))
                 drawSight(p, ww, wh, aim[p][0], aim[p][1]);
