@@ -12928,6 +12928,16 @@ int main(int argc, char* argv[])
                 if (inGame && !aimMoved[p] && !hud.cpu[p]) hud.drawCross[p] = false;
             }
             wasInGame = inGame;
+            // Light Gun Edition: 4:3 (and 16:10): the crosshairs stay inside the game's picture (not over the bezel /
+            // the bars; a shot there is still off the screen: a reload)
+            if (cfg.aspect == 1 || cfg.aspect == 2) {
+                const float gw = std::min(float(ww), float(wh) * (cfg.aspect == 1 ? 496.0f / 384.0f : 1.6f));
+                const float x0 = (float(ww) - gw) * 0.5f, x1 = x0 + gw;
+                for (int p = 0; p < 4; ++p) {
+                    aim[p][0] = std::clamp(aim[p][0], x0, x1);
+                    aim[p][1] = std::clamp(aim[p][1], 0.0f, float(wh));
+                }
+            }
         }
         // crt (render/crt.h): this frame's filter (the menu may have changed it); aim = the pointers on the window,
         // aimSrc = the picture's point the curved screen shows there (the netplay partner's: the other way round)
