@@ -2190,8 +2190,10 @@ struct HidSetup {
     std::string key[4], name[4];
     std::string note;        // a line under the prompt ("That gun is Player 1's")
     Uint64 seatAt = 0, eatUntil = 0;
-    float done[4] = {0, 0, 0, 0};   // the DONE button as drawn last (window pixels: x, y, w, h; w 0 not shown)
-    int winW = 1, winH = 1;
+    // at the game's start (a blank / missing file): the page comes before anything else, and the start-up (the SEGA
+    // logo, the attract) only after it (afterBoot); else from Options > Controls (back there after it)
+    bool boot = false;
+    std::function<void()> afterBoot;
 };
 static HidSetup gHid;
 static std::function<void()> hidSetupRefresh;
@@ -8877,47 +8879,39 @@ int main(int argc, char* argv[])
                 return button || e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP ||
                        e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_UP;
             };
-            // Light Gun Edition: LightgunHID.ini's set-up (blank file, or Controls > Light Gun Setup): a page over the
-            // menu that stays until it is finished: each gun's trigger pull takes the next free player (1-4; a gun
-            // already set is only named); Player 1's reload button (right / middle) or Enter saves and ends it,
-            // Backspace starts again, Esc leaves it with nothing saved. No time limit. The guns are the players' at once.
+            // Light Gun Edition: LightgunHID.ini's set-up (a blank / missing file: before the start-up's SEGA logo and
+            // attract; or Controls > Light Gun Setup): a full menu page that stays until it is finished: each gun's
+            // trigger pull takes the next free player (1-4; a gun already set is only named); DONE (shot or clicked),
+            // Player 1's reload button or Enter saves and ends it; Start Again; Skip / Esc leave it with nothing saved.
+            // No time limit. The guns are the players' at once.
             hooks.gunSetup = [&]() {   // Light Gun Edition: Controls > Light Gun Setup: the set-up again (next menu frame)
                 if (gHid.file.empty() || gHid.active) return;
                 lightGuns.cancelAssign();
                 gHid.pending = true;
             };
-            hidSetupLines = [&]() {
-                std::vector<std::string> l;
-                if (!gHid.active) return l;
-                l = {"LIGHT GUN SETUP", ""};
-                for (int p = 0; p < 4; ++p) {
-                    std::string who = "Player " + std::to_string(p + 1) + ":  ";
-                    if (!gHid.key[p].empty()) {
-                        const std::string id = game::LightgunHid::idOfPath(gHid.key[p]);
-                        who += gHid.name[p] + (id.empty() ? "" : " (" + id + ")");
-                    } else
-                        who += p == gHid.seat ? "> pull the trigger of this player's gun <" : "-";
-                    l.push_back(who);
-                }
-                l.push_back("");
-                l.push_back(gHid.note.empty() ? " " : gHid.note);
-                l.push_back("");
-                if (gHid.seat == 0)
-                    l.push_back("Pull Player 1's trigger first, then each other gun in turn");
-                else
-                    l.push_back("DONE: shoot DONE below, Player 1's reload button (right click) or Enter");
-                // (Esc cancels too, nothing saved; not shown: the launcher's Esc closes the game)
-                l.push_back(gHid.seat == 0 ? "Enter: skip for now (play with the mouse; asked again next time)" : "Backspace: start again");
-                return l;
+            // the gun's label on the page: its name and its VID / PID
+            auto hidGunLabel = [](int p) {
+                const std::string id = game::LightgunHid::idOfPath(gHid.key[p]);
+                return gHid.name[p] + (id.empty() ? "" : "  " + id);
             };
-            // save: write the guns set (none: nothing written, asked again at the next start); else cancel
+            // save: write the guns set (none: nothing written, asked again at the next start); else nothing saved
             auto hidFinish = [&, gunRaw, saveCfg](bool save) {
                 lightGuns.stopCapture();
                 gunRaw(false);
                 gHid.active = gHid.pending = false;
                 gHid.eatUntil = SDL_GetTicks() + 400;   // (the last pull's click is no menu click)
+                auto leave = [&]() {   // the start-up goes on (the SEGA logo, the attract), or back to Controls
+                    if (gHid.boot) {
+                        gHid.boot = false;
+                        fe.start();
+                        if (gHid.afterBoot) gHid.afterBoot();
+                        gHid.afterBoot = nullptr;
+                    } else
+                        openCategory(game::kCatControls);
+                };
                 if (!save) {
-                    SDL_Log("LightgunHID.ini: set-up cancelled (nothing saved)");
+                    SDL_Log("LightgunHID.ini: set-up skipped (nothing saved; asked again at the next start)");
+                    leave();
                     return;
                 }
                 game::LightgunHid hid;
@@ -8930,57 +8924,114 @@ int main(int argc, char* argv[])
                     hid.id[p] = id.empty() ? game::LightgunHid::normalise(gHid.key[p]) : id;
                     ++n;
                 }
-                if (n == 0) {
-                    SDL_Log("LightgunHID.ini: set-up skipped (no gun); asked again at the next start");
-                    return;
-                }
-                if (hid.save(gHid.file))
-                    SDL_Log("LightgunHID.ini: written (%d gun%s): %s", n, n == 1 ? "" : "s", gHid.file.c_str());
-                else
-                    SDL_Log("LightgunHID.ini: could not write %s", gHid.file.c_str());
-                hidApply(menu.cfg, gHid.key, gHid.name);
-                saveCfg();
-                lightGuns.configure(menu.cfg);
+                if (n > 0) {
+                    if (hid.save(gHid.file))
+                        SDL_Log("LightgunHID.ini: written (%d gun%s): %s", n, n == 1 ? "" : "s", gHid.file.c_str());
+                    else
+                        SDL_Log("LightgunHID.ini: could not write %s", gHid.file.c_str());
+                    hidApply(menu.cfg, gHid.key, gHid.name);
+                    saveCfg();
+                    lightGuns.configure(menu.cfg);
+                } else
+                    SDL_Log("LightgunHID.ini: set-up ended with no gun (asked again at the next start)");
+                leave();
             };
             auto hidRestart = [&]() {
                 gHid.seat = 0;
                 gHid.seatAt = SDL_GetTicks();
+                gHid.note.clear();
                 for (int p = 0; p < 4; ++p) gHid.key[p].clear(), gHid.name[p].clear();
                 lightGuns.startCapture();
             };
+            // the page (the game's own menu look, full screen): the four players' guns, Done, Start Again, Skip. Each
+            // gun's trigger pull takes the next free player; the rows are shot (or clicked) as any menu row
+            auto hidPage = [&, hidFinish, hidRestart, hidGunLabel]() {
+                std::vector<game::Frontend::Extra> rows;
+                for (int p = 0; p < 4; ++p) {
+                    game::Frontend::Extra e;
+                    e.name = "Player " + std::to_string(p + 1) + (p >= 2 ? " (4P)" : "");
+                    e.value = [p, hidGunLabel]() {
+                        if (!gHid.key[p].empty()) return hidGunLabel(p);
+                        return std::string(p == gHid.seat ? "Pull this player's trigger" : "-");
+                    };
+                    e.click = []() {};
+                    e.help = "Each light gun's trigger pull sets the next player: Player 1 first, then 2, 3, 4 (3 / 4: the 4-player mode)";
+                    e.raw = true;
+                    rows.push_back(e);
+                }
+                {
+                    game::Frontend::Extra e;
+                    e.name = " ";
+                    e.value = []() { return gHid.note; };
+                    e.click = []() {};
+                    e.raw = true;
+                    rows.push_back(e);
+                }
+                {
+                    game::Frontend::Extra e;
+                    e.name = "DONE";
+                    e.click = [hidFinish]() { hidFinish(true); };
+                    e.off = []() { return gHid.seat == 0 ? std::string("Pull Player 1's trigger first (or Skip)") : std::string(); };
+                    e.help = "Save these guns (LightgunHID.ini) and start the game; Player 1's reload button or Enter does it too";
+                    e.raw = true;
+                    rows.push_back(e);
+                }
+                {
+                    game::Frontend::Extra e;
+                    e.name = "Start Again";
+                    e.click = [hidRestart]() { hidRestart(); gHid.note = "Started again: pull Player 1's trigger"; };
+                    e.help = "Clear the players' guns and set them again from Player 1";
+                    e.raw = true;
+                    rows.push_back(e);
+                }
+                {
+                    game::Frontend::Extra e;
+                    e.name = "Skip";
+                    e.click = [hidFinish]() { hidFinish(false); };
+                    e.help = gHid.boot ? "Play with the mouse for now: nothing saved, asked again at the next start"
+                                       : "Leave without changing your guns";
+                    e.raw = true;
+                    rows.push_back(e);
+                }
+                fe.extras = rows;
+                fe.extrasTitle = "Light Gun Setup";
+                fe.extrasTab = -1;
+                fe.extrasExit = [hidFinish]() { hidFinish(false); };
+                fe.screenExtras();
+            };
+            hidSetupLines = []() { return std::vector<std::string>{}; };   // (the page shows it all)
             hidSetupEvent = [&, hidFinish, hidRestart](const SDL_Event& e) {
                 const bool button = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP;
                 if (!gHid.active)
                     return button && SDL_GetTicks() < gHid.eatUntil;
                 if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
-                    if (e.key.key == SDLK_ESCAPE) {
-                        hidFinish(false);
-                        return true;
-                    }
                     if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) {
-                        hidFinish(true);
+                        hidFinish(gHid.seat > 0);
                         return true;
                     }
                     if (e.key.key == SDLK_BACKSPACE) {
                         hidRestart();
                         gHid.note = "Started again: pull Player 1's trigger";
-                        SDL_Log("LightgunHID.ini: set-up: started again");
+                        return true;
+                    }
+                    if (e.key.key == SDLK_ESCAPE) {
+                        hidFinish(false);
                         return true;
                     }
                 }
-                return button || e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP ||
-                       e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
-                       e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_WHEEL;
+                // a right / middle click: a gun's reload button (read through raw input): no menu Back here
+                return (button && e.button.button != SDL_BUTTON_LEFT) || e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP;
             };
-            hidSetupRefresh = [&, gunRaw, hidFinish, hidRestart]() {
+            hidSetupRefresh = [&, gunRaw, hidFinish, hidRestart, hidPage]() {
                 if (!gHid.active) {
-                    if (!gHid.pending || gHid.file.empty() || online.editing() || lightGuns.assigning() >= 0)
+                    if (!gHid.pending || gHid.file.empty() || online.editing() || lightGuns.assigning() >= 0 ||
+                        fe.splashActive())
                         return;
                     gHid.active = true;
-                    gHid.note.clear();
                     gunRaw(true);
                     hidRestart();
-                    SDL_Log("LightgunHID.ini: set-up: player 1, pull your trigger");
+                    hidPage();
+                    SDL_Log("LightgunHID.ini: set-up page%s: player 1, pull your trigger", gHid.boot ? " (before the start-up)" : "");
                     return;
                 }
                 if (!lightGuns.captured.got)
@@ -8990,37 +9041,23 @@ int main(int argc, char* argv[])
                 int owner = -1;
                 for (int p = 0; p < 4; ++p)
                     if (!gHid.key[p].empty() && gHid.key[p] == c.key) owner = p;
-                // the DONE button shot (or clicked) by a gun already set: the set-up ends, saved
-                float px = c.u * float(gHid.winW), py = c.v * float(gHid.winH);
-                if (!c.absolute) {
-                    SDL_GetMouseState(&px, &py);
-                    float sx = 1.0f;   // (window points -> pixels)
-                    if (SDL_Window* w = SDL_GetMouseFocus()) sx = SDL_GetWindowPixelDensity(w);
-                    px *= sx, py *= sx;
-                }
-                const bool onDone = gHid.done[2] > 0 && px >= gHid.done[0] && px <= gHid.done[0] + gHid.done[2] &&
-                                    py >= gHid.done[1] && py <= gHid.done[1] + gHid.done[3];
-                if (!c.reload && onDone && owner >= 0) {
-                    hidFinish(true);
-                    return;
-                }
                 if (c.reload) {   // a reload button: Player 1's ends the set-up, saved
                     if (owner == 0) {
                         hidFinish(true);
                         return;
                     }
-                    gHid.note = owner > 0 ? "Only Player 1's reload button finishes (or Enter)"
+                    gHid.note = owner > 0 ? "Only Player 1's reload button finishes (or shoot DONE)"
                                           : gHid.seat == 0 ? "Pull Player 1's trigger first" : "Pull that gun's trigger to set it";
                 } else if (owner >= 0) {
-                    gHid.note = "That gun is already Player " + std::to_string(owner + 1) + "'s";
+                    gHid.note = "That gun is Player " + std::to_string(owner + 1) + "'s";
                 } else if (gHid.seat >= 4) {
-                    gHid.note = "All 4 players are set: shoot DONE to finish";
+                    gHid.note = "All 4 players are set: shoot DONE";
                 } else {
                     gHid.key[gHid.seat] = c.key;
                     gHid.name[gHid.seat] = c.name;
                     SDL_Log("LightgunHID.ini: set-up: player %d: %s (%s)", gHid.seat + 1, c.name.c_str(), c.key.c_str());
-                    gHid.note = "Player " + std::to_string(gHid.seat + 1) + " set" +
-                                (gHid.seat < 3 ? ": next gun, or shoot DONE to finish" : ": shoot DONE to finish");
+                    gHid.note = "Player " + std::to_string(gHid.seat + 1) + " set: " +
+                                (gHid.seat < 3 ? "the next gun's trigger, or shoot DONE" : "shoot DONE");
                     ++gHid.seat;
                     gHid.seatAt = SDL_GetTicks();
                 }
@@ -9773,11 +9810,17 @@ int main(int argc, char* argv[])
                     // either style, the attract after them only with Title / Attract on
                     const bool remakeBoot = menu.cfg.menuStyle == 1, pcScreens = menu.cfg.pcSplash;
                     if (!booted && attractFirst && (cfg.title || remakeBoot || pcScreens)) {   // THOTD's boot: the start-up splash, the attract
-                        audio.silence();                           // (the menu's cue 22 waits for the menu)
-                        menuBoardStop();                           // (and the arcade menu song: no CD files, user 2026-10-31)
-                        // (liveattract: the Remake style's boot: the SEGA logo only, then the attract from the story)
-                        fe.splashStart(uint32_t(SDL_GetTicks()), false, remakeBoot && !pcScreens);
-                    }
+                        auto boot = [&, remakeBoot, pcScreens]() {
+                            audio.silence();                           // (the menu's cue 22 waits for the menu)
+                            menuBoardStop();                           // (and the arcade menu song: no CD files, user 2026-10-31)
+                            // (liveattract: the Remake style's boot: the SEGA logo only, then the attract from the story)
+                            fe.splashStart(uint32_t(SDL_GetTicks()), false, remakeBoot && !pcScreens);
+                        };
+                        // Light Gun Edition: a blank LightgunHID.ini: its set-up page first, the start-up after it
+                        if (gHid.pending && !gHid.file.empty()) gHid.boot = true, gHid.afterBoot = boot;
+                        else boot();
+                    } else if (!booted && gHid.pending && !gHid.file.empty())
+                        gHid.boot = true;   // (no start-up screens: the page, then the menu)
                     SDL_HideCursor();
                     booted = true;
                 } else if (enterGame())
@@ -11273,34 +11316,6 @@ int main(int argc, char* argv[])
                 }
                 if (tourPage >= 0 && tourFrame >= gMenuTourN)
                     tourFrame = 0;
-            }
-            if (hidSetupLines) {   // Light Gun Edition: LightgunHID.ini's set-up prompt over the menu
-                const std::vector<std::string> hl = hidSetupLines();
-                if (!hl.empty()) {
-                    padNote.setText(hl, wh >= 720 ? 3 : 2);
-                    padNote.drawAt(ww, wh, ww * 0.5f, wh * 0.45f);
-                    // the DONE button under it, once a gun is set (shoot it with a gun already set, or click it)
-                    gHid.winW = ww, gHid.winH = wh;
-                    gHid.done[2] = 0;
-                    if (gHid.seat > 0) {
-                        static Overlay hidDone;
-                        static bool hidDoneOk = false;
-                        if (!hidDoneOk) {
-                            std::string e;
-                            hidDoneOk = hidDone.init(e);
-                            hidDone.setStyle(230, 120, 255, 120);
-                        }
-                        if (hidDoneOk) {
-                            hidDone.setText({"", "     DONE     ", ""}, wh >= 720 ? 6 : 4);
-                            const float bw = hidDone.drawnWidth(), bh = hidDone.drawnHeight();
-                            const float cy = std::min(wh * 0.45f + padNote.drawnHeight() * 0.5f + bh * 0.5f + wh * 0.03f,
-                                                      wh - bh * 0.5f - 8.0f);
-                            hidDone.drawAt(ww, wh, ww * 0.5f, cy);
-                            gHid.done[0] = ww * 0.5f - bw * 0.5f, gHid.done[1] = cy - bh * 0.5f;
-                            gHid.done[2] = bw, gHid.done[3] = bh;
-                        }
-                    }
-                }
             }
             drawGunAids(menu.cfg, ww, wh, false);   // padpass: a Sinden's white border on the menus too
             SDL_GL_SwapWindow(window);
