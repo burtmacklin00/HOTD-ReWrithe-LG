@@ -3748,10 +3748,11 @@ int main(int argc, char* argv[])
             r.boss.startGame(r, cfg.players);
             SDL_Log("Boss Mode: %s (chapter %d event %d)", game::kBossNames[bossModeOpt - 2], r.boss.start().chapter + 1, r.boss.start().event);
         } else if (chapterStart) {
-            // Light Gun Edition: the 4-player mode (an arcade game on this PC): player 1 starts, players 2-4 join with
-            // their trigger / start like inserting a coin (computer teammates join by themselves); PC Mode (each player
-            // picked a character and is Ready) and online games as before
-            const int startPlayers = !gNet && cfg.players >= 3 && !r.pcmode ? 1 : cfg.players;
+            // Light Gun Edition: every game on this PC (Arcade, Chapter Select, PC Mode; 1-4 players) starts with player
+            // 1 alone; the others join with their trigger / start like inserting a coin (computer teammates join by
+            // themselves; PC Mode: with the character they picked). The players' choice sets how many can play. Boss
+            // Mode (nobody joins during a fight) and online games as before
+            const int startPlayers = !gNet ? 1 : cfg.players;
             r.chapter_start(endingOpt ? 3 : chapter, menuEvent >= 0 && runChapter < 0 ? menuEvent : event, startPlayers);   // (menuEvent: the Cheat screen)
             if (menuEvent >= 0 && runChapter < 0)
                 SDL_Log("Cheat screen: chapter %d from event %d", chapter + 1, menuEvent);
@@ -3768,7 +3769,7 @@ int main(int argc, char* argv[])
         }
         else {
             r.apply_settings();
-            if (cfg.players == 2)
+            if (cfg.players == 2 && gNet)   // (Light Gun Edition: a local game's player 2 joins with their trigger)
                 r.player_join(1);
         }
         return true;
