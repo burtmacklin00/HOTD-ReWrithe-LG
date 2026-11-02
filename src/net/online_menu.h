@@ -59,7 +59,9 @@ public:
     void startFailed(game::Frontend& fe, const std::string& why);
     // testing (HOTD_ONLINE_TEST): "host" (Start once player 2 is in), "join:<join code, share code or address>|<password>"
     // (typed in the Join box), "join-lan:<code>" (the LAN list's first game clicked, the code typed), "join-lan-open"
-    // (the LAN list's first game open on the LAN clicked: no code)
+    // (the LAN list's first game open on the LAN clicked: no code). Not testing (Light Gun Edition, --online-host /
+    // --online-join): "auto-host" (Start Hosting, the code copied to the clipboard, the game starts once a friend is in;
+    // more can join the running game), "auto-join:<code or empty>" (a game on this network, else the code)
     void script(game::Frontend& fe, const std::string& cmd);
     // testing (--frontend-shot with --frontend-screen 120, HOTD_FE_ONLINE=<scene>): a page with made-up players and
     // messages, no network (main, host, hosting2, hosting4-1, hosting4-3, joining2, joining4, fail-password, fail-full,
@@ -87,6 +89,10 @@ private:
     bool ready_ = false, joinAfterEdit_ = false, scriptHost_ = false, tookHost_ = false, rosterLogged_ = false;
     std::string scriptLan_;                              // testing (join-lan:<code>): the code typed once the LAN list shows a game
     bool scriptLanOpen_ = false;                         // testing (join-lan-open): the LAN list's first game clicked, no code
+    // Light Gun Edition (auto-join, --online-join): a game open on this network is joined at once; else after 3 s the code
+    // (from the command line or the clipboard), if it is one; else the page waits for a game on this network
+    std::string autoJoinCode_;
+    std::chrono::steady_clock::time_point autoJoinAt_{};
     // a typed join code whose address is not on this network's list yet (the list hears each host once a second): the
     // join waits up to 2.5 s after the Join page opened for the LAN list, so the same network uses the LAN address
     // (a code with the internet address seldom works from inside the same router)

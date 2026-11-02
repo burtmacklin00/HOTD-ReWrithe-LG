@@ -2493,6 +2493,9 @@ int main(int argc, char* argv[])
         }
     std::string root, regions, snapshot, dumps, texsets, pcRoot, arcade, boundaryReport, audioWav, diffReplayDir;
     bool safeMode = false;   // compat (2026-10-29): --safe-mode
+    // Light Gun Edition: --online-host / --online-join [code]: Online Co-op opened and started by itself (the launcher's
+    // "3 - Online - Host / Join"): OnlineMenu::script "auto-host" / "auto-join:<code>"
+    std::string onlineAutoOpt;
     // --frontend-shot <png> [--frontend-cursor X,Y] [--size WxH] (menuart): the ported PC main menu drawn from the PC
     // files into a PNG (default 1280 x 720, the pointer at 321, 222 = on Arcade, as the harness capture), then exit
     std::string frontendPng;
@@ -2608,6 +2611,12 @@ int main(int argc, char* argv[])
         }
         if (a == "--gl-check")   // compat: the graphics test (glCheck)
             return glCheck();
+        if (a == "--online-host") { onlineAutoOpt = "auto-host"; continue; }   // Light Gun Edition (its own if, as above)
+        if (a == "--online-join") {   // the code is optional: none = the clipboard's, else the first game on this network
+            const std::string code = i + 1 < argc && std::strncmp(argv[i + 1], "--", 2) != 0 ? next() : std::string();
+            onlineAutoOpt = code.empty() ? std::string("auto-join-clipboard") : "auto-join:" + code;   // (read once the window is up)
+            continue;
+        }
         if (a == "--safe-mode") {   // compat: Safe Mode ("Play (Safe Mode).bat"; below, after launcher.ini)
             safeMode = true;
             noModsOpt = true;   // (no texture packs)
@@ -10736,6 +10745,20 @@ int main(int argc, char* argv[])
             // Online Co-op: the network and the page's values; text input on while a field is edited; the game when
             // both PCs are ready (the host pressed Start)
             online.frame(fe);
+            // Light Gun Edition: --online-host / --online-join: the Online page opened and started once the menu is up
+            // (not while the light gun set-up asks for the guns)
+            if (static bool onlineAutoDone = false; !onlineAutoDone && !onlineAutoOpt.empty() && fe.screen() == 1 &&
+                                                    !fe.splashActive() && !gHid.active && !online.busy()) {
+                onlineAutoDone = true;
+                if (onlineAutoOpt == "auto-join-clipboard") {   // (SDL's clipboard needs the video started)
+                    onlineAutoOpt = "auto-join:";
+                    if (char* clip = SDL_GetClipboardText()) onlineAutoOpt += clip, SDL_free(clip);
+                }
+                online.open(fe, [&]() { fe.screenMainMenu(); });
+                online.script(fe, onlineAutoOpt);
+                SDL_Log("[net] %s", onlineAutoOpt == "auto-host" ? "--online-host: hosting, the code copied"
+                                                                              : "--online-join: joining");
+            }
             static bool scripted = false;   // testing: the Online page's Host / Join without clicks (hidden window)
             if (static const char* ot = std::getenv("HOTD_ONLINE_TEST"); ot && (scripted || (fe.screen() == 1 && !fe.splashActive()))) {
                 if (!scripted) {

@@ -62,7 +62,8 @@ Copy-One (Join-Path $rel "hotd_viewer.exe") "bin\hotd_viewer.exe"   # the Model 
 # Light Gun Edition: the quick settings (src/presets/presets.cpp): one program under each setting's name, beside the
 # folders whose settings lines the Display ones put into settings\launcher.ini (add lines there to change them only in
 # that mode); the Hook of the Reaper game file (no LightgunHID.ini: the game asks for the guns at its first start and writes it)
-foreach ($n in "2 - Display - 4x3", "2 - Display - 16x9", "2 - Crosshairs - On", "2 - Crosshairs - Off") {
+foreach ($n in "2 - Display - 4x3", "2 - Display - 16x9", "2 - Crosshairs - On", "2 - Crosshairs - Off",
+            "3 - Online - Host", "3 - Online - Join") {
     Copy-One (Join-Path $rel "hotd_presets.exe") "$n.exe"
 }
 New-Item -ItemType Directory -Force (Join-Path $Out "4x3"), (Join-Path $Out "16x9") | Out-Null

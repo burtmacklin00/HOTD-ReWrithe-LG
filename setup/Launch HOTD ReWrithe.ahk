@@ -9,8 +9,12 @@
 ;   When the game closes (Esc, or Quit in its menu), Hook of the Reaper is asked to close too (a clean close only;
 ;   it is never started here).
 ;
-; Optional argument: 4x3 or 16x9 (runs "2 - Display - 4x3.exe" / "2 - Display - 16x9.exe" first), e.g.
-;   "Launch HOTD ReWrithe.ahk" 4x3
+; Optional arguments (any order):
+;   4x3 or 16x9   runs "2 - Display - 4x3.exe" / "2 - Display - 16x9.exe" first, e.g. "Launch HOTD ReWrithe.ahk" 4x3
+;   host          Online Co-op: the game hosts by itself, its join code copied to the clipboard (send it to your
+;                 friends; on the same network they need none); the game starts once a friend is in, more can join it
+;   join [code]   Online Co-op: joins a game on this network by itself, else the code (given here, or copied to the
+;                 clipboard). "3 - Online - Host.exe" / "3 - Online - Join.exe" start this launcher with host / join.
 ;
 ; Your settings: "Launch HOTD ReWrithe.ini" beside this launcher (updates never replace it), section [Launcher]:
 ;   IgnorePads=1   every gamepad / XInput controller is ignored (light guns, mouse and keyboard only); default 0
@@ -61,16 +65,27 @@ if !FileExist(GamePath) {
     ExitApp
 }
 
-; 4x3 / 16x9 from the command line
-mode := A_Args.Length() ? A_Args[1] : ""
-if (mode = "4x3" || mode = "16x9") {
-    preset := A_ScriptDir "\2 - Display - " mode ".exe"
-    if FileExist(preset) {
-        RunWait, "%preset%", %A_ScriptDir%
-        Log("display mode " mode ": ran " preset " (exit code " ErrorLevel ")")
-    } else
-        Log("display mode " mode ": " preset " not found")
+; the command line: 4x3 / 16x9, host, join [code]
+GameArgs := ""
+for i, arg in A_Args {
+    if (arg = "4x3" || arg = "16x9") {
+        preset := A_ScriptDir "\2 - Display - " arg ".exe"
+        if FileExist(preset) {
+            RunWait, "%preset%", %A_ScriptDir%
+            Log("display mode " arg ": ran " preset " (exit code " ErrorLevel ")")
+        } else
+            Log("display mode " arg ": " preset " not found")
+    } else if (arg = "host") {
+        GameArgs := "--online-host"
+    } else if (arg = "join") {
+        GameArgs := "--online-join"
+        code := A_Args[i + 1]
+        if (code != "" && code != "4x3" && code != "16x9")
+            GameArgs .= " """ code """"
+    }
 }
+if (GameArgs != "")
+    Log("online: " (InStr(GameArgs, "host") ? "hosting" : "joining"))
 
 if IgnorePads {
     ; SDL's own setting: ignore every pad but one that doesn't exist (not 0x0000/0x0000, which XInput pads often report);
@@ -89,7 +104,7 @@ if Debug {
     Log("Hook of the Reaper " (ErrorLevel ? "is running (pid " ErrorLevel ")" : "is not running"))
 }
 
-Run, "%GamePath%", %A_ScriptDir%\bin,, gamePid
+Run, "%GamePath%" %GameArgs%, %A_ScriptDir%\bin,, gamePid
 Log("game started (pid " gamePid ")")
 WinWait, ahk_pid %gamePid%,, 30
 if !ErrorLevel {

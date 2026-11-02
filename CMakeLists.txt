@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21)
 project(hotd_m2 VERSION 1.0.1 LANGUAGES C CXX)
 # Light Gun Edition: its own build number on top of the ReWrithe version (v1.0.1-lg1): raise it for each release of
 # this edition; the release tag must match (git tag v1.0.1-lg1)
-set(HOTD_LG_EDITION "lg9")
+set(HOTD_LG_EDITION "lg10")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -264,6 +264,7 @@ if(WIN32)   # the package's game exe stub (util/game_exe.h): no DLLs (static run
         target_compile_definitions(hotd_presets PRIVATE _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
         target_compile_options(hotd_presets PRIVATE /utf-8)
     endif()
+    target_link_libraries(hotd_presets PRIVATE shell32)   # (3 - Online: ShellExecute)
     add_dependencies(hotd hotd_presets)
 endif()
 add_executable(hotd_viewer src/viewer/main.cpp src/game/files_check.cpp)   # files_check: a package's ROM zip -> regions

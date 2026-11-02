@@ -876,6 +876,21 @@ void OnlineMenu::script(game::Frontend& fe, const std::string& cmd)
             settings_.players = 1;
             game_->hostStart(settings_);
         }
+    } else if (cmd == "auto-host") {   // Light Gun Edition: --online-host
+        show(fe, Page::Host);
+        startHost(fe);
+        if (game_) copyCode();
+        scriptHost_ = game_ != nullptr;
+    } else if (cmd.rfind("auto-join:", 0) == 0) {   // Light Gun Edition: --online-join [code]
+        show(fe, Page::Join);
+        scriptLanOpen_ = true;
+        Address a;
+        std::string pw, text = cmd.substr(10);
+        autoJoinCode_ = !text.empty() && text.size() < 80 && parseShareCode(text, a, pw) ? text : std::string();
+        autoJoinAt_ = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        if (autoJoinCode_.empty())
+            status_ = "Looking for a game on your network... (over the internet: copy the host's code, then Paste Code)";
+        build(fe);
     } else if (cmd == "host") {
         show(fe, Page::Host);
         startHost(fe);
@@ -919,6 +934,18 @@ void OnlineMenu::frame(game::Frontend& fe)
                 startJoin(fe, g.addr.str(), g.code);
                 break;
             }
+    if (!autoJoinCode_.empty() && page_ == Page::Join && !game_ && std::chrono::steady_clock::now() >= autoJoinAt_) {
+        scriptLanOpen_ = false;   // (Light Gun Edition, auto-join: no game open on this network: the code)
+        joinText_ = autoJoinCode_;
+        autoJoinCode_.clear();
+        status_.clear();
+        joinTyped(fe);
+    }
+    if (autoJoinAt_ != std::chrono::steady_clock::time_point{} && page_ != Page::Join && !game_) {
+        scriptLanOpen_ = false;   // (auto-join: the player left the Join page: nothing more by itself)
+        autoJoinCode_.clear();
+        autoJoinAt_ = {};
+    }
     if (!pendingJoin_.empty() && page_ == Page::Join && !game_) {   // a typed code waiting for the LAN list (joinTyped)
         bool heard = false;
         Address a;
