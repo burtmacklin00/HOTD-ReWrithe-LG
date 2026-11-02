@@ -328,6 +328,10 @@ public:
     std::function<const std::vector<uint8_t>*(int entry)> galleryThumb;
     std::function<const std::vector<uint8_t>*()> galleryCard;
     bool hideHand = false;   // gallery3: the hand not drawn (the Remake layout: the mouse between its parts)
+    // Light Gun Edition: aim help for light guns in the menus: a shot / hover that lands on nothing takes the nearest
+    // button / row within kSnapRange menu units (about one and a half rows), so the menus are easier to shoot
+    bool snapAim = false;
+    static constexpr int kSnapRange = 40;
     // galfix (user 2026-10-26: "the bony-hand cursor vanishes in the middle of the screen"): over the Gallery's model the
     // hand is drawn at this opacity instead of hidden (1: as everywhere else)
     float handAlpha = 1.0f;
@@ -1017,6 +1021,10 @@ private:
     void hoverWalk(Widget* w);            // 0x427998 (from 0x427938)
     void drawWalk(Widget* w);             // 0x427AE8 (from 0x427A84)
     void activateWalk(Widget* w);         // 0x427810 (from 0x4277B0)
+    // Light Gun Edition (snapAim): the nearest activatable widget to the pointer within kSnapRange: a point on it whose
+    // hit test passes (false: none)
+    bool snapPoint(int& x, int& y);
+    void snapCollect(Widget* w, int& best, int& bx, int& by);
     bool walking_ = false;                // 0x5CED8C
     bool blink_ = true;                   // 0x5CED90 (frame counter 0x5CEC08 bit 3)
 

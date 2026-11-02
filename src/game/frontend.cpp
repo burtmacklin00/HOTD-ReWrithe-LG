@@ -19,6 +19,7 @@
 #include "util/utf8.h"
 
 #include <algorithm>
+#include <functional>
 #include <cmath>
 #include <chrono>
 #include <cstdio>
@@ -294,7 +295,57 @@ void Frontend::activate()
     stackReset();
     if (root_)
         activateWalk(root_);
+    const bool missed = walking_;   // (the walk ends itself when a widget took the click)
     walking_ = false;
+    int sx, sy;
+    if (missed && snapAim && root_ && snapPoint(sx, sy)) {   // Light Gun Edition: the nearest button / row instead
+        const int px = px_, py = py_;
+        px_ = sx, py_ = sy;
+        walking_ = true;
+        stackReset();
+        activateWalk(root_);
+        walking_ = false;
+        px_ = px, py_ = py;
+    }
+}
+
+void Frontend::snapCollect(Widget* w, int& best, int& bx, int& by)
+{
+    for (; w; w = w->next) {
+        int x, y, ww, hh;
+        absRect(*w, x, y, ww, hh);
+        if (w->activate && w->hit && ww > 0 && hh > 0) {
+            const int dx = px_ < x ? x - px_ : px_ >= x + ww ? px_ - (x + ww - 1) : 0;
+            const int dy = py_ < y ? y - py_ : py_ >= y + hh ? py_ - (y + hh - 1) : 0;
+            const int d = dx * dx + dy * dy;
+            if (d < best) {   // a point on it that its own hit test takes (text widgets: only their letters)
+                const int pts[3][2] = {{std::clamp(px_, x, x + ww - 1), std::clamp(py_, y, y + hh - 1)},
+                                       {x + ww / 2, y + hh / 2},
+                                       {x + std::min(ww - 1, 4), y + hh / 2}};
+                for (const auto& q : pts)
+                    if ((this->*w->hit)(*w, q[0], q[1])) {
+                        best = d, bx = q[0], by = q[1];
+                        break;
+                    }
+            }
+        }
+        if (w->child) {
+            push(*w);
+            snapCollect(w->child, best, bx, by);
+        }
+    }
+    if (stack_.size() > 1)
+        stack_.pop_back();
+}
+
+bool Frontend::snapPoint(int& x, int& y)
+{
+    int best = kSnapRange * kSnapRange + 1;
+    x = y = -1;
+    stackReset();
+    if (root_)
+        snapCollect(root_, best, x, y);
+    return x >= 0;
 }
 
 // ---- 0x427F64: the width (sum of glyph widths + 1, space 8) and height ('A') of a string ----
@@ -3438,6 +3489,27 @@ void Frontend::update(const FrontendInput& inRaw, uint32_t nowMs)
     if (root_)
         hoverWalk(root_);
     walking_ = false;
+    if (snapAim && root_) {   // Light Gun Edition: nothing under the gun: the nearest button / row is lit (what a shot takes)
+        bool lit = false;
+        std::function<void(Widget*)> any = [&](Widget* w) {
+            for (; w && !lit; w = w->next) {
+                lit = lit || ((w->flags & 0x40000) && w->activate);
+                any(w->child);
+            }
+        };
+        any(root_);
+        int sx, sy;
+        if (!lit && snapPoint(sx, sy)) {
+            const int px = px_, py = py_;
+            px_ = sx, py_ = sy;
+            walking_ = true;
+            stackReset();
+            help_.clear();
+            hoverWalk(root_);
+            walking_ = false;
+            px_ = px, py_ = py;
+        }
+    }
     clickFrames(nowMs);
 }
 

@@ -10634,6 +10634,7 @@ int main(int argc, char* argv[])
             const bool splashing = fe.splashActive();
             fe.promptChoice = menu.cfg.padPrompts, fe.buttonStyle = menu.cfg.buttonStyle;   // padglyphs: Controls > Button Prompts / Style
             fe.iconOutline = menu.cfg.iconOutline != 0;   // menus3: Controls > Icon Outline
+            fe.snapAim = lightGuns.menuGunOn();   // Light Gun Edition: a gun's shot near a button takes it
             fe.update(in, uint32_t(SDL_GetTicks()));
             // HOTD_MENU_PERF_TOUR=N (menuperf, docs/performance.md): every Remake page in turn, N frames each, Down then
             // Up pressed every 12 frames (the focus moving; the Jukebox: the chosen row), then the table and the end
