@@ -2194,6 +2194,9 @@ struct HidSetup {
     // logo, the attract) only after it (afterBoot); else from Options > Controls (back there after it)
     bool boot = false;
     std::function<void()> afterBoot;
+    // the screen's buttons as drawn last (window pixels x, y, w, h; w 0: not shown): DONE, START AGAIN, SKIP
+    float btn[3][4] = {};
+    int winW = 1, winH = 1;
 };
 static HidSetup gHid;
 static std::function<void()> hidSetupRefresh;
@@ -8889,11 +8892,6 @@ int main(int argc, char* argv[])
                 lightGuns.cancelAssign();
                 gHid.pending = true;
             };
-            // the gun's label on the page: its name and its VID / PID
-            auto hidGunLabel = [](int p) {
-                const std::string id = game::LightgunHid::idOfPath(gHid.key[p]);
-                return gHid.name[p] + (id.empty() ? "" : "  " + id);
-            };
             // save: write the guns set (none: nothing written, asked again at the next start); else nothing saved
             auto hidFinish = [&, gunRaw, saveCfg](bool save) {
                 lightGuns.stopCapture();
@@ -8943,64 +8941,23 @@ int main(int argc, char* argv[])
                 for (int p = 0; p < 4; ++p) gHid.key[p].clear(), gHid.name[p].clear();
                 lightGuns.startCapture();
             };
-            // the page (the game's own menu look, full screen): the four players' guns, Done, Start Again, Skip. Each
-            // gun's trigger pull takes the next free player; the rows are shot (or clicked) as any menu row
-            auto hidPage = [&, hidFinish, hidRestart, hidGunLabel]() {
-                std::vector<game::Frontend::Extra> rows;
-                for (int p = 0; p < 4; ++p) {
-                    game::Frontend::Extra e;
-                    e.name = "Player " + std::to_string(p + 1) + (p >= 2 ? " (4P)" : "");
-                    e.value = [p, hidGunLabel]() {
-                        if (!gHid.key[p].empty()) return hidGunLabel(p);
-                        return std::string(p == gHid.seat ? "waiting for its trigger" : "-");
-                    };
-                    e.click = []() {};   // (only shows the gun: the trigger is pulled anywhere on the screen)
-                    e.help = "Pull each gun's trigger in turn, aimed anywhere: Player 1 first, then 2, 3, 4 (3 / 4: the 4-player mode)";
-                    e.raw = true;
-                    rows.push_back(e);
-                }
-                {
-                    game::Frontend::Extra e;
-                    e.name = "DONE";
-                    e.click = [hidFinish]() { hidFinish(true); };
-                    e.off = []() { return gHid.seat == 0 ? std::string("Pull Player 1's trigger first (or Skip)") : std::string(); };
-                    e.help = "Save these guns (LightgunHID.ini) and start the game; Player 1's reload button or Enter does it too";
-                    e.raw = true;
-                    rows.push_back(e);
-                }
-                {
-                    game::Frontend::Extra e;
-                    e.name = "Start Again";
-                    e.click = [hidRestart]() { hidRestart(); gHid.note = "Started again: pull Player 1's trigger"; };
-                    e.help = "Clear the players' guns and set them again from Player 1";
-                    e.raw = true;
-                    rows.push_back(e);
-                }
-                {
-                    game::Frontend::Extra e;
-                    e.name = "Skip";
-                    e.click = [hidFinish]() { hidFinish(false); };
-                    e.help = gHid.boot ? "Play with the mouse for now: nothing saved, asked again at the next start"
-                                       : "Leave without changing your guns";
-                    e.raw = true;
-                    rows.push_back(e);
-                }
-                fe.extras = rows;
+            // the screen: the game's own menu page as the backdrop (its title, no rows); over it (drawn in the menu
+            // loop): the prompt in the middle (shoot anywhere there: the next player's gun), the players' guns as a
+            // list at the bottom left, DONE / START AGAIN / SKIP at the bottom right. Everything is read through raw
+            // input (each gun's own position), not the Windows pointer
+            auto hidPage = [&, hidFinish]() {
+                fe.extras.clear();
                 fe.extrasTitle = "Light Gun Setup";
                 fe.extrasTab = -1;
                 fe.extrasExit = [hidFinish]() { hidFinish(false); };
                 fe.screenExtras();
             };
-            // the banner under the page's rows: whose trigger is awaited (any aim), what just happened
+            // the prompt (the middle of the screen)
             hidSetupLines = []() {
                 std::vector<std::string> l;
                 if (!gHid.active) return l;
-                if (gHid.seat < 4)
-                    l.push_back("PLAYER " + std::to_string(gHid.seat + 1) + ": PULL YOUR TRIGGER");
-                else
-                    l.push_back("ALL 4 PLAYERS SET");
-                l.push_back(gHid.note.empty() ? std::string(gHid.seat == 0 ? "Aim anywhere on the screen" : " ") : gHid.note);
-                l.push_back(gHid.seat == 0 ? std::string("No light guns? Shoot / click Skip") : std::string("Every gun set? Shoot DONE (or Player 1's reload button)"));
+                l.push_back(gHid.seat < 4 ? "PLAYER " + std::to_string(gHid.seat + 1) + ": PULL YOUR TRIGGER" : std::string("ALL 4 PLAYERS SET"));
+                l.push_back(gHid.note.empty() ? std::string(gHid.seat < 4 ? "aim anywhere here" : "shoot DONE") : gHid.note);
                 return l;
             };
             hidSetupEvent = [&, hidFinish, hidRestart](const SDL_Event& e) {
@@ -9022,8 +8979,9 @@ int main(int argc, char* argv[])
                         return true;
                     }
                 }
-                // a right / middle click: a gun's reload button (read through raw input): no menu Back here
-                return (button && e.button.button != SDL_BUTTON_LEFT) || e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP;
+                // the guns are read through raw input (each one's own aim): the menu under the screen gets nothing
+                return button || e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_WHEEL || e.type == SDL_EVENT_KEY_DOWN ||
+                       e.type == SDL_EVENT_KEY_UP || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_UP;
             };
             hidSetupRefresh = [&, gunRaw, hidFinish, hidRestart, hidPage]() {
                 if (!gHid.active) {
@@ -9041,9 +8999,34 @@ int main(int argc, char* argv[])
                     return;
                 const game::LightGuns::Captured c = lightGuns.captured;
                 lightGuns.captured = {};
+                // one gun = one VID / PID (what LightgunHID.ini keeps): a gun that shows up as two mice is one player
+                const std::string cid = game::LightgunHid::idOfPath(c.key);
                 int owner = -1;
                 for (int p = 0; p < 4; ++p)
-                    if (!gHid.key[p].empty() && gHid.key[p] == c.key) owner = p;
+                    if (!gHid.key[p].empty() && (gHid.key[p] == c.key || (!cid.empty() && game::LightgunHid::idOfPath(gHid.key[p]) == cid)))
+                        owner = p;
+                if (!c.reload) {   // a button shot (a gun: where it points; a mouse: the pointer)
+                    float px = c.u * float(gHid.winW), py = c.v * float(gHid.winH);
+                    if (!c.absolute) {
+                        SDL_GetMouseState(&px, &py);
+                        if (SDL_Window* w = SDL_GetMouseFocus()) px *= SDL_GetWindowPixelDensity(w), py *= SDL_GetWindowPixelDensity(w);
+                    }
+                    int hit = -1;
+                    for (int k = 0; k < 3; ++k)
+                        if (gHid.btn[k][2] > 0 && px >= gHid.btn[k][0] && px <= gHid.btn[k][0] + gHid.btn[k][2] &&
+                            py >= gHid.btn[k][1] && py <= gHid.btn[k][1] + gHid.btn[k][3])
+                            hit = k;
+                    SDL_Log("LightgunHID.ini: set-up: trigger (%s) at %.0f, %.0f%s", c.name.c_str(), px, py,
+                            hit == 0 ? ": DONE" : hit == 1 ? ": START AGAIN" : hit == 2 ? ": SKIP" : "");
+                    if (hit == 0) {
+                        if (gHid.seat > 0) { hidFinish(true); return; }
+                        gHid.note = "Set Player 1's gun first (or SKIP)";
+                        lightGuns.startCapture();
+                        return;
+                    }
+                    if (hit == 1) { hidRestart(); gHid.note = "Started again"; return; }
+                    if (hit == 2) { hidFinish(false); return; }
+                }
                 if (c.reload) {   // a reload button: Player 1's ends the set-up, saved
                     if (owner == 0) {
                         hidFinish(true);
@@ -11320,19 +11303,54 @@ int main(int argc, char* argv[])
                 if (tourPage >= 0 && tourFrame >= gMenuTourN)
                     tourFrame = 0;
             }
-            if (gHid.active && hidSetupLines) {   // Light Gun Edition: the set-up page's banner (under its rows)
-                static Overlay hidBanner;
-                static bool hidBannerOk = false;
-                if (!hidBannerOk) {
+            if (gHid.active && hidSetupLines) {   // Light Gun Edition: the set-up screen over its backdrop page
+                static Overlay hidPrompt, hidList, hidBtn[3];
+                static bool hidOk = false, hidTried = false;
+                if (!hidTried) {
+                    hidTried = true;
                     std::string e;
-                    if ((hidBannerOk = hidBanner.init(e))) hidBanner.setStyle(210, 255, 70, 60);
+                    hidOk = hidPrompt.init(e) && hidList.init(e) && hidBtn[0].init(e) && hidBtn[1].init(e) && hidBtn[2].init(e);
+                    hidPrompt.setStyle(200, 255, 70, 60);
+                    hidList.setStyle(200, 235, 235, 220);
+                    hidBtn[0].setStyle(235, 110, 255, 110);
+                    hidBtn[1].setStyle(235, 235, 235, 220);
+                    hidBtn[2].setStyle(235, 255, 170, 90);
                 }
-                const std::vector<std::string> hl = hidSetupLines();
-                if (hidBannerOk && !hl.empty()) {
-                    hidBanner.setText(hl, wh >= 1000 ? 4 : wh >= 700 ? 3 : 2);
-                    float sc = 1, fx0 = 0, fy0 = 0;   // (the page's 640 x 480 units: the free space above Exit, y 0x158)
-                    game::Hud::pictureRect(fe.canvasWidth(), game::Frontend::kHeight, float(ww), float(wh), sc, fx0, fy0);
-                    hidBanner.drawAt(ww, wh, ww * 0.5f, fy0 + 0x158 * sc);
+                if (hidOk) {
+                    gHid.winW = ww, gHid.winH = wh;
+                    const int big = wh >= 1000 ? 5 : wh >= 700 ? 4 : 3, mid = wh >= 1000 ? 3 : 2;
+                    std::vector<std::string> pl = hidSetupLines();
+                    pl.insert(pl.begin(), "");
+                    pl.push_back("");
+                    hidPrompt.setText(pl, big);
+                    hidPrompt.drawAt(ww, wh, ww * 0.5f, wh * 0.40f);
+                    // the players' guns (bottom left)
+                    std::vector<std::string> ll = {"", " PLAYERS", ""};
+                    for (int p = 0; p < 4; ++p) {
+                        std::string id = gHid.key[p].empty() ? std::string() : game::LightgunHid::idOfPath(gHid.key[p]);
+                        if (!gHid.key[p].empty() && id.empty()) id = gHid.name[p];
+                        ll.push_back(" PLAYER " + std::to_string(p + 1) + "   " +
+                                     (!gHid.key[p].empty() ? id : p == gHid.seat ? std::string("< pull the trigger") : std::string("-")) + " ");
+                    }
+                    ll.push_back("");
+                    hidList.setText(ll, mid);
+                    hidList.drawAnchored(ww, wh, ww * 0.04f, wh * 0.94f, 0.0f, 1.0f);
+                    // DONE / START AGAIN / SKIP (bottom right, stacked from the bottom up)
+                    static const char* const kBtn[3] = {"DONE", "START AGAIN", "SKIP"};
+                    float y = wh * 0.94f;
+                    for (int k = 2; k >= 0; --k) {
+                        std::string t = kBtn[k];
+                        while (t.size() < 13) t = " " + t + " ";
+                        hidBtn[k].setText({"", t, ""}, k == 0 ? big : mid);
+                        const float bw = hidBtn[k].drawnWidth(), bh = hidBtn[k].drawnHeight();
+                        const bool off = k == 0 && gHid.seat == 0;
+                        if (!off) {
+                            hidBtn[k].drawAnchored(ww, wh, ww * 0.96f, y, 1.0f, 1.0f);
+                            gHid.btn[k][0] = ww * 0.96f - bw, gHid.btn[k][1] = y - bh, gHid.btn[k][2] = bw, gHid.btn[k][3] = bh;
+                        } else
+                            gHid.btn[k][2] = 0;
+                        y -= bh + wh * 0.025f;
+                    }
                 }
             }
             drawGunAids(menu.cfg, ww, wh, false);   // padpass: a Sinden's white border on the menus too
