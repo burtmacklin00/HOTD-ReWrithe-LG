@@ -6,16 +6,11 @@
 //   2 - Display - 4x3 / 16x9   the lines of 4x3\launcher.ini or 16x9\launcher.ini (aspect=1 / aspect=0; add more lines
 //                              there to change them only in that mode) put into settings\launcher.ini
 //   2 - Crosshairs - On / Off  crosshairs=1 / 0
-//   3 - Online - Host / Join   start the game through the launcher (Launch HOTD ReWrithe - MLGB.ahk if it is there, else
-//                              Launch HOTD ReWrithe.ahk; no AutoHotkey: bin\hotd.exe itself) with host / join: the game
-//                              opens Online Co-op by itself (--online-host / --online-join: the game's code copied /
-//                              a game on this network joined, else the code on the clipboard)
 //
 // settings\launcher.ini keeps every other line as it was; a key that is not there is added.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#include <shellapi.h>
 #include <tlhelp32.h>
 
 #include <cstdio>
@@ -32,7 +27,6 @@ struct Preset {
     const wchar_t* name;     // the program's name, without .exe
     const wchar_t* folder;   // its lines come from <folder>\launcher.ini ("" none)
     Keys keys;               // else (or with the folder's file missing) these
-    const wchar_t* launch = nullptr;   // a launch (3 - Online): the launcher's argument (host / join), no settings
 };
 
 const std::vector<Preset>& presets()
@@ -42,8 +36,6 @@ const std::vector<Preset>& presets()
         {L"2 - Display - 16x9", L"16x9", {{"aspect", "0"}}},
         {L"2 - Crosshairs - On", L"", {{"crosshairs", "1"}}},
         {L"2 - Crosshairs - Off", L"", {{"crosshairs", "0"}}},
-        {L"3 - Online - Host", L"", {}, L"host"},
-        {L"3 - Online - Join", L"", {}, L"join"},
     };
     return list;
 }
@@ -153,22 +145,6 @@ bool gameRunning()
     return found;
 }
 
-// 3 - Online: the launcher (its Esc, Hook of the Reaper, a front-end's steps) with the argument, else the game itself
-bool launch(const std::wstring& arg)
-{
-    for (const wchar_t* name : {L"Launch HOTD ReWrithe - MLGB.ahk", L"Launch HOTD ReWrithe.ahk"}) {
-        const std::wstring ahk = g_dir + name;
-        if (GetFileAttributesW(ahk.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
-        // (ShellExecute's result above 32: started; a .ahk with no AutoHotkey installed fails: the game itself next)
-        if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", ahk.c_str(), arg.c_str(), g_dir.c_str(), SW_SHOWNORMAL)) > 32)
-            return true;
-        break;
-    }
-    const std::wstring game = g_dir + L"bin\\hotd.exe", args = L"--online-" + arg;
-    return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", game.c_str(), args.c_str(), (g_dir + L"bin").c_str(),
-                                                   SW_SHOWNORMAL)) > 32;
-}
-
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
@@ -185,20 +161,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     for (const Preset& p : presets())
         if (_wcsicmp(p.name, name.c_str()) == 0) preset = &p;
     if (!preset) {
-        fail(L"\"" + name + L".exe\" is not one of the quick settings (2 - Display, 2 - Crosshairs, 3 - Online): keep these programs' "
+        fail(L"\"" + name + L".exe\" is not one of the quick settings (2 - Display, 2 - Crosshairs): keep these programs' "
              L"names as they came.");
         return 1;
     }
     if (gameRunning()) {
         fail(L"Close the game first, then run \"" + name + L"\" again (the game saves its settings when it closes).");
         return 1;
-    }
-    if (preset->launch) {
-        if (!launch(preset->launch)) {
-            fail(L"Could not start the game (bin\\hotd.exe): keep \"" + name + L".exe\" in the game's folder.");
-            return 1;
-        }
-        return 0;
     }
     Keys keys = preset->keys;
     if (*preset->folder) {

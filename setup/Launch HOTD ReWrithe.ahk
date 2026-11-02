@@ -14,7 +14,7 @@
 ;   host          Online Co-op: the game hosts by itself, its join code copied to the clipboard (send it to your
 ;                 friends; on the same network they need none); the game starts once a friend is in, more can join it
 ;   join [code]   Online Co-op: joins a game on this network by itself, else the code (given here, or copied to the
-;                 clipboard). "3 - Online - Host.exe" / "3 - Online - Join.exe" start this launcher with host / join.
+;                 clipboard). "Launch HOTD ReWrithe - Link Play Host.ahk" / "... - Link Play Join.ahk" do the same.
 ;
 ; Your settings: "Launch HOTD ReWrithe.ini" beside this launcher (updates never replace it), section [Launcher]:
 ;   IgnorePads=1   every gamepad / XInput controller is ignored (light guns, mouse and keyboard only); default 0
@@ -22,9 +22,12 @@
 ;   Debug=1        the logs (as "Launch HOTD ReWrithe - Debug.ahk"); default 0
 ;
 ; Other launchers build on this one (they set their own values, then #Include it), so a change here reaches them too:
-;   "Launch HOTD ReWrithe - Debug.ahk"   Debug := true
-;   a front-end's own launcher           e.g. its gun set-up first, IgnorePads := true, EndCommand := "<a program>"
-; Values they can set before the #Include: IgnorePads, CloseHotr, Debug (true / false), EndCommand (run at the end).
+;   "Launch HOTD ReWrithe - Debug.ahk"            Debug := true
+;   "Launch HOTD ReWrithe - Link Play Host.ahk"   LinkPlay := "host"   (online / same-network co-op: hosts by itself)
+;   "Launch HOTD ReWrithe - Link Play Join.ahk"   LinkPlay := "join"   (joins by itself)
+;   a front-end's own launcher                    e.g. its gun set-up first, IgnorePads := true, EndCommand := "<a program>"
+; Values they can set before the #Include: IgnorePads, CloseHotr, Debug (true / false), EndCommand (run at the end),
+; LinkPlay ("host" / "join"), LinkCode (join with this code).
 #NoEnv
 #SingleInstance Force
 SendMode Input
@@ -65,8 +68,12 @@ if !FileExist(GamePath) {
     ExitApp
 }
 
-; the command line: 4x3 / 16x9, host, join [code]
+; the command line: 4x3 / 16x9, host, join [code] (a Link Play launcher's LinkPlay / LinkCode first)
 GameArgs := ""
+if (LinkPlay = "host")
+    GameArgs := "--online-host"
+else if (LinkPlay = "join")
+    GameArgs := "--online-join" (LinkCode != "" ? " """ LinkCode """" : "")
 for i, arg in A_Args {
     if (arg = "4x3" || arg = "16x9") {
         preset := A_ScriptDir "\2 - Display - " arg ".exe"

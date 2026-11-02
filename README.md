@@ -30,11 +30,12 @@ What this edition adds:
   first; they take effect at its next start). The Display ones put the lines of `4x3\launcher.ini` / `16x9\launcher.ini`
   into `settings\launcher.ini` (add lines there to change them only in that mode). New in the game: Options > Video >
   **Show Crosshairs** (launcher.ini `crosshairs=`).
-- **Online in one click:** `3 - Online - Host.exe` starts the game (through the launcher) straight into Online Co-op >
-  Start Hosting with the Host page's last settings, its join code copied to the clipboard; the game starts once a friend
-  is in (more can join the running game with start). `3 - Online - Join.exe` joins a game on the same network by itself;
-  over the internet copy the host's code first, then run it (the code on the clipboard is used). Command line:
-  `hotd.exe --online-host` / `--online-join [code]`; the launcher: `host` / `join [code]`.
+- **Link Play in one click** (online and same-network co-op): `Launch HOTD ReWrithe - Link Play Host.ahk` starts the
+  game straight into Online Co-op > Start Hosting with the Host page's last settings, its join code copied to the
+  clipboard; the game starts once a friend is in (more can join the running game with start). `Launch HOTD ReWrithe -
+  Link Play Join.ahk` joins a game on the same network by itself; over the internet copy the host's code first (the
+  code on the clipboard is used). Command line: `hotd.exe --online-host` / `--online-join [code]`; the launcher:
+  `host` / `join [code]`.
 - **Bezel in 4:3:** the game draws `4x3\bezel.png` (or `4x3\bezel-default.png`) over the side bars in 4:3 mode: a
   1920 x 1080 picture with the art in the outer 240 px each side and the middle transparent, scaled to the window's
   height and centred. No separate overlay program.

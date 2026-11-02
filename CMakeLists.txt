@@ -264,7 +264,6 @@ if(WIN32)   # the package's game exe stub (util/game_exe.h): no DLLs (static run
         target_compile_definitions(hotd_presets PRIVATE _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
         target_compile_options(hotd_presets PRIVATE /utf-8)
     endif()
-    target_link_libraries(hotd_presets PRIVATE shell32)   # (3 - Online: ShellExecute)
     add_dependencies(hotd hotd_presets)
 endif()
 add_executable(hotd_viewer src/viewer/main.cpp src/game/files_check.cpp)   # files_check: a package's ROM zip -> regions
