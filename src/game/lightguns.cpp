@@ -110,6 +110,7 @@ void LightGuns::absolute(uint64_t id, float u, float v)
     Dev& d = dev(id);
     if (!menuKey_.empty() && !capture_ && assignSeat_ < 0) {   // Light Gun Edition: the menus follow Player 1's gun only
         if (d.key == menuKey_) menu_.u = u, menu_.v = v, menu_.moved = true;
+        d.u = u, d.v = v;   // (where every gun points: PC Mode's select reads a pull off the screen)
         return;
     }
     if (!d.absolute) {
@@ -147,10 +148,21 @@ void LightGuns::buttons(uint64_t id, unsigned flags)
         return;
     }
     if (!menuKey_.empty() && assignSeat_ < 0) {   // Light Gun Edition: the menus follow Player 1's gun only
+        const bool off = d.u < 0.0f || d.u > 1.0f || d.v < 0.0f || d.v > 1.0f;
         if (d.key == menuKey_) {
+            if (seatPick_ == 4 && ((flags & 0x14) || ((flags & 0x1) && off))) {   // (PC Mode, 4 panels: player 1's Ready)
+                seatPress[0].reload = true;
+                return;
+            }
             if (flags & 0x1) menu_.trigger = menu_.held = true;
             if (flags & 0x2) menu_.held = false;
             if (flags & 0x4) menu_.alt = true;
+        } else if (seatPick_ && !d.key.empty()) {   // PC Mode's select: players 2-4's own guns on their own panels
+            for (int p = 1; p < (seatPick_ == 4 ? 4 : 2); ++p)
+                if (pin[p] == d.key) {
+                    if ((flags & 0x1) && !off) seatPress[p].trigger = true;
+                    if ((flags & 0x14) || ((flags & 0x1) && off)) seatPress[p].reload = true;
+                }
         }
         return;
     }

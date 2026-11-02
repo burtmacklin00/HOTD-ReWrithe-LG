@@ -332,7 +332,14 @@ public:
     bool takeMenu(int lw, int lh, bool& moved, float& x, float& y, bool& trigger, bool& held, bool& alt);
     // Light Gun Edition: a trigger pull of a player not in play (waiting / out of lives) is their Start as well
     bool triggerStarts = true;
+    // Light Gun Edition: PC Mode's character select (the menus follow Player 1's gun): each player's own gun (their
+    // LightgunHID.ini / Assign gun) for their own panel: 0 off, 2 the 2-panel screen (players 2's gun), 4 the
+    // 4-panel screen (players 2-4's guns; player 1's reload and off-screen pull too, its trigger stays the menu's click)
+    struct SeatPress { bool trigger = false, reload = false; };   // reload: the reload button or a pull off the screen
+    void setSeatPick(int mode) { if (mode != seatPick_) { seatPick_ = mode; for (SeatPress& s : seatPress) s = {}; } }
+    SeatPress seatPress[4];
 private:
+    int seatPick_ = 0;
     struct Dev {
         uint64_t id = 0;
         std::string key, name;   // (ipolish) describe()

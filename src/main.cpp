@@ -10819,6 +10819,25 @@ int main(int argc, char* argv[])
             if (bindRefresh) bindRefresh();       // keybind: the Keys & Buttons page's countdown
             if (gunAssignRefresh) gunAssignRefresh();   // ipolish: the Light Guns page's wait / its result
             if (hidSetupRefresh) hidSetupRefresh();     // Light Gun Edition: LightgunHID.ini's set-up
+            {   // Light Gun Edition: PC Mode's character select with each player's own gun (the menus follow player 1's):
+                // 4 panels: players 2-4's trigger = the next character, reload / a pull off the screen = Ready (again:
+                // not ready); player 1 points as in every menu, its reload / off-screen pull = Ready. 2 panels: player
+                // 2's trigger = their next character (No Player too); player 1 picks and starts as before
+                const int mode = !gNet && fe.screen() == 16 && lightGuns.menuGunOn() ? fe.pcSeats : 0;
+                lightGuns.setSeatPick(mode);
+                for (int p = 0; mode && p < 4; ++p) {
+                    game::LightGuns::SeatPress& sp = lightGuns.seatPress[p];
+                    if (!sp.trigger && !sp.reload) continue;
+                    if (mode == 4 && !fe.pcCpu[p] && fe.pcChars[p] != 0) {
+                        if (sp.reload)
+                            fe.pcModeSeat(p, fe.pcReady[p] ? game::Frontend::kPcUnready : game::Frontend::kPcReady);
+                        else if (sp.trigger)
+                            fe.pcModeSeat(p, game::Frontend::kPcNext);
+                    } else if (mode == 2 && p == 1 && sp.trigger)
+                        fe.pcModeGunNext(1);
+                    sp = {};
+                }
+            }
             // Online Co-op: the network and the page's values; text input on while a field is edited; the game when
             // both PCs are ready (the host pressed Start)
             online.frame(fe);
@@ -11302,6 +11321,22 @@ int main(int argc, char* argv[])
                 }
                 if (tourPage >= 0 && tourFrame >= gMenuTourN)
                     tourFrame = 0;
+            }
+            if (!gHid.active && !gNet && fe.screen() == 16 && lightGuns.menuGunOn()) {   // Light Gun Edition: PC Mode's
+                static Overlay pcGunHint;                                                 // select: the guns' controls
+                static bool pcHintOk = false, pcHintTried = false;
+                if (!pcHintTried) {
+                    pcHintTried = true;
+                    std::string e;
+                    if ((pcHintOk = pcGunHint.init(e))) pcGunHint.setStyle(190, 255, 225, 120), pcGunHint.translate = false;
+                }
+                if (pcHintOk) {
+                    const std::string t = fe.pcSeats == 4 ? "GUNS: TRIGGER = NEXT CHARACTER    RELOAD OR SHOOT OFF SCREEN = READY"
+                                                          : "PLAYER 2'S GUN: TRIGGER = NEXT CHARACTER";
+                    const int sc = std::max(1, std::min(wh >= 1000 ? 3 : 2, int(float(ww) * 0.9f / float(8 * t.size() + 12))));
+                    pcGunHint.setText({t}, sc);
+                    pcGunHint.drawAnchored(ww, wh, ww * 0.5f, wh * 0.995f, 0.5f, 1.0f);
+                }
             }
             if (gHid.active) {   // Light Gun Edition: the set-up screen, the whole window (sized to fit any window)
                 static Overlay hidBg, hidTitle, hidPrompt, hidNote, hidList, hidBtn[3];

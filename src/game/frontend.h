@@ -454,6 +454,8 @@ public:
     // a seat's action (kPcPrev / kPcNext the arrows, kPcReady toggles Ready, kPcUnready); the screen is rebuilt, and
     // when every seat that plays is ready onPcModeStart runs. Ignored with 2 panels; the arrows while the seat is Ready
     void pcModeSeat(int seat, int act);
+    // Light Gun Edition: a gun's trigger on the 2-panel screen: that player's next character (player 2: No Player too)
+    void pcModeGunNext(int seat) { if (screen() == 16 && pcSeats == 2 && seat >= 0 && seat < 2) pcModeStep(seat, 1); }
     // kPcCpu (players 2-4 with a character): the seat a CPU teammate (ready) / back to a person (not ready)
     enum : int { kPcPrev = 0, kPcNext = 1, kPcReady = 2, kPcUnready = 3, kPcCpu = 4 };
     int pcSeats = 2;                        // 2: the PC's two panels; 4: the four panels
