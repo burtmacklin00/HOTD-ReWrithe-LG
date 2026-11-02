@@ -88,16 +88,21 @@ template <class P> void Game<P>::hud_ammo_draw(uint32_t task)
         }
         const int rx = p * 0x1F + 4;
         const uint32_t hint = mem.u32(0xCA700 + text_region() * 4);
+        // Light Gun Edition (ours): the 4P mode: RELOAD right above the player's own bullets and torches (row 0x20), no
+        // "shoot outside the screen" line, so the four players' prompts never stack in the middle (players 3 / 4's
+        // sit under their bands at the top: Hud::drawSeatHud); 1-2 players: the arcade's rows 0x14 / 0x1B
+        const bool lg4 = coop4_on();
+        const int ry = lg4 ? 0x20 : 0x14;
         const int32_t lives = int32_t(mem.u32(pl + 0xC));
         int32_t timer = int32_t(mem.u32(pl + 0x40));
         if (mem.template at<uint8_t>(pl + 0x3E) != 0 && lives != 0 && scene != 3 && scene != 5 && mem.u32(G::shot_enable) != 0) {
             if (timer % 0x3C < 0x2D) {
-                sprite_draw_anim(kTileRam, 1, 0, rx, 0x14, 0x36);
-                if (timer > 0x77)
+                sprite_draw_anim(kTileRam, 1, 0, rx, ry, 0x36);
+                if (timer > 0x77 && !lg4)
                     sprite_draw_anim(kTileRam, 1, 0, rx, 0x1B, hint);
             } else {
-                sprite_draw(kTileRam, rx, 0x14, 0x36);
-                if (timer > 0x77)
+                sprite_draw(kTileRam, rx, ry, 0x36);
+                if (timer > 0x77 && !lg4)
                     sprite_draw(kTileRam, rx, 0x1B, int(hint));
             }
             if (timer != 0 && mem.template at<uint8_t>(G::gun_inputs + uint32_t(p) * 0x1C + 0x15) != 0 &&
@@ -109,8 +114,9 @@ template <class P> void Game<P>::hud_ammo_draw(uint32_t task)
         }
         if (timer != 0 || lives == 0 || scene == 3 || scene == 5) {
             mem.set32(pl + 0x40, 0);
-            sprite_draw(kTileRam, rx, 0x14, 0x36);
-            sprite_draw(kTileRam, rx, 0x1B, int(hint));
+            sprite_draw(kTileRam, rx, ry, 0x36);
+            if (!lg4)
+                sprite_draw(kTileRam, rx, 0x1B, int(hint));
         }
     }
 }
@@ -316,6 +322,18 @@ template <class P> void Game<P>::hud_start_prompt(int p, int which, int on)
 }
 
 // --- continue / game over (the flow's player states call these): the player's place from table 0xCA714 (x, y) ---
+// Light Gun Edition (ours): in the 4P mode players 1 / 2's CONTINUE? / GAME OVER sit right above their own bands at the
+// bottom corners (as players 3 / 4's at the top: Hud::drawSeatHud), not in the middle where all four stacked
+namespace hud_lg {
+template <class G> int contX(const G& g, int p)
+{
+    return g.coop4_on() && p < 2 ? (p == 0 ? 2 : 0x24) : int(g.mem.template at<int8_t>(0xCA714 + uint32_t(p) * 2));
+}
+template <class G> int contY(const G& g, int p)
+{
+    return g.coop4_on() && p < 2 ? 0x1F : int(g.mem.template at<int8_t>(0xCA715 + uint32_t(p) * 2));
+}
+}
 
 // 0x95010 hud_continue_sprite (player): CONTINUE? (0x113). PC Mode (THOTD.EXE 0x50BC24): only when the player
 // can_continue (0x45B8F0: a credit left, or Free-Play); without one the countdown's digit runs alone
@@ -323,21 +341,20 @@ template <class P> void Game<P>::hud_continue_sprite(int p)
 {
     if (pm_on() && !pm_can_continue())
         return;
-    sprite_place(0x1000000, 1, 0, mem.template at<int8_t>(0xCA714 + uint32_t(p) * 2),
-                 mem.template at<int8_t>(0xCA715 + uint32_t(p) * 2), 0x113);
+    sprite_place(0x1000000, 1, 0, hud_lg::contX(*this, p), hud_lg::contY(*this, p), 0x113);
 }
 
 // 0x95040 hud_continue_digit (player, digit): the countdown digit (table 0xCA720)
 template <class P> void Game<P>::hud_continue_digit(int p, int digit)
 {
-    sprite_place(0x1000000, 1, 0, mem.template at<int8_t>(0xCA714 + uint32_t(p) * 2) + 0x16,
-                 mem.template at<int8_t>(0xCA715 + uint32_t(p) * 2), mem.template at<int16_t>(0xCA720 + uint32_t(digit) * 2));
+    sprite_place(0x1000000, 1, 0, hud_lg::contX(*this, p) + 0x16, hud_lg::contY(*this, p),
+                 mem.template at<int16_t>(0xCA720 + uint32_t(digit) * 2));
 }
 
 // 0x95080 hud_continue_label (player): CONTINUE? and its digit taken off, bank 8 freed
 template <class P> void Game<P>::hud_continue_label(int p)
 {
-    const int x = mem.template at<int8_t>(0xCA714 + uint32_t(p) * 2), y = mem.template at<int8_t>(0xCA715 + uint32_t(p) * 2);
+    const int x = hud_lg::contX(*this, p), y = hud_lg::contY(*this, p);
     sprite_draw(0x1000000, x, y, 0x113);
     sprite_draw(0x1000000, x + 0x16, y, 0x114);
     sprite_bank_free(8);
@@ -346,14 +363,13 @@ template <class P> void Game<P>::hud_continue_label(int p)
 // 0x950E0 hud_game_over_sprite (player): GAME OVER (0xA5) at the player's place
 template <class P> void Game<P>::hud_game_over_sprite(int p)
 {
-    sprite_place(0x1000000, 1, 0, mem.template at<int8_t>(0xCA714 + uint32_t(p) * 2),
-                 mem.template at<int8_t>(0xCA715 + uint32_t(p) * 2), 0xA5);
+    sprite_place(0x1000000, 1, 0, hud_lg::contX(*this, p), hud_lg::contY(*this, p), 0xA5);
 }
 
 // 0x95110 hud_game_over_sprite_final (player): taken off, bank 0x12 freed
 template <class P> void Game<P>::hud_game_over_sprite_final(int p)
 {
-    sprite_draw(0x1000000, mem.template at<int8_t>(0xCA714 + uint32_t(p) * 2), mem.template at<int8_t>(0xCA715 + uint32_t(p) * 2), 0xA5);
+    sprite_draw(0x1000000, hud_lg::contX(*this, p), hud_lg::contY(*this, p), 0xA5);
     sprite_bank_free(0x12);
 }
 

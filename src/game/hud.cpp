@@ -1306,12 +1306,11 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
                 const uint64_t t = rt.frameCount + 1 - since;
                 if (t % 0x3C < 0x2D) {
                     const int rx = left ? 4 : 0x23;
-                    int ry = 0x2F + dy;
-                    bool line = t > 0x77 && !pc;   // (PC models: RELOAD alone, as the PC's 0x50B7E4 and drawPc2D)
-                    if (prompt(mem.at<Player>(rt.player_rec(seat - 2))) && ry + (line ? 0xA : 5) > 0x14) {
-                        ry = 0x1F;
-                        line = false;
-                    }
+                    // Light Gun Edition: always right under the seat's own band, RELOAD alone (players 1 / 2's sit
+                    // right above theirs at the bottom now: hud_ammo_draw in the 4P mode), so nothing stacks
+                    const int ry = 0x2F + dy;
+                    const bool line = false;
+                    (void)t;
                     pieces.push_back({rx, ry, 0x36, 0});
                     if (line)
                         pieces.push_back({rx, ry + 7, mem.u32(0xCA700 + rt.text_region() * 4), 0});
