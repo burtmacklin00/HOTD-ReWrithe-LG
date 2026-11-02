@@ -135,13 +135,13 @@ void LightGuns::relative(uint64_t id, float dx, float dy)
 void LightGuns::buttons(uint64_t id, unsigned flags)
 {
     Dev& d = dev(id);
-    if (capture_) {   // Light Gun Edition: LightgunHID.ini's set-up waits for a trigger pull (nothing else happens)
-        if (flags & 0x1) {
+    if (capture_) {   // Light Gun Edition: LightgunHID.ini's set-up waits for a trigger pull or a reload button (nothing else happens)
+        if (flags & (0x1 | 0x4 | 0x10)) {
             if (d.key.empty())
                 d.key = "raw:" + std::to_string(id);
             if (d.name.empty())
                 d.name = d.absolute ? "Light Gun" : "Mouse";
-            captured = Captured{true, d.key, d.name};
+            captured = Captured{true, d.key, d.name, (flags & 0x1) == 0};
             capture_ = false;
         }
         return;

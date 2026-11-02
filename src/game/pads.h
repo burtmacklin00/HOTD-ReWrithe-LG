@@ -315,6 +315,7 @@ public:
     struct Captured {
         bool got = false;
         std::string key, name;
+        bool reload = false;   // the right / middle button (else the trigger)
     };
     void startCapture() { capture_ = true; captured = Captured{}; }
     void stopCapture() { capture_ = false; }
