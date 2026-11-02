@@ -1118,7 +1118,7 @@ std::vector<Frontend::Extra> menuCoopRows(LaunchConfig& c, const MenuHooks& h)
     r.push_back({"Local 2 Players", []() { return std::string("Start"); }, [h]() { if (h.startCoop) h.startCoop(2); },
                  "Two players on this PC from Chapter 1 (Player 2's input: Options > Controls)"});
     r.push_back({"Local 4 Players", []() { return std::string("Start"); }, [h]() { if (h.startCoop) h.startCoop(4); },
-                 "Four players on this PC from Chapter 1 (players 3 / 4: gamepads; Options > Controls)"});
+                 "The 4-player game on this PC from Chapter 1: player 1 starts, players 2-4 join with their trigger / start"});
     experimental(r);
     r.push_back({"Online Co-op", []() { return page("Host / Join"); }, [h]() { if (h.online) h.online(); },
                  "Two PCs over the internet or the LAN: host a game or join one (3-4 PCs: Experimental)"});
