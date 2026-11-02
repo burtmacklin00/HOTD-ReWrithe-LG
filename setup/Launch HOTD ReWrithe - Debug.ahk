@@ -4,6 +4,8 @@
 ;   settings\launcher.log   the launcher's steps (start, the game's window, Esc, the game closing, Hook of the Reaper)
 ;   settings\outputs.log    every message the game sends to Hook of the Reaper, timed (recoil, ammo, life, damage, death)
 ;   settings\hotd.log       the game's own log (always written): guns, LightgunHID.ini, menus, bezel ...
+; Hook of the Reaper is left running when the game closes (testing: no restarting it after every run).
 ; To report a problem: play until it happens, close the game, send the three files.
 Debug := true
+CloseHotr := false
 #Include %A_ScriptDir%\Launch HOTD ReWrithe.ahk
