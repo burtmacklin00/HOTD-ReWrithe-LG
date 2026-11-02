@@ -85,6 +85,7 @@ template <class P> void Game<P>::player_shoot(uint32_t task)
         }
         if (mem.u32(G::shot_enable) != 0) {
             pl.flags |= 2;
+            if (source == 0) ++lg_shots[p & 3];   // Light Gun Edition: the outputs' recoil (ours)
             shot_ray_setup(p, x, y, 496.0f);
             uint32_t test = mem.u32(G::gun_test_mode);
             gun.trigger = 0;
@@ -176,6 +177,7 @@ template <class P> void Game<P>::player_shoot_pc(uint32_t task)
         }
         if (mem.u32(G::shot_enable) != 0) {
             pl.flags |= 2;
+            if (source == 0) ++lg_shots[p & 3];   // Light Gun Edition: the outputs' recoil (ours)
             shot_ray_setup(p, x, y, 496.0f);
             gun.trigger = 0;
             pl.shot_pos[0] = int16_t(int32_t(x));

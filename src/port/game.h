@@ -33,6 +33,10 @@ public:
     // The experimental 4-player mode (docs/coop4.md, port/coop4.h): set by the runtime for --players 4 (the arcade
     // logic only); 0 in every 1-2 player game and in the proofs, so nothing of seats 3 / 4 runs, reads or writes then.
     int seats4 = 0;
+    // Light Gun Edition (game/game_outputs.h): each seat's bullets fired by its own input (not the attract's demo), counted
+    // where player_shoot sets the Player's "fired" flag (the shot test clears that flag again in the same frame, so the
+    // outputs read this count); never read by the logic
+    uint32_t lg_shots[4] = {0, 0, 0, 0};
     // Options "Game Text: Japanese" (ours): the region's text-only effects (the subtitles / voice-message sprites,
     // chapter cards, RELOAD hint, the attract tutorial's text) as the JAPAN region 0 draws them, while the logic keeps
     // reading the real region 0x51F791 (attract order, credits, the opening title's timing). Off in the proofs.

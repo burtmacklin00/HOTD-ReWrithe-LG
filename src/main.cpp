@@ -1063,7 +1063,12 @@ void outputsFrame(game::Runtime& rt, const game::LaunchConfig& cfg)
         const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
         o.valid = true;
         o.state = pl.state;
-        o.fired = (pl.flags & 2u) != 0;
+        // a bullet left the gun since the last frame: the seat's shot count (Runtime::lg_shots: the Player's "fired"
+        // flag is cleared by the shot test in the same frame); a count that went back (a new game): no shot
+        static uint32_t lastShots[4] = {};
+        const uint32_t shots = rt.lg_shots[p & 3];
+        o.fired = shots > lastShots[p & 3];
+        lastShots[p & 3] = shots;
         o.lives = pl.lives;
         o.rounds = pl.rounds;
     }
@@ -3743,7 +3748,11 @@ int main(int argc, char* argv[])
             r.boss.startGame(r, cfg.players);
             SDL_Log("Boss Mode: %s (chapter %d event %d)", game::kBossNames[bossModeOpt - 2], r.boss.start().chapter + 1, r.boss.start().event);
         } else if (chapterStart) {
-            r.chapter_start(endingOpt ? 3 : chapter, menuEvent >= 0 && runChapter < 0 ? menuEvent : event, cfg.players);   // (menuEvent: the Cheat screen)
+            // Light Gun Edition: the 4-player mode (an arcade game on this PC): player 1 starts, players 2-4 join with
+            // their trigger / start like inserting a coin (computer teammates join by themselves); PC Mode (each player
+            // picked a character and is Ready) and online games as before
+            const int startPlayers = !gNet && cfg.players >= 3 && !r.pcmode ? 1 : cfg.players;
+            r.chapter_start(endingOpt ? 3 : chapter, menuEvent >= 0 && runChapter < 0 ? menuEvent : event, startPlayers);   // (menuEvent: the Cheat screen)
             if (menuEvent >= 0 && runChapter < 0)
                 SDL_Log("Cheat screen: chapter %d from event %d", chapter + 1, menuEvent);
             if (endingOpt) {   // --ending: Chapter 4's end count at its last frame (game_chapter_end_wait: sub-mode 7)
