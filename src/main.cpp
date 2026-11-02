@@ -8957,7 +8957,7 @@ int main(int argc, char* argv[])
                 std::vector<std::string> l;
                 if (!gHid.active) return l;
                 l.push_back(gHid.seat < 4 ? "PLAYER " + std::to_string(gHid.seat + 1) + ": PULL YOUR TRIGGER" : std::string("ALL 4 PLAYERS SET"));
-                l.push_back(gHid.note.empty() ? std::string(gHid.seat < 4 ? "aim anywhere here" : "shoot DONE") : gHid.note);
+                l.push_back(gHid.note.empty() ? std::string(gHid.seat < 4 ? "aim anywhere on the screen" : "shoot DONE") : gHid.note);
                 return l;
             };
             hidSetupEvent = [&, hidFinish, hidRestart](const SDL_Event& e) {
@@ -9042,8 +9042,8 @@ int main(int argc, char* argv[])
                     gHid.key[gHid.seat] = c.key;
                     gHid.name[gHid.seat] = c.name;
                     SDL_Log("LightgunHID.ini: set-up: player %d: %s (%s)", gHid.seat + 1, c.name.c_str(), c.key.c_str());
-                    gHid.note = "Player " + std::to_string(gHid.seat + 1) + " set: " +
-                                (gHid.seat < 3 ? "the next gun's trigger, or shoot DONE" : "shoot DONE");
+                    gHid.note = "Player " + std::to_string(gHid.seat + 1) + " set" +
+                                (gHid.seat < 3 ? std::string(": next gun, or shoot DONE") : std::string(": shoot DONE"));
                     ++gHid.seat;
                     gHid.seatAt = SDL_GetTicks();
                 }
@@ -11303,53 +11303,77 @@ int main(int argc, char* argv[])
                 if (tourPage >= 0 && tourFrame >= gMenuTourN)
                     tourFrame = 0;
             }
-            if (gHid.active && hidSetupLines) {   // Light Gun Edition: the set-up screen over its backdrop page
-                static Overlay hidPrompt, hidList, hidBtn[3];
+            if (gHid.active) {   // Light Gun Edition: the set-up screen, the whole window (sized to fit any window)
+                static Overlay hidBg, hidTitle, hidPrompt, hidNote, hidList, hidBtn[3];
                 static bool hidOk = false, hidTried = false;
                 if (!hidTried) {
                     hidTried = true;
                     std::string e;
-                    hidOk = hidPrompt.init(e) && hidList.init(e) && hidBtn[0].init(e) && hidBtn[1].init(e) && hidBtn[2].init(e);
-                    hidPrompt.setStyle(200, 255, 70, 60);
-                    hidList.setStyle(200, 235, 235, 220);
-                    hidBtn[0].setStyle(235, 110, 255, 110);
+                    hidOk = hidBg.init(e) && hidTitle.init(e) && hidPrompt.init(e) && hidNote.init(e) && hidList.init(e) &&
+                            hidBtn[0].init(e) && hidBtn[1].init(e) && hidBtn[2].init(e);
+                    for (Overlay* o : {&hidTitle, &hidPrompt, &hidNote, &hidList, &hidBtn[0], &hidBtn[1], &hidBtn[2]}) o->translate = false;
+                    hidTitle.setStyle(0, 220, 30, 30);
+                    hidPrompt.setStyle(0, 255, 235, 200);
+                    hidNote.setStyle(0, 255, 120, 100);
+                    hidList.setStyle(190, 235, 235, 220);
+                    hidBtn[0].setStyle(235, 120, 255, 120);
                     hidBtn[1].setStyle(235, 235, 235, 220);
                     hidBtn[2].setStyle(235, 255, 170, 90);
+                    // the backdrop: dark red at the top to black, a darker band at the bottom for the list / buttons
+                    std::vector<uint8_t> px(2 * 64 * 4);
+                    for (int y = 0; y < 64; ++y)
+                        for (int x = 0; x < 2; ++x) {
+                            const float t = float(y) / 63.0f;
+                            uint8_t* q = &px[size_t(y * 2 + x) * 4];
+                            q[0] = uint8_t(70.0f * (1.0f - t) + 8.0f), q[1] = uint8_t(4.0f * (1.0f - t)), q[2] = uint8_t(6.0f * (1.0f - t)), q[3] = 255;
+                        }
+                    hidBg.setImage(px, 2, 64, true);
                 }
                 if (hidOk) {
                     gHid.winW = ww, gHid.winH = wh;
-                    const int big = wh >= 1000 ? 5 : wh >= 700 ? 4 : 3, mid = wh >= 1000 ? 3 : 2;
-                    std::vector<std::string> pl = hidSetupLines();
-                    pl.insert(pl.begin(), "");
-                    pl.push_back("");
-                    hidPrompt.setText(pl, big);
-                    hidPrompt.drawAt(ww, wh, ww * 0.5f, wh * 0.40f);
+                    // a text scale (whole pixels of the 8 x 8 font) whose widest line fits `wFrac` of the window and
+                    // whose letters are at most `hFrac` of its height
+                    auto fit = [&](size_t cols, float wFrac, float hFrac) {
+                        const int byW = int(float(ww) * wFrac / float(8 * cols + 12));
+                        const int byH = int(float(wh) * hFrac / 8.0f);
+                        return std::max(1, std::min(byW, byH));
+                    };
+                    hidBg.drawIn(ww, wh, 0, 0, float(ww), float(wh));
+                    hidTitle.setText({"LIGHT GUN SETUP"}, fit(15, 0.70f, 0.075f));
+                    hidTitle.drawAnchored(ww, wh, ww * 0.5f, wh * 0.06f, 0.5f, 0.0f);
+                    const std::vector<std::string> pl = hidSetupLines();
+                    const std::string prompt = pl.empty() ? std::string() : pl[0], note = pl.size() > 1 ? pl[1] : std::string();
+                    hidPrompt.setText({prompt}, fit(prompt.size(), 0.90f, 0.065f));
+                    hidPrompt.drawAt(ww, wh, ww * 0.5f, wh * 0.33f);
+                    hidNote.setText({note}, fit(std::max<size_t>(note.size(), 40), 0.90f, 0.03f));
+                    hidNote.drawAt(ww, wh, ww * 0.5f, wh * 0.33f + hidPrompt.drawnHeight() * 0.5f + wh * 0.04f);
                     // the players' guns (bottom left)
-                    std::vector<std::string> ll = {"", " PLAYERS", ""};
+                    std::vector<std::string> ll = {"PLAYERS", ""};
                     for (int p = 0; p < 4; ++p) {
                         std::string id = gHid.key[p].empty() ? std::string() : game::LightgunHid::idOfPath(gHid.key[p]);
                         if (!gHid.key[p].empty() && id.empty()) id = gHid.name[p];
-                        ll.push_back(" PLAYER " + std::to_string(p + 1) + "   " +
-                                     (!gHid.key[p].empty() ? id : p == gHid.seat ? std::string("< pull the trigger") : std::string("-")) + " ");
+                        ll.push_back("PLAYER " + std::to_string(p + 1) + "  " +
+                                     (!gHid.key[p].empty() ? id : p == gHid.seat ? std::string("< waiting") : std::string("-")));
                     }
-                    ll.push_back("");
-                    hidList.setText(ll, mid);
-                    hidList.drawAnchored(ww, wh, ww * 0.04f, wh * 0.94f, 0.0f, 1.0f);
-                    // DONE / START AGAIN / SKIP (bottom right, stacked from the bottom up)
+                    const float bottom = wh * 0.95f;
+                    hidList.setText(ll, fit(28, 0.46f, 0.032f));
+                    hidList.drawAnchored(ww, wh, ww * 0.04f, bottom, 0.0f, 1.0f);
+                    // DONE / START AGAIN / SKIP (bottom right, one width, stacked up from the bottom)
                     static const char* const kBtn[3] = {"DONE", "START AGAIN", "SKIP"};
-                    float y = wh * 0.94f;
+                    const int bs = fit(13, 0.40f, 0.035f);
+                    const float gap = wh * 0.02f;
+                    float y = bottom;
                     for (int k = 2; k >= 0; --k) {
                         std::string t = kBtn[k];
-                        while (t.size() < 13) t = " " + t + " ";
-                        hidBtn[k].setText({"", t, ""}, k == 0 ? big : mid);
-                        const float bw = hidBtn[k].drawnWidth(), bh = hidBtn[k].drawnHeight();
-                        const bool off = k == 0 && gHid.seat == 0;
-                        if (!off) {
+                        while (t.size() < 13) t = t.size() % 2 ? t + " " : " " + t;
+                        hidBtn[k].setText({t}, bs);
+                        const float bw = hidBtn[k].drawnWidth(), bh = hidBtn[k].drawnHeight() * 1.0f;
+                        if (!(k == 0 && gHid.seat == 0)) {
                             hidBtn[k].drawAnchored(ww, wh, ww * 0.96f, y, 1.0f, 1.0f);
                             gHid.btn[k][0] = ww * 0.96f - bw, gHid.btn[k][1] = y - bh, gHid.btn[k][2] = bw, gHid.btn[k][3] = bh;
                         } else
                             gHid.btn[k][2] = 0;
-                        y -= bh + wh * 0.025f;
+                        y -= bh + gap;
                     }
                 }
             }
@@ -12797,6 +12821,21 @@ int main(int argc, char* argv[])
                 aim[p][0] = x * ww / std::max(lw, 1);
                 aim[p][1] = y * wh / std::max(lh, 1);
             }
+        }
+        {   // Light Gun Edition: a player's crosshair only once their gun / mouse has moved in this game (a seat in
+            // play whose gun was never picked up, e.g. player 4 of a 4-player game, shows none in the middle of the
+            // screen); computer teammates as before
+            static bool aimMoved[4] = {};
+            static float aimFirst[4][2] = {};
+            static bool wasInGame = false;
+            const bool inGame = rt.mem.at<int16_t>(game::A::G::game_mode) == 4;
+            for (int p = 0; p < 4; ++p) {
+                if (inGame && !wasInGame) aimMoved[p] = false, aimFirst[p][0] = aim[p][0], aimFirst[p][1] = aim[p][1];
+                if (inGame && !aimMoved[p] && std::fabs(aim[p][0] - aimFirst[p][0]) + std::fabs(aim[p][1] - aimFirst[p][1]) > 4.0f)
+                    aimMoved[p] = true;
+                if (inGame && !aimMoved[p] && !hud.cpu[p]) hud.drawCross[p] = false;
+            }
+            wasInGame = inGame;
         }
         // crt (render/crt.h): this frame's filter (the menu may have changed it); aim = the pointers on the window,
         // aimSrc = the picture's point the curved screen shows there (the netplay partner's: the other way round)
