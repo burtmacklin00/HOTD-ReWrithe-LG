@@ -1127,7 +1127,7 @@ std::vector<Frontend::Extra> menuCoopRows(LaunchConfig& c, const MenuHooks& h)
     // player 2 can also join with key 2; 3 / 4: the experimental 4P mode (docs/coop4.md)
     r.push_back({"Players in Arcade", [&c]() { return std::to_string(c.players); },
                  [&c, save]() { c.players = c.players % 4 + 1; save(); },
-                 "How many play from the start of Arcade / Chapter Select (the others join with their start button)"});
+                 "How many play from the start of Arcade / Chapter Select (the others join with their trigger / start button)"});
     listed(r, {"1", "2", "3", "4"});
     experimental(r, [&c]() { return c.players >= 3; });
     // computer teammates (local play): player 2 (any game), players 3 / 4 (the 4P mode)

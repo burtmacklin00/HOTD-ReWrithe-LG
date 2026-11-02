@@ -10634,7 +10634,9 @@ int main(int argc, char* argv[])
             const bool splashing = fe.splashActive();
             fe.promptChoice = menu.cfg.padPrompts, fe.buttonStyle = menu.cfg.buttonStyle;   // padglyphs: Controls > Button Prompts / Style
             fe.iconOutline = menu.cfg.iconOutline != 0;   // menus3: Controls > Icon Outline
-            fe.snapAim = lightGuns.menuGunOn();   // Light Gun Edition: a gun's shot near a button takes it
+            // Light Gun Edition: a gun's shot near a button takes it (not in the Firing Range: its shots are at targets;
+            // not on PC Mode's four panels: a near miss would take another player's arrow)
+            fe.snapAim = lightGuns.menuGunOn() && !fe.rangeShown() && !(fe.screen() == 16 && fe.pcSeats == 4);
             fe.update(in, uint32_t(SDL_GetTicks()));
             // HOTD_MENU_PERF_TOUR=N (menuperf, docs/performance.md): every Remake page in turn, N frames each, Down then
             // Up pressed every 12 frames (the focus moving; the Jukebox: the chosen row), then the table and the end
@@ -12416,8 +12418,10 @@ int main(int argc, char* argv[])
                 // 640 x 480 screen fitted to the window's height: "Continue" at y 248, "Exit" at y 272, ~20 high
                 const float s = float(lh) / 480.0f, px = (guns[0].x - (float(lw) / 2.0f - 320.0f * s)) / s,
                             py = guns[0].y / s;
-                if (std::abs(px - 320.0f) <= 90.0f)
-                    pauseIn.hover = py >= 244.0f && py < 270.0f ? 0 : py >= 270.0f && py < 296.0f ? 1 : -1;
+                // Light Gun Edition: easier to shoot: Continue anywhere in the band above the line between the two
+                // items, Exit below it (each about three times the items' size)
+                if (std::abs(px - 320.0f) <= 220.0f)
+                    pauseIn.hover = py >= 190.0f && py < 270.0f ? 0 : py >= 270.0f && py < 350.0f ? 1 : -1;
             }
             pause.cutScenes = !gNet;   // (bossbug: the pause in cut-scenes too, local games)
             if (gScene.active() && pause.paused())
@@ -12705,6 +12709,10 @@ int main(int argc, char* argv[])
             // left / right edge is off it too), original 4:3 = the 496 x 384 screen (the bars are off it); outside the
             // window (a mouse pushed past it) is off it in both
             const float halfW = gameHalfW(cfg.aspect, lw, lh);
+            // Light Gun Edition: the 4P name entry's second round runs players 3 / 4 in players 1 / 2's places: their
+            // own guns there (they had to use players 1 / 2's)
+            const bool nameSwap = rt.coop4_on() && rt.rank4Round() == 2 && rt.name_entry_active();
+            if (nameSwap) std::swap(guns[0], guns[2]), std::swap(guns[1], guns[3]);
             for (int p = 0; p < rt.seat_count(); ++p) {   // 4P: players 3 / 4 too
                 float ax, ay;
                 float gx, gy;
@@ -12722,6 +12730,7 @@ int main(int argc, char* argv[])
                 g.trigger = guns[p].trigger || guns[p].reload;
                 guns[p].trigger = guns[p].reload = false;
             }
+            if (nameSwap) std::swap(guns[0], guns[2]), std::swap(guns[1], guns[3]);
             // --autofire (T1): the same gun input as the headless runs (no mouse events), so a window run with
             // screenshots replays the headless play-through
             if (gBot)   // --bot <seed> in the window (polish: checkpoint runs that die)

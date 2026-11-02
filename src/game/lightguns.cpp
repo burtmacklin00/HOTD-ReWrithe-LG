@@ -380,6 +380,10 @@ bool LightGuns::takeMenu(int lw, int lh, bool& moved, float& x, float& y, bool& 
         u = 0.1f + (u - c[0]) * 0.8f / (c[2] - c[0]);
         v = 0.1f + (v - c[1]) * 0.8f / (c[3] - c[1]);
     }
+    // Light Gun Edition: a pull off the screen (the reload habit) clicks nothing in the menus: it would land on the
+    // edge (often Back / Exit in a corner)
+    if (trigger && (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f))
+        trigger = false;
     x = std::clamp(u, 0.0f, 1.0f) * float(lw);
     y = std::clamp(v, 0.0f, 1.0f) * float(lh);
     return moved || trigger || alt;

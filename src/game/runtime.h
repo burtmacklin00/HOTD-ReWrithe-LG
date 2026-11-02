@@ -361,6 +361,8 @@ public:
     bool name_entry_routine(uint32_t routine, uint32_t task);               // group 0xC5470's tasks
     void name_entry_key(int c);                                             // the keyboard: a letter, 8 back, 9 forward, 13 END
     bool name_entry_active() const;
+    // Light Gun Edition: the 4P name entry's round (1 players 1 / 2, 2 players 3 / 4 in their places; 0 none)
+    int rank4Round() const { return rank4Round_; }
     std::deque<int> nameKeys;
     std::string nameKeysTest;                                               // --name-keys (testing)
     bool rankingLowTest = false;                                            // --ranking-low (testing): the top 10 with 0 scores (any game places)
