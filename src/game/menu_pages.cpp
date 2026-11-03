@@ -194,7 +194,7 @@ void menuReset(LaunchConfig& c, int page)
         for (int p = 0; p < 4; ++p) c.gunDev[p].clear(), c.gunName[p].clear();   // (ipolish: Light Guns: Assign)
         break;
     case kCatGameplay:
-        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
+        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
         break;
     case kResetAdvanced:
@@ -514,6 +514,19 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "An empty gun reloads by itself (not in the originals): every player, 3P / 4P too; online the host's"});
         r.push_back({"Edge Reload", [&c]() { return onOff(c.edgeReload); }, [&c, save]() { c.edgeReload = !c.edgeReload; save(); },
                      "As The House of the Dead 2: moving the mouse crosshair onto the screen's edge reloads, no shot needed"});
+        // Light Gun Edition: the fun modes (local games; online games are always played as normal)
+        r.push_back({"Flashlight Mode", [&c]() { return onOff(c.flashlight); }, [&c, save]() { c.flashlight = !c.flashlight; save(); },
+                     "Fun mode: the mansion goes dark and each player's gun lights the screen where it aims"});
+        r.push_back({"Big Heads", [&c]() { return onOff(c.bigHeads); }, [&c, save]() { c.bigHeads = !c.bigHeads; save(); },
+                     "Fun mode: every creature's head drawn nearly twice as big"});
+        r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { c.shotgun = !c.shotgun; save(); },
+                     "Fun mode: each shot hits a much wider area, but the gun holds only 3 shells"});
+        r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { c.freeFire = !c.freeFire; save(); },
+                     "Fun mode: unlimited ammo, no reloading (for young players and parties)"});
+        r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { c.hardcore = !c.hardcore; save(); },
+                     "Fun mode: one life each, no continues, no joining back in; its own high scores"});
+        r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
+                     "Co-op: each player's score, shots, hits and accuracy at the end of a chapter, and the MVP"});
         // skipfix (user 2026-10-27): the hold-to-skip of the cut-scenes the arcade cannot skip (main.cpp)
         // feat29 (user 2026-10-29: "Add Free Play in the settings"): the Cheat screen's Free-Play (THOTD.EXE 0xD5B35C,
         // launcher.ini freeplay=): PC Mode's continues never run out. Arcade games are free play already (no coins)

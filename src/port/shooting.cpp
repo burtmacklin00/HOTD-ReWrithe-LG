@@ -14,6 +14,7 @@ namespace hotd::port {
 template <class P> int Game<P>::ray_sign_test(int player, float x, float y, float z, float radius)
 {
     ShotRay& r = mem.at<ShotRay>(shot_ray_rec(player));
+    radius = radius * lg_hit_scale;   // Light Gun Edition: Shotgun Mode (1 otherwise)
     const float c0 = r.cam_trig[0], c1 = r.cam_trig[1], s0 = r.cam_trig[2], s1 = r.cam_trig[3];
     if constexpr (P::pc) {
         if (mem.at<int32_t>(G::frontend_state) == 5)
@@ -70,6 +71,7 @@ template <class P> void Game<P>::shot_resolve()
         }
         pl.flags &= ~2u;
         if (mem.u32(G::shot_candidate_count) != 0) {
+            if (mem.u32(G::input_source) == 0) ++lg_hits[p & 3];   // Light Gun Edition: the Party Scoreboard's hits
             shot_hit_nearest(p);
             mem.set32(G::shot_last_count, mem.u32(G::shot_candidate_count));
         }

@@ -363,6 +363,13 @@ public:
     bool name_entry_active() const;
     // Light Gun Edition: the 4P name entry's round (1 players 1 / 2, 2 players 3 / 4 in their places; 0 none)
     int rank4Round() const { return rank4Round_; }
+    // Light Gun Edition's fun modes (set by the host for a local game; never online): Free Fire (rounds kept full),
+    // Shotgun Mode's shells a load (0 off; the radius is Game::lg_hit_scale), Hardcore (an out-of-lives player is out
+    // for the game: no continue, no joining back), Big Heads (draws only)
+    struct LgModes { bool freeFire = false, hardcore = false, bigHeads = false; int shotgunShells = 0; } lgModes;
+    bool lgOut_[4] = {false, false, false, false};
+    void lg_modes_frame();
+    void lg_big_heads();
     std::deque<int> nameKeys;
     std::string nameKeysTest;                                               // --name-keys (testing)
     bool rankingLowTest = false;                                            // --ranking-low (testing): the top 10 with 0 scores (any game places)

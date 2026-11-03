@@ -253,6 +253,12 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "resolution_window") { const util::Size s = util::parseSize(v); resWinW = s.w, resWinH = s.h; }
         else if (k == "autoreload") autoReload = n != 0;
         else if (k == "edgereload") edgeReload = n != 0;
+        else if (k == "flashlight") flashlight = n != 0;   // (Light Gun Edition: the fun modes)
+        else if (k == "bigheads") bigHeads = n != 0;
+        else if (k == "shotgun") shotgun = n != 0;
+        else if (k == "partyboard") partyBoard = n != 0;
+        else if (k == "hardcore") hardcore = n != 0;
+        else if (k == "freefire") freeFire = n != 0;
         else if (k == "scoredisplay") scoreDisplay = n != 0;
         else if (k == "attractgore") attractGore = n != 0;
         else if (k == "lgupdatecheck") updateCheck = n != 0;
@@ -390,7 +396,7 @@ void LaunchConfig::save(const std::string& file) const
     std::ofstream& f = c.f;
     f << "arcade=" << toBase(arcade, base) << "\npc=" << toBase(pc, base) << "\nmodels=" << models << "\nsound=" << sound << "\nplayers=" << players << "\np2input=" << p2Input
       << "\ndifficulty=" << difficulty << "\nlives=" << lives << "\nblood=" << blood << "\ncuts=" << (cuts ? 1 : 0) << "\ntitle=" << (title ? 1 : 0) << "\nfbi=" << (fbi ? 1 : 0) << "\npcsplash=" << (pcSplash ? 1 : 0) << "\ngametext=" << gameText << "\nlang=" << language
-      << "\naspect=" << aspect << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
+      << "\naspect=" << aspect << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nflashlight=" << (flashlight ? 1 : 0) << "\nbigheads=" << (bigHeads ? 1 : 0) << "\nshotgun=" << (shotgun ? 1 : 0) << "\npartyboard=" << (partyBoard ? 1 : 0) << "\nhardcore=" << (hardcore ? 1 : 0) << "\nfreefire=" << (freeFire ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
       << "\ndisplaymode=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? (exclusive ? 2 : 1) : 0)
       << "\nexclusive=" << (exclusive ? 1 : 0)
       << "\nresolution_fullscreen=" << util::sizeKey({resFullW, resFullH}) << "\nresolution_window=" << util::sizeKey({resWinW, resWinH})

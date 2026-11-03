@@ -296,6 +296,14 @@ struct LaunchConfig {
     // GitHub #17 (user 2026-11-03 "HOTD 2 style reloading"): a mouse crosshair moved onto the screen's edge reloads,
     // no shot needed (launcher.ini edgereload=)
     bool edgeReload = false;
+    // Light Gun Edition: the fun modes (Options > Gameplay; local games only, never online). launcher.ini flashlight=,
+    // bigheads=, shotgun=, partyboard=, hardcore=, freefire=
+    bool flashlight = false;   // the screen dark, each player's gun a light where it aims (draws only)
+    bool bigHeads = false;     // the creatures' heads drawn larger (draws only)
+    bool shotgun = false;      // a wider blast (the shot test's radius x2.5), 3 shells a load
+    bool partyBoard = true;    // co-op: each player's score, shots, hits and accuracy at a chapter's end, the MVP
+    bool hardcore = false;     // one life, no continues, its own high scores
+    bool freeFire = false;     // unlimited ammo, no reloading
     // setup2: the version that last ran with these settings (launcher.ini lastversion=; another one: What's New once)
     std::string lastVersion;
     bool attractGore = true;     // Gameplay "Attract Gore": the attract demo blows parts off as the 1998 PC (port::gAttractGore)

@@ -792,6 +792,7 @@ void Runtime::frame_one()
     if (scoreDisplay && mem.at<int16_t>(G::game_mode) == 4 && mem.u32(0x51F42C) == 0 && !coop4_on())
         mem.set32(0x51F42C, 7);
     game_mode_frame();
+    lg_modes_frame();   // Light Gun Edition: the fun modes (local games)
     if (mem.at<int16_t>(G::game_mode) == 4)
         score_line_hide();   // relplay: the score line only in play (draws only: its own cells)
     actor_pm_sync();   // pmextra: PC Mode's extra characters drawn as actors (before players 3 / 4's copies)
@@ -809,6 +810,8 @@ void Runtime::frame_one()
     for (uint32_t k = 0; k < 12; ++k)
         camera[k] = mem.f32(slot + 4 * k);
     ragdoll_frame();   // the Ragdoll mod (game/ragdoll.h): the dead bodies' drawn poses (draws only; after the camera: it needs it)
+    if (lgModes.bigHeads)
+        lg_big_heads();   // Light Gun Edition: Big Heads (draws only)
     // actorswap: the cut-scene viewer's Actors (draws only; off outside the viewer)
     if ((actorPreValid_ = actorView)) {
         actorPreDraw_ = drawList;
@@ -833,6 +836,50 @@ void Runtime::frame_one()
         }
     }
     ++frameCount;
+}
+
+} // namespace hotd::game
+
+namespace hotd::game {
+
+// Light Gun Edition: the fun modes' game part, after each frame's logic (in play only)
+void Runtime::lg_modes_frame()
+{
+    if (mem.at<int16_t>(G::game_mode) != 4)
+        return;
+    for (int p = 0; p < seat_count(); ++p) {
+        port::a::Player& pl = mem.at<port::a::Player>(player_rec(p));
+        if (lgModes.freeFire && pl.state == 5) {   // Free Fire: the gun never runs dry
+            pl.rounds = pm_full_rounds(p);
+            pl.empty = 0;
+        }
+        if (lgModes.shotgunShells > 0 && pl.rounds > lgModes.shotgunShells)   // Shotgun Mode: a load is 3 shells
+            pl.rounds = uint8_t(lgModes.shotgunShells);
+        if (lgModes.hardcore && pl.state == 4) {   // Hardcore: out of lives = out of the game (no countdown to wait)
+            lgOut_[p & 3] = true;
+            pl.continue_timer = 0;
+        }
+    }
+}
+
+// Light Gun Edition: Big Heads: every body part of the head class (part roles: class 1) drawn 1.8 times larger about
+// its joint (the neck), it and its shadow; the hit spheres are the game's own (draws only)
+void Runtime::lg_big_heads()
+{
+    constexpr uint32_t kRoles = 0x1184E0;   // (creature.cpp kPartRoles: 0xF8 a type, 8 a role)
+    constexpr float kScale = 1.8f;
+    for (DrawModel& d : drawList) {
+        if (d.part == 0 || d.body == 0 || !mem.mapped(d.part) || !mem.mapped(d.body))
+            continue;
+        const int32_t type = mem.at<int16_t>(d.body + 0xCC);
+        const uint32_t joint = mem.u32(d.part + 0x38);
+        if (type < 0 || type > 0x7F || joint >= 31)
+            continue;
+        if (mem.at<int8_t>(kRoles + uint32_t(type) * 0xF8 + joint * 8 + 3) != 1)
+            continue;
+        for (int k = 0; k < 9; ++k)
+            d.m[k] *= kScale;
+    }
 }
 
 } // namespace hotd::game

@@ -3805,12 +3805,26 @@ int main(int argc, char* argv[])
         if (gSonic.preset)
             SDL_Log("Sonic Mode: %s", game::sonicName(gSonic.preset));
         r.rankingFile = !rankingFileOpt.empty() ? rankingFileOpt : frames < 0 ? cacheDir() + rankingName(gSonic.preset) : std::string();
+        if (!r.rankingFile.empty() && rankingFileOpt.empty() && cfg.hardcore && !gNet && !bossModeOpt)
+            r.rankingFile += "_hardcore";   // Light Gun Edition: Hardcore's own top 10
         r.nameKeysTest = nameKeysOpt;
         r.rankingLowTest = rankingLowOpt;
         r.nameEntryOnClear = nameEntryOpt || (launcher && inputTestFile.empty() && !autoStart && checkpoints.empty());
         r.audio = audioOn ? &audio : nullptr;
         r.settings.difficulty = cfg.difficulty;
         r.settings.lives = cfg.lives;
+        // Light Gun Edition: the fun modes (Options > Gameplay): local games only (online: as normal, on every PC)
+        if (!gNet) {
+            r.lgModes.freeFire = cfg.freeFire;
+            r.lgModes.hardcore = cfg.hardcore && !bossModeOpt;
+            r.lgModes.bigHeads = cfg.bigHeads;
+            r.lgModes.shotgunShells = cfg.shotgun ? 3 : 0;
+            r.lg_hit_scale = cfg.shotgun ? 2.5f : 1.0f;
+            if (r.lgModes.hardcore) {
+                r.settings.lives = 0;          // (the lives table's first row: 1 life)
+                r.bossNoContinue = true;       // (everyone out: game over at once, no team countdown)
+            }
+        }
         // custom: the game logic runs with red (the colour is the view's). Yellow: the PC's blood byte is 4 (table 0x5CE884's
         // fifth file), i.e. not red, so its "not red" model choices (0x5E7 / 0x5E9 / 0x5E5, the props' +1) apply; the
         // arcade logic (four GGSET colours) gets green for that with PC models (GGSET's rows recolour only the arcade
@@ -13517,11 +13531,86 @@ int main(int argc, char* argv[])
         } else {
         view->opt.clearColor = !hud.drawUnder(rt, ww, wh, view->opt.clear);
         view->draw(rt, ww, wh, blendFrom, alpha);   // rate: the 3D picture blended; the HUD / sights below are not
+        if (cfg.flashlight && !gNet && !gScene.active()) {
+            // Light Gun Edition: Flashlight Mode: the picture dark but for a soft light round each playing player's aim
+            // (in their colour's tint); cut-scenes only dimmed, so the story stays visible
+            static Overlay dark;
+            static bool darkOk = false, darkTried = false;
+            if (!darkTried) {
+                darkTried = true;
+                std::string e;
+                darkOk = dark.init(e);
+            }
+            if (darkOk && ww > 0 && wh > 0 && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active) {
+                constexpr int DW = 192, DH = 108;
+                static std::vector<uint8_t> px(size_t(DW) * DH * 4);
+                const bool inPlay = rt.mem.at<int16_t>(game::A::G::game_mode) == 4;
+                const bool cut = rt.mem.at<uint8_t>(game::A::G::scene_state) != 2;   // (2: in play; else a cut-scene)
+                const float base = cut ? 0.55f : 0.94f;
+                static const float kTint[4][3] = {{1.0f, 0.75f, 0.65f}, {0.70f, 0.80f, 1.0f}, {0.70f, 1.0f, 0.70f}, {1.0f, 0.95f, 0.65f}};
+                struct L { float x, y; int p; };
+                std::vector<L> lights;
+                for (int p = 0; p < rt.seat_count() && inPlay; ++p)
+                    if (rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5)
+                        lights.push_back({aim[p][0] / float(ww) * DW, aim[p][1] / float(wh) * DH, p});
+                const float rad = DH * 0.20f, soft = DH * 0.09f;
+                for (int y = 0; y < DH; ++y)
+                    for (int x = 0; x < DW; ++x) {
+                        float a = base, tr = 0, tg = 0, tb = 0, lit = 0;
+                        for (const L& l : lights) {
+                            const float d = std::sqrt((x + 0.5f - l.x) * (x + 0.5f - l.x) + (y + 0.5f - l.y) * (y + 0.5f - l.y));
+                            const float k = std::clamp((rad + soft - d) / soft, 0.0f, 1.0f);   // 1 inside, 0 outside
+                            a = std::min(a, base * (1.0f - k));
+                            if (k > lit) lit = k, tr = kTint[l.p][0], tg = kTint[l.p][1], tb = kTint[l.p][2];
+                        }
+                        uint8_t* q = &px[size_t(y * DW + x) * 4];
+                        // the dark: black; the edge of a light: a faint tint of the player's colour
+                        const float edge = lit > 0 && lit < 1 ? 0.25f : 0.0f;
+                        q[0] = uint8_t(255 * tr * edge), q[1] = uint8_t(255 * tg * edge), q[2] = uint8_t(255 * tb * edge);
+                        q[3] = uint8_t(std::clamp(a + edge * 0.5f * (1.0f - a), 0.0f, 1.0f) * 255);
+                    }
+                dark.setImage(px, DW, DH, true);
+                dark.drawIn(ww, wh, 0, 0, float(ww), float(wh));
+            }
+        }
         pillarbox(ww, wh);
         hud.pauseSelection = paused ? pause.selection() : -1;
         hud.deferSights = crtCrisp;
         hud.draw(rt, ww, wh, aimSrc, (debugLines && !trailerNow) || (gScene.active() && !sceneClean), gScene.active() && !sceneClean ? gScene.lines(rt) : hudLines(rt, paused));
         hud.deferSights = false;
+        if (cfg.partyBoard && !gNet && rt.clear.active && !gScene.active()) {
+            // Light Gun Edition: the Party Scoreboard: on a chapter's results, with two or more players in the game so
+            // far: each player's score, shots, hits and accuracy (this game), and the MVP (the best score)
+            static Overlay board;
+            static bool boardOk = false, boardTried = false;
+            if (!boardTried) {
+                boardTried = true;
+                std::string e;
+                if ((boardOk = board.init(e))) board.setStyle(215, 255, 235, 200), board.translate = false;
+            }
+            struct Row { int p; uint32_t score, shots, hits; };
+            std::vector<Row> rows;
+            for (int p = 0; p < rt.seat_count(); ++p) {
+                const uint32_t shots = rt.lg_shots[p], hits = std::min(rt.lg_hits[p], shots);
+                if (shots == 0 || cfg.seatBot[p] != 0) continue;
+                rows.push_back({p, rt.mem.u32(rt.player_rec(p) + 8), shots, hits});
+            }
+            if (boardOk && rows.size() >= 2) {
+                int mvp = 0;
+                for (size_t i = 1; i < rows.size(); ++i)
+                    if (rows[i].score > rows[size_t(mvp)].score) mvp = int(i);
+                std::vector<std::string> lines = {"PARTY SCOREBOARD", "", "PLAYER     SCORE   SHOTS    HITS  ACCURACY"};
+                for (size_t i = 0; i < rows.size(); ++i) {
+                    const Row& r = rows[i];
+                    char b[96];
+                    std::snprintf(b, sizeof b, "%dP%s %9u %7u %7u %8u%%", r.p + 1, int(i) == mvp ? " MVP" : "    ", r.score, r.shots,
+                                  r.hits, r.shots ? r.hits * 100u / r.shots : 0u);
+                    lines.push_back(b);
+                }
+                board.setText(lines, wh >= 1000 ? 3 : 2);
+                board.drawAnchored(ww, wh, ww * 0.5f, wh * 0.97f, 0.5f, 1.0f);
+            }
+        }
         }
         if (crtOn) {   // crt: through the filter to the window; the crisp sights and the messages below over it
             if (shot && crtShot)

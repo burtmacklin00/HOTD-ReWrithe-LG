@@ -37,6 +37,10 @@ public:
     // where player_shoot sets the Player's "fired" flag (the shot test clears that flag again in the same frame, so the
     // outputs read this count); never read by the logic
     uint32_t lg_shots[4] = {0, 0, 0, 0};
+    // Light Gun Edition's fun modes (game logic: local games only; 1 / 0 in the proofs and online): Shotgun Mode's shot
+    // test radius factor, and each seat's shots that hit something (the Party Scoreboard's, real input only)
+    float lg_hit_scale = 1.0f;
+    uint32_t lg_hits[4] = {0, 0, 0, 0};
     // Options "Game Text: Japanese" (ours): the region's text-only effects (the subtitles / voice-message sprites,
     // chapter cards, RELOAD hint, the attract tutorial's text) as the JAPAN region 0 draws them, while the logic keeps
     // reading the real region 0x51F791 (attract order, credits, the opening title's timing). Off in the proofs.

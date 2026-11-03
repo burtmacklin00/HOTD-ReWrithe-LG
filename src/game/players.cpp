@@ -76,6 +76,8 @@ void Runtime::coop4_enable()
 // the start button (keys 1 / 2, a mouse's middle button): seen by player_start_check on the player's next frame
 void Runtime::player_join(int p)
 {
+    if (lgModes.hardcore && lgOut_[p & 3])   // Light Gun Edition: Hardcore: out of lives is out for the game
+        return;
     startRequest[p] = true;
 }
 

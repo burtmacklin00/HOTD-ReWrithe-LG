@@ -30,6 +30,10 @@ What this edition adds:
   first; they take effect at its next start). The Display ones put the lines of `4x3\launcher.ini` / `16x9\launcher.ini`
   into `settings\launcher.ini` (add lines there to change them only in that mode). New in the game: Options > Video >
   **Show Crosshairs** (launcher.ini `crosshairs=`).
+- **Fun modes** (Options > Gameplay; local games, online games always play as normal): **Flashlight Mode** (the
+  mansion dark, each player's gun lights where it aims), **Big Heads**, **Shotgun Mode** (a much wider blast, 3 shells a
+  load), **Free Fire** (unlimited ammo), **Hardcore** (one life, no continues, its own top 10) and the **Party
+  Scoreboard** (co-op: each player's score, shots, hits and accuracy at a chapter's end, and the MVP; on by default).
 - **Link Play in one click** (online and same-network co-op): `Launch HOTD ReWrithe - Link Play Host.ahk` starts the
   game straight into Online Co-op > Start Hosting with the Host page's last settings, its join code copied to the
   clipboard; the game starts once a friend is in (more can join the running game with start). `Launch HOTD ReWrithe -
