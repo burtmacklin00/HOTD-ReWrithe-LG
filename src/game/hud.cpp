@@ -1262,7 +1262,14 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
                     return true;
             return false;
         };
-        if (pl.state == 4) {
+        // Light Gun Edition: everyone out (the arcade's own big CONTINUE? in the middle counts down for the whole
+        // team, the seats' own countdowns wait): no second, frozen CONTINUE? at players 3 / 4's corners
+        bool anyPlaying = false;
+        for (int q = 0; q < rt.seat_count(); ++q)
+            anyPlaying = anyPlaying || mem.at<Player>(rt.player_rec(q)).state == 5;
+        if (pl.state == 4 && !anyPlaying) {
+            // (nothing at the corner: the team's countdown is the big one)
+        } else if (pl.state == 4) {
             const int d = std::clamp(pl.continue_timer / 4096, 0, 9);
             const int x = left ? 2 : 0x24;
             if (!rt.pm_on() || rt.pm_can_continue())   // PC Mode: CONTINUE? only with a credit (0x50BC24), the digit always
