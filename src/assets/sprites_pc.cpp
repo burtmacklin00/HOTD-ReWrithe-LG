@@ -69,6 +69,7 @@ std::shared_ptr<const RawPages> rawPages(const std::string& path, const std::set
     if (!f.read(hdr, 12) || std::memcmp(hdr, "PIFF", 4) != 0 || std::memcmp(hdr + 8, "VVTP", 4) != 0)
         return r;   // (not kept: tried again next time)
     r->ok = true;
+    const int shift = pcVmcPageShift(path);   // pchotfix: the Japanese release's page numbers (pc_loader.h)
     std::vector<uint8_t> body;
     for (;;) {
         char ch[8];
@@ -76,6 +77,8 @@ std::shared_ptr<const RawPages> rawPages(const std::string& path, const std::set
             break;
         uint32_t size;
         std::memcpy(&size, ch + 4, 4);
+        if (size > (1u << 24))
+            break;   // pchotfix: a damaged file: the pages read so far are kept
         if (std::memcmp(ch, "BODY", 4) != 0 || size < 64) {
             f.seekg(size, std::ios::cur);
             continue;
@@ -87,12 +90,16 @@ std::shared_ptr<const RawPages> rawPages(const std::string& path, const std::set
         std::memcpy(&number, ph + 4, 4);
         std::memcpy(&w, ph + 8, 2);
         std::memcpy(&h, ph + 10, 2);
-        if (!pages.count(int(number)) || w != 256 || h != 256) {
+        if (number > 0 && number < 512)
+            number += uint32_t(shift);
+        // pchotfix: a page whose chunk is too small for its 256 x 256 texels (a cut file) is not taken
+        if (!pages.count(int(number)) || w != 256 || h != 256 || size < 64 + 256 * 256 * 2) {
             f.seekg(size - 64, std::ios::cur);
             continue;
         }
         body.resize(size - 64);
-        f.read(reinterpret_cast<char*>(body.data()), std::streamsize(body.size()));
+        if (!f.read(reinterpret_cast<char*>(body.data()), std::streamsize(body.size())))
+            break;   // the file ends inside the page
         r->list.emplace_back(int(number), body);
     }
     last = r;
@@ -108,29 +115,56 @@ bool PcSprites::load(const std::string& installDir, std::string& err, int stage,
         err = "SPRITE/SPR.RBH missing or not an RBH file";
         return false;
     }
-    const size_t base = 0x28, bodySize = rd<uint32_t>(rbh, 0x24);
+    // pchotfix (players 2026-11-02): the body as the file says, kept inside the file (a cut / damaged file)
+    const size_t base = 0x28, bodySize = std::min<size_t>(rd<uint32_t>(rbh, 0x24), rbh.size() - base);
     const uint32_t first = rd<uint32_t>(rbh, base);
-    const size_t n = first / 4;
-    sprites_.assign(n, Sprite{});
+    const size_t n = std::min<size_t>(first / 4, bodySize / 4);
+    // pchotfix: the Japanese PC release's SPR.RBH (1479 sprites, 71,868 bytes; also in repacks of the PC game) lacks
+    // the US / European release's first 161 sprites (a picture, a logo and the grey 24 font, 2..160, on its VMC pages
+    // 1-7): its sprite i is their i + 161 and its pages below 512 are 7 lower (pcVmcPageShift). Read as the US file's
+    // numbers, so the menu, HUD and fonts find the same sprites; the missing grey font is drawn from the white one.
+    // Checked against the Japanese disc: 1453 of its 1479 sprites equal the US file's i + 161 (the others are equal
+    // duplicates elsewhere)
+    constexpr size_t kUsSprites = 1640, kJaSprites = 1479;
+    const size_t idShift = n == kJaSprites ? kUsSprites - kJaSprites : 0;
+    const int pageShift = idShift ? 7 : 0;
+    if (n != kUsSprites && n != kJaSprites)
+        std::fprintf(stderr, "PC sprites: SPRITE/SPR.RBH has %zu sprites (the 1998 release: %zu): another version\n", n, kUsSprites);
+    sprites_.assign(n + idShift, Sprite{});
     std::set<int> pages;
+    size_t bad = 0;
     for (size_t i = 0; i < n; ++i) {
         const size_t o = base + rd<uint32_t>(rbh, base + 4 * i);
-        if (o + 16 > base + bodySize)
+        if (o < base || o + 16 > base + bodySize) {
+            ++bad;
             continue;
-        Sprite& s = sprites_[i];
-        const uint32_t count = rd<uint32_t>(rbh, o);
+        }
+        Sprite& s = sprites_[i + idShift];
+        // (the first 64 pieces, as before; pchotfix: only those inside the file)
+        const uint32_t count = std::min<uint32_t>({rd<uint32_t>(rbh, o), 64u, uint32_t((base + bodySize - o - 16) / 16)});
         for (int k = 0; k < 4; ++k)
             s.box[k] = rd<int16_t>(rbh, o + 4 + 2 * k);
         s.w = rd<int16_t>(rbh, o + 12);
         s.h = rd<int16_t>(rbh, o + 14);
-        for (uint32_t k = 0; k < count && k < 64; ++k) {
+        if (s.w < 0 || s.h < 0 || s.w > 8192 || s.h > 8192) {
+            s = Sprite{};   // pchotfix: no such picture (image() would make it): a damaged file
+            ++bad;
+            continue;
+        }
+        for (uint32_t k = 0; k < count; ++k) {
             const size_t q = o + 16 + 16 * k;
             Piece p{rd<int16_t>(rbh, q), rd<int16_t>(rbh, q + 2), rd<int16_t>(rbh, q + 4), rd<int16_t>(rbh, q + 6),
                     rd<uint8_t>(rbh, q + 8), rd<uint8_t>(rbh, q + 9), rd<int16_t>(rbh, q + 12)};
+            if (p.page > 0 && p.page < 512)
+                p.page = int16_t(p.page + pageShift);
             s.pieces.push_back(p);
             pages.insert(p.page);
         }
     }
+    if (bad)
+        std::fprintf(stderr, "PC sprites: SPRITE/SPR.RBH: %zu of %zu sprites unreadable (a damaged file?)\n", bad, n);
+    if (idShift)
+        std::fprintf(stderr, "PC sprites: the Japanese PC release's SPR.RBH (%zu sprites): read as the US release's numbers\n", n);
     // the pages, from BIGGER.VMC (docs/formats.md §3)
     const std::shared_ptr<const RawPages> raw = rawPages(pcPath(installDir, "ART/STAGE1/CREATURE/BIGGER.VMC"), pages);
     if (!raw->ok) {
@@ -160,6 +194,7 @@ bool PcSprites::load(const std::string& installDir, std::string& err, int stage,
         if (btbl.size() != 65536 || bpal.size() < 1024) btbl.clear();
     }
     brownPages_.clear();
+    pages_.clear();   // pchotfix: only this load's pages (drawable)
     brown_ = false;
     // perf (2026-10-21): the pages converted on several threads (each page on its own; a page number read twice takes
     // the later one's texels, as when the later one overwrote the earlier)
@@ -212,6 +247,20 @@ bool PcSprites::load(const std::string& installDir, std::string& err, int stage,
     run();
     for (std::thread& t : pool)
         t.join();
+    // pchotfix: the grey 24 font (2..160, the US release's VMC pages 1-7) when the files have no such pages (the
+    // Japanese release, or its BIGGER.VMC with the US SPR.RBH): the white 24 font's same glyph (id + 0x19B), drawn
+    // darker. The cursor and the other menu pictures are past these and come from the files as they are.
+    {
+        size_t aliased = 0;
+        for (int id = 2; id <= 160 && size_t(id + 0x19B) < sprites_.size(); ++id)
+            if (!drawable(id) && drawable(id + 0x19B)) {
+                sprites_[size_t(id)] = sprites_[size_t(id + 0x19B)];
+                sprites_[size_t(id)].shade = 150;
+                ++aliased;
+            }
+        if (aliased)
+            std::fprintf(stderr, "PC sprites: the grey font drawn from the white one (%zu glyphs; not in these PC files)\n", aliased);
+    }
     // display2: the blood colour. The PC game draws its sprites from TEXTURE.VMC too, i.e. the B_<colour>.VMC set
     // (pc_loader.cpp). Of the sprite pages only 219 / 220 differ between the sets (the GAME OVER screen 0x4E3, red ->
     // the blood colour); the hit marks 0x47E..0x483 (pages 103-114) are the same red in every set, and the PC's
@@ -292,9 +341,10 @@ void PcSprites::draw(std::vector<uint8_t>& canvas, int id, int x, int y, int cx0
     if (id <= 0 || size_t(id) >= sprites_.size())
         return;
     const std::map<int, std::vector<uint8_t>>& pages = brown_ ? brownPages_ : pages_;
-    for (const Piece& p : sprites_[size_t(id)].pieces) {
+    const Sprite& sp = sprites_[size_t(id)];
+    for (const Piece& p : sp.pieces) {
         const auto it = pages.find(p.page);
-        if (it == pages.end())
+        if (it == pages.end() || it->second.size() < 256 * 256 * 4)
             continue;
         const std::vector<uint8_t>& px = it->second;
         for (int j = 0; j < p.y1 - p.y0; ++j) {
@@ -306,11 +356,28 @@ void PcSprites::draw(std::vector<uint8_t>& canvas, int id, int x, int y, int cx0
                 if (sx < cx0 || sx >= cx1 || u > 255)
                     continue;
                 const uint8_t* s = &px[size_t(v * 256 + u) * 4];
-                if (s[3])
-                    std::memcpy(&canvas[(size_t(sy) * size_t(canvasW) + size_t(sx)) * 4], s, 4);
+                if (!s[3])
+                    continue;
+                uint8_t* d = &canvas[(size_t(sy) * size_t(canvasW) + size_t(sx)) * 4];
+                std::memcpy(d, s, 4);
+                if (sp.shade)
+                    for (int k = 0; k < 3; ++k)
+                        d[k] = uint8_t(s[k] * sp.shade / 255);
             }
         }
     }
+}
+
+bool PcSprites::drawable(int id) const
+{
+    if (custom_.count(id))
+        return true;
+    if (id <= 0 || size_t(id) >= sprites_.size() || sprites_[size_t(id)].pieces.empty())
+        return false;
+    for (const Piece& p : sprites_[size_t(id)].pieces)
+        if (!pages_.count(p.page))
+            return false;
+    return true;
 }
 
 std::vector<uint8_t> PcSprites::image(int id) const
@@ -322,9 +389,10 @@ std::vector<uint8_t> PcSprites::image(int id) const
         return {};
     std::vector<uint8_t> out(size_t(w) * h * 4, 0);
     const std::map<int, std::vector<uint8_t>>& pages = brown_ ? brownPages_ : pages_;
-    for (const Piece& p : sprites_[size_t(id)].pieces) {
+    const Sprite& sp = sprites_[size_t(id)];
+    for (const Piece& p : sp.pieces) {
         const auto it = pages.find(p.page);
-        if (it == pages.end())
+        if (it == pages.end() || it->second.size() < 256 * 256 * 4)
             continue;
         for (int j = 0; j < p.y1 - p.y0; ++j) {
             const int y = p.y0 + j, v = p.v + j;
@@ -335,8 +403,13 @@ std::vector<uint8_t> PcSprites::image(int id) const
                 if (x < 0 || x >= w || u > 255)
                     continue;
                 const uint8_t* s = &it->second[size_t(v * 256 + u) * 4];
-                if (s[3])
-                    std::memcpy(&out[(size_t(y) * w + size_t(x)) * 4], s, 4);
+                if (!s[3])
+                    continue;
+                uint8_t* d = &out[(size_t(y) * w + size_t(x)) * 4];
+                std::memcpy(d, s, 4);
+                if (sp.shade)
+                    for (int k = 0; k < 3; ++k)
+                        d[k] = uint8_t(s[k] * sp.shade / 255);
             }
         }
     }

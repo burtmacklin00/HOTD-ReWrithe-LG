@@ -222,6 +222,81 @@ ShortcutResult createShortcut(const std::string& folder, bool startMenu, const s
 
 std::string selfExePath() { return narrow(selfExe().wstring()); }
 
+ShortcutResult createShortcutTo(const std::string& linkFolder, const std::string& name, const std::string& target,
+                                const std::string& iconFile, std::string& made, std::string& msg) {
+    const fs::path dir(wide(linkFolder)), exe(wide(target));
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    ShortcutResult result = ShortcutResult::Failed;
+    msg = "could not create the shortcut in " + linkFolder;
+    IShellLinkW* link = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLinkW, reinterpret_cast<void**>(&link)))) {
+        const fs::path icon = iconFile.empty() ? exe : fs::path(wide(iconFile));
+        link->SetPath(exe.c_str());
+        link->SetWorkingDirectory(exe.parent_path().c_str());
+        link->SetDescription(L"The House of the Dead: ReWrithe");
+        link->SetIconLocation(icon.c_str(), 0);
+        IPersistFile* file = nullptr;
+        if (SUCCEEDED(link->QueryInterface(IID_IPersistFile, reinterpret_cast<void**>(&file)))) {
+            const fs::path lnk = dir / (wide(name) + L".lnk");
+            if (SUCCEEDED(file->Save(lnk.c_str(), TRUE))) {
+                result = ShortcutResult::Created;
+                made = narrow(lnk.wstring());
+                msg = "Shortcut created: " + made;
+            }
+            file->Release();
+        }
+        link->Release();
+    }
+    if (SUCCEEDED(co)) CoUninitialize();
+    return result;
+}
+
+std::string desktopFolder() { return narrow(knownFolder(FOLDERID_Desktop).wstring()); }
+std::string startMenuFolder() { return narrow(knownFolder(FOLDERID_Programs).wstring()); }
+
+bool launch(const std::string& exe, const std::string& args, const std::string& workDir) {
+    std::wstring cmd = L"\"" + wide(exe) + L"\"" + (args.empty() ? std::wstring() : L" " + wide(args));
+    STARTUPINFOW si{};
+    si.cb = sizeof si;
+    PROCESS_INFORMATION pi{};
+    const std::wstring wd = wide(workDir);
+    if (!CreateProcessW(wide(exe).c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, wd.empty() ? nullptr : wd.c_str(),
+                        &si, &pi))
+        return false;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return true;
+}
+
+int runHidden(const std::string& exe, const std::string& args, int seconds) {
+    std::wstring cmd = L"\"" + wide(exe) + L"\"" + (args.empty() ? std::wstring() : L" " + wide(args));
+    STARTUPINFOW si{};
+    si.cb = sizeof si;
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(wide(exe).c_str(), cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+        return -1;
+    CloseHandle(pi.hThread);
+    DWORD code = DWORD(-1);
+    if (WaitForSingleObject(pi.hProcess, DWORD(seconds) * 1000) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+    else TerminateProcess(pi.hProcess, 1);
+    CloseHandle(pi.hProcess);
+    return int(code);
+}
+
+#endif
+
+#ifndef _WIN32
+ShortcutResult createShortcutTo(const std::string&, const std::string&, const std::string&, const std::string&, std::string&,
+                                std::string& msg) {
+    msg = "Windows only";
+    return ShortcutResult::Failed;
+}
+std::string desktopFolder() { return {}; }
+std::string startMenuFolder() { return {}; }
+bool launch(const std::string&, const std::string&, const std::string&) { return false; }
+int runHidden(const std::string& exe, const std::string& args, int) { return std::system(("\"" + exe + "\" " + args).c_str()); }
 #endif
 
 void dialogFrame(void* hwnd, bool on)

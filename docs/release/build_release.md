@@ -114,3 +114,23 @@ window, i.e. the looping music track is decoded and mixed all the time; no "buil
     be in the SDK image; if not, add an `apt-get install` step or use `ubuntu-22.04` (then glibc 2.35: no SteamOS 3.4-).
   - stb is fetched at `master` (not pinned): pin a commit for reproducible builds.
   - The Windows job's version check compares the tag with `hotd --version`: a tag that differs from CMakeLists.txt fails.
+
+## v1.1.0: setup, auto-updater, changelog (setup2, 2026-11-02)
+
+- **CHANGELOG.md** (Keep a Changelog) at the repository root; the packages carry it as `CHANGELOG.txt`
+  (make_portable_hotd.ps1, make_linux_package.sh, release.yml's macOS job). The game shows the running version's
+  section as What's New (once after a new version starts: launcher.ini `lastversion=`; Options > System > What's New).
+  Every release: add its section at the top (`## [x.y.z] - date`) before tagging.
+- **The release on GitHub must have** `hotd-rewrithe-v<version>-win64.zip` and `SHA256SUMS.txt` as assets (the CI
+  uploads both): the auto-updater (src/util/update_check.h) downloads the zip, checks it against SHA256SUMS.txt and
+  refuses a mismatch. The release's description (its "body") is the changelog the Update page shows: paste the
+  version's CHANGELOG section (or docs/release/notes_vX.md) there.
+- The updater unpacks with bin\hotd_launch.exe (copied to settings\update\hotd_update.exe, so bin\ can be replaced);
+  it keeps settings\, screenshots\ and data\arcade / pc / music / steam, and writes nothing outside the game's folder.
+- Test without the internet: `HOTD_UPDATE_URL=<a local release.json>` (asset URLs may be local paths),
+  `HOTD_UPDATE_AUTO=1` (presses Update, hidden window), `HOTD_UPDATE_RESTART_ARGS="--frames 200 --mute"`.
+- The setup's install: `hotd.exe --setup-test <folder> --arcade <zip> --pc <folder>` (headless; with
+  `HOTD_SETUP_SANDBOX=<folder>` the shortcuts and the Apps & features entry go to a test place);
+  `hotd.exe --uninstall --yes --remove-settings` removes it again. Pictures of every page:
+  `HOTD_SETUP_SHOTS=<folder>` (+ HOTD_SHOT_ARCADE / HOTD_SHOT_PC / HOTD_SHOT_PC_NOTE / HOTD_SHOT_PC_BAD /
+  HOTD_SHOT_PC_SATURN), run from a package's bin\hotd.exe.

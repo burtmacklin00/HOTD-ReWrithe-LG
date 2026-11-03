@@ -752,8 +752,18 @@ void Hud::loadPcSprites()
 {
     pcTried_ = true;
     std::string err;
-    if (pcDir_.empty() || !pcSprites_.load(pcDir_, err, 1, blood_))
+    if (pcDir_.empty() || !pcSprites_.load(pcDir_, err, 1, blood_)) {
         label_.setText({"PC HUD sprites: " + (pcDir_.empty() ? std::string("no PC folder") : err) + " (placeholder)"}, 1);
+        return;
+    }
+    // pchotfix: a damaged / unknown SPR.RBH or BIGGER.VMC: the sights (0x45E / 0x45F) and the 1P mark not on pages that
+    // were read: the HUD as without PC sprites (its own drawing), not empty or garbage
+    for (const int id : {0x45E, 0x45F})
+        if (!pcSprites_.drawable(id)) {
+            std::fprintf(stderr, "PC HUD sprites: sprite 0x%X cannot be drawn from these PC files: the HUD's own drawing\n", unsigned(id));
+            pcSprites_ = assets::PcSprites{};
+            return;
+        }
 }
 
 // The sights (user 2026-10-16: the originals' crosshairs, not the shot spark 0x660). The PC draws sprites 0x45E (1P,

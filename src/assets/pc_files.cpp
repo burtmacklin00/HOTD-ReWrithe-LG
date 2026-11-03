@@ -213,7 +213,8 @@ std::string unsupportedArchive(const std::string& path)
 {
     for (const char* ext : {".rar", ".7z"})
         if (endsWithNoCase(path, ext))
-            return "'" + path + "' is a " + std::string(ext + 1) + " archive: not supported. Convert it to a .zip (or unpack it) and choose that.";
+            return std::filesystem::path(path).filename().string() + " is a " + std::string(ext + 1) +
+                   " archive that could not be opened: unpack it (or repack it as a .zip) and choose that.";
     return "";
 }
 
@@ -251,7 +252,7 @@ bool readFile(const std::string& path, std::vector<uint8_t>& out, std::string* e
         }
         return true;
     }
-    FILE* f = std::fopen(onDisk(path).c_str(), "rb");
+    FILE* f = hotd::fopenLong(onDisk(path));
     if (!f) {
         if (err) *err = "cannot open " + path;
         return false;
@@ -350,7 +351,7 @@ std::unique_ptr<std::istream> openStream(const std::string& path)
 {
     std::string zip, inner;
     if (!split(path, zip, inner)) {
-        auto f = std::make_unique<std::ifstream>(fs::path(onDisk(path)), std::ios::binary);
+        auto f = std::make_unique<std::ifstream>(hotd::longPath(onDisk(path)), std::ios::binary);
         if (!*f)
             return nullptr;
         return f;
@@ -363,7 +364,7 @@ std::unique_ptr<std::istream> openStream(const std::string& path)
     if (e->method == 0 && e->compSize == e->size) {
         uint64_t base = 0;
         FILE* f = nullptr;
-        if (!z->file.dataOffset(*e, base, err) || !(f = std::fopen(zip.c_str(), "rb")))
+        if (!z->file.dataOffset(*e, base, err) || !(f = hotd::fopenLong(zip)))
             return nullptr;
         return std::make_unique<OwnedStream>(std::make_unique<SegmentBuf>(f, base, e->size));
     }

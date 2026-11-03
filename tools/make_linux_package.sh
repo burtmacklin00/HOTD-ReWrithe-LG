@@ -136,6 +136,7 @@ done
 cp "$repo/LICENSE" "$out/LICENSE.txt"
 cp "$repo/NOTICE.md" "$out/NOTICE.txt"
 cp "$repo/docs/release/CREDITS.txt" "$out/CREDITS.txt"
+cp "$repo/CHANGELOG.md" "$out/CHANGELOG.txt"   # setup2: What's New reads it
 cp "$repo/docs/online_howto.md" "$out/ONLINE HOWTO.txt"
 
 # 4. Checks: no game data, the bundled SDL is the one the exe loads, the newest glibc it needs

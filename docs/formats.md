@@ -156,6 +156,15 @@ how many).
 - `BIGGER.VMC`: 421 pages, all 256×256. Export then import gives a byte-identical file (tested).
 - `B_<color>.VMC`: `PACK` chunks, compression not cracked yet.
 
+### Release versions (2026-11-02)
+The Japanese PC release has an older BIGGER.VMC (54,293,628 bytes, 415 chunks) and SPRITE\SPR.RBH (1479 sprites,
+71,868 bytes); its B_<colour>.VMC sets are smaller too. Its pages 1..330 are the US / European release's pages 8..337,
+pixel for pixel; the world pages 512..595 are the same. The US / European files added pages 1-7 and sprites 0..160 at
+the front (a 640 x 480 picture, a 147 x 54 sprite and the grey 24-pixel font, 2..160); the Japanese sprite i is their
+i + 161 (1453 of 1479 records equal). The CREAT / WORLD RBH files are the same in both, so the ReWrithe loaders read the
+Japanese files with the US numbering (pc_loader.h pcVmcPageShift, sprites_pc.cpp). The European disc's BIGGER.VMC
+differs from the US one in 5 single bits (texels); the French repack and the US disc match the manifest.
+
 ### How the game uses the files
 
 - `BIGGER.VMC` (55 MB) is the creature texture source. `TEXTURE.VMC` is a cache of the same size with the blood color baked in.

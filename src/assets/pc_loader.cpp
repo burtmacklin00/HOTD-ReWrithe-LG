@@ -10,6 +10,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <mutex>
 #include <set>
 
 namespace hotd {
@@ -122,6 +124,7 @@ bool readVmcPages(const std::string& path, const std::vector<uint16_t>& pages, s
         for (size_t i = 0; i < p.size(); i += 4) { p[i] = 255; p[i + 2] = 255; p[i + 3] = 255; }
     std::vector<uint8_t> body, packedBody;
     std::vector<bool> seen(pages.size(), false);
+    const int shift = pcVmcPageShift(path);   // pchotfix: the Japanese release's numbering
     for (;;) {
         char ch[8];
         f.read(ch, 8);
@@ -129,6 +132,8 @@ bool readVmcPages(const std::string& path, const std::vector<uint16_t>& pages, s
         uint32_t size;
         std::memcpy(&size, ch + 4, 4);
         const bool packed = std::memcmp(ch, "PACK", 4) == 0;
+        if (size > (1u << 24))
+            break;   // pchotfix: no chunk is that big: a damaged file ends here (the pages read so far are kept)
         if ((std::memcmp(ch, "BODY", 4) != 0 && !packed) || size < 64) { f.seekg(size, std::ios::cur); continue; }
         uint8_t ph[64];
         const std::streampos chunkStart = f.tellg();
@@ -144,10 +149,16 @@ bool readVmcPages(const std::string& path, const std::vector<uint16_t>& pages, s
         std::memcpy(&number, ph + 4, 4);
         std::memcpy(&w, ph + 8, 2);
         std::memcpy(&h, ph + 10, 2);
+        if (number > 0 && number < 512)
+            number += uint32_t(shift);
         int slot = -1;
         for (size_t i = 0; i < pages.size(); ++i)
             if (pages[i] == number) slot = int(i);
-        if (slot < 0 || w != kPage || h != kPage) { f.seekg(chunkStart + std::streamoff(size)); continue; }
+        // pchotfix: a chunk too small for its page (a damaged / cut file) is passed over, not read past its end
+        if (slot < 0 || w != kPage || h != kPage || (!packed && size < 64 + uint32_t(kPage) * kPage * 2)) {
+            f.seekg(chunkStart + std::streamoff(size));
+            continue;
+        }
         if (packed) {
             f.seekg(chunkStart);
             if (!unpackVmcChunk(f, size, packedBody, 1 << 20) || packedBody.size() < 64 + size_t(kPage) * kPage * 2) {
@@ -203,6 +214,64 @@ bool readVmcPages(const std::string& path, const std::vector<uint16_t>& pages, s
 }
 
 } // namespace
+
+int pcVmcPageShift(const std::string& path)
+{
+    static std::mutex lock;
+    static std::map<std::string, int> known;
+    const std::string key = path + "|" + std::to_string(pcfs::size(path));
+    {
+        std::lock_guard<std::mutex> g(lock);
+        if (const auto it = known.find(key); it != known.end())
+            return it->second;
+    }
+    int shift = 0;
+    if (const std::unique_ptr<std::istream> stream = pcfs::openStream(path)) {
+        std::istream& f = *stream;
+        char hdr[12];
+        if (f.read(hdr, 12) && std::memcmp(hdr, "PIFF", 4) == 0 && std::memcmp(hdr + 8, "VVTP", 4) == 0) {
+            std::set<uint32_t> low;   // the page numbers below 512
+            std::vector<uint8_t> buf;
+            for (;;) {
+                char ch[8];
+                if (!f.read(ch, 8))
+                    break;
+                uint32_t size;
+                std::memcpy(&size, ch + 4, 4);
+                if (size > (1u << 24))
+                    break;
+                const std::streampos start = f.tellg();
+                const bool packed = std::memcmp(ch, "PACK", 4) == 0;
+                if ((packed || std::memcmp(ch, "BODY", 4) == 0) && size >= 64) {
+                    uint8_t ph[64];
+                    if (packed) {
+                        if (!unpackVmcChunk(f, size, buf, 1) || buf.size() < 64)
+                            break;
+                        std::memcpy(ph, buf.data(), 64);
+                    } else if (!f.read(reinterpret_cast<char*>(ph), 64)) {
+                        break;
+                    }
+                    uint32_t number;
+                    std::memcpy(&number, ph + 4, 4);
+                    if (number > 0 && number < 512)
+                        low.insert(number);
+                }
+                f.clear();
+                f.seekg(start + std::streamoff(size));
+                if (!f)
+                    break;
+            }
+            // the Japanese release: exactly pages 1..330 (the US / European one: 1..337)
+            if (low.size() == 330 && *low.begin() == 1 && *low.rbegin() == 330)
+                shift = 7;
+        }
+    }
+    if (shift)
+        std::fprintf(stderr, "PC files: %s has the Japanese PC release's page numbers (read as the US release's)\n", path.c_str());
+    std::lock_guard<std::mutex> g(lock);
+    known[key] = shift;
+    return shift;
+}
 
 // display2: the pages of the blood colour's set (B_<colour>.VMC, as THOTD.EXE 0x4273F0 rebuilds TEXTURE.VMC; custom:
 // B_RED's blood texels, those that differ from B_GREEN's, tinted as loadStage does). Red / -1: false (BIGGER.VMC is
@@ -405,6 +474,7 @@ std::unique_ptr<StageData> PcSource::loadStage(int stage, std::string& err)
     static const char* const kBloodFiles[5] = {"B_RED", "B_GREEN", "B_BLUE", "B_PURPL", "B_YELLO"};
     const bool customBlood = (cfg_.blood & PcConfig::kBloodCustom) != 0;
     std::string greenVmc;   // custom blood: the green set, to find the blood texels (those that differ from B_RED's)
+    int jaBlood = 0;        // pchotfix: > 0: BIGGER.VMC drawn, this blood colour's texels laid over it (the Japanese sets)
     if (customBlood) {
         const std::string r = pcPath(cfg_.installDir, "ART/STAGE1/CREATURE/B_RED.VMC");
         const std::string g = pcPath(cfg_.installDir, "ART/STAGE1/CREATURE/B_GREEN.VMC");
@@ -414,7 +484,13 @@ std::unique_ptr<StageData> PcSource::loadStage(int stage, std::string& err)
         }
     } else if (cfg_.blood >= 0 && cfg_.blood < 5) {
         const std::string b = pcPath(cfg_.installDir, std::string("ART/STAGE1/CREATURE/") + kBloodFiles[cfg_.blood] + ".VMC");
-        if (pcfs::exists(b)) vmc = b;
+        // pchotfix: the Japanese release's B_<colour>.VMC sets have 4 world pages (549, 552-554) unlike its own
+        // BIGGER.VMC and the US sets (Chapter 1's zombies were drawn with other textures): its BIGGER.VMC (the same as
+        // the US one's, page for page) is drawn, the blood colour's texels laid over it below (pcBloodPages)
+        if (pcfs::exists(b) && (pcVmcPageShift(b) == 0 || !pcfs::exists(vmc)))
+            vmc = b;
+        else if (pcfs::exists(b))
+            jaBlood = cfg_.blood;
     } else {
         const std::string cache = cfg_.installDir + "/ART/STAGE1/CREATURE/TEXTURE.VMC";
         const int64_t texSize = pcfs::size(cache);
@@ -449,6 +525,16 @@ std::unique_ptr<StageData> PcSource::loadStage(int stage, std::string& err)
     }
     if (!pages.empty() && !readVmcPages(vmc, pages, ts.layers, err, tbl.empty() ? nullptr : &tbl, tbl.empty() ? nullptr : &pal))
         return nullptr;
+    if (!pages.empty() && jaBlood > 0) {   // pchotfix: the Japanese sets' blood texels over BIGGER.VMC
+        std::vector<std::vector<uint8_t>> bl;
+        std::string berr;
+        if (pcBloodPages(cfg_.installDir, jaBlood, pages, bl, berr, tbl.empty() ? nullptr : &tbl, tbl.empty() ? nullptr : &pal) &&
+            bl.size() == ts.layers.size())
+            for (size_t l = 0; l < bl.size(); ++l)
+                for (size_t i = 0; i + 3 < bl[l].size() && i + 3 < ts.layers[l].size(); i += 4)
+                    if (bl[l][i + 3] && ts.layers[l][i + 3])
+                        std::memcpy(&ts.layers[l][i], &bl[l][i], 3);
+    }
     // custom blood colour (display, EXPERIMENTAL): the PC has only B_RED / GREEN / BLUE / PURPL / YELLO; the texels
     // where B_RED and B_GREEN differ are the blood, tinted here: the red set's brightness (its strongest channel) times
     // the chosen colour, alpha kept. The grey (brown.pal) pages stay as they are.

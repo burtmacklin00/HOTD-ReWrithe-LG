@@ -40,6 +40,7 @@ struct MenuHooks {
     std::function<void()> languagePage;                 // menufb: System > Language's page (menuLanguageRows)
     std::function<void()> advancedPage;                 // advopt: the Advanced page (Gameplay's last row)
     std::function<void()> filesCheck;                   // the text launcher (files check, data folders)
+    std::function<void()> whatsNew;                     // setup2: the What's New page (the setup window)
     std::function<void()> shortcut;                     // create the desktop shortcut
     std::function<std::string()> shortcutValue;         // "Create" / "Created" / ...
     std::function<std::vector<Frontend::Extra>()> modsRows;          // the mods' rows (menuModRows with the host's mods)

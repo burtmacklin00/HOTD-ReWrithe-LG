@@ -1041,20 +1041,7 @@ void Frontend::screenMainMenu()
 // corner (the Remake's: top-right, its prompts are at the bottom), small, not translated
 void Frontend::addVersionTag()
 {
-    // the update check (util/update_check.h): once per run, when the main menu is built after a newer release was found
-    static bool asked = false;
-    std::string tag;
-    if (!asked && util::updateAvailable(tag)) {
-        asked = true;
-        const std::string msg = "A new version (" + tag + ") of The House of the Dead: ReWrithe is available (you have " +
-                                std::string(HOTD_VERSION_TEXT) + ").\n\nOpen the download page? Unzip the new version over "
-                                "this folder; your settings are kept.";
-        const SDL_MessageBoxButtonData buttons[] = {{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Open download page"},
-                                                    {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Not now"}};
-        const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, nullptr, "Update available", msg.c_str(), 2, buttons, nullptr};
-        int pick = 0;
-        if (SDL_ShowMessageBox(&box, &pick) && pick == 1) SDL_OpenURL(util::kReleasesPage);
-    }
+    // (setup2: a newer release is offered by the setup window's Update page, main.cpp; no message box here any more)
     if (style == kStyleRemake) {
         Widget* v = rWidget(cw_ - 212, 6, 200, 14, &Frontend::drawRText, HOTD_VERSION_TEXT);
         v->id = 2;   // right-aligned
@@ -3138,6 +3125,20 @@ bool Frontend::load(const std::string& pcInstall, std::string& err)
         splashSpr_ = spr_;
     if (!spr_.width(0xD3) || !spr_.width(0xF9) || !spr_.width(glyph('A', 0x20000))) {
         err = "SPRITE/SPR.RBH: the menu pictures are missing";
+        return false;
+    }
+    // pchotfix (players 2026-11-02: "the menu text is scrambled, the cursor a black blob"): the fonts and the cursor
+    // as the 1998 release has them (24-pixel letters on pages that were read). Another / damaged SPR.RBH or BIGGER.VMC
+    // that still does not fit (the Japanese release's is read as the US one's, sprites_pc.cpp): the text launcher, not
+    // garbage
+    const int letters[] = {glyph('A', 0x20000), glyph('A', 0x20000 | 0x40000), glyph('A', 0x20000 | 0x80000), glyph('B', 0x20000)};
+    for (const int g : letters)
+        if (!spr_.drawable(g) || spr_.height(g) != 24) {
+            err = "SPRITE/SPR.RBH / ART/STAGE1/CREATURE/BIGGER.VMC: the menu font does not match the 1998 PC release's (another version, or damaged)";
+            return false;
+        }
+    if (!spr_.drawable(0xF9) || !spr_.drawable(0xD3)) {
+        err = "SPRITE/SPR.RBH / ART/STAGE1/CREATURE/BIGGER.VMC: the menu cursor does not match the 1998 PC release's (another version, or damaged)";
         return false;
     }
     return true;

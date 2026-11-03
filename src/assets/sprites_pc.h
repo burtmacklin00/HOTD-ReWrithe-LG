@@ -46,6 +46,9 @@ public:
     void addImage(int id, int w, int h, std::vector<uint8_t> rgba, int ox = 0, int oy = 0);
     // the top-left of sprite id's pieces (0, 0 when unknown): where a picture standing in for it goes
     void origin(int id, int& ox, int& oy) const;
+    // pchotfix: sprite id has pieces and every one of their pages was read (false: not drawn, or only in part: another
+    // version of SPR.RBH / BIGGER.VMC, or a damaged one)
+    bool drawable(int id) const;
 
 private:
     struct Piece {
@@ -56,6 +59,7 @@ private:
     struct Sprite {
         int16_t box[4] = {}, w = 0, h = 0;
         std::vector<Piece> pieces;
+        uint8_t shade = 0;   // pchotfix: 0, or the texels scaled by shade / 255 (the grey font drawn from the white one)
     };
     std::vector<Sprite> sprites_;
     std::map<int, std::vector<uint8_t>> pages_;   // page number -> 256 x 256 RGBA

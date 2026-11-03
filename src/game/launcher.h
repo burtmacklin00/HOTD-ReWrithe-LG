@@ -8,10 +8,14 @@
 #include "game/sights.h"
 #include "render/crt.h"
 #include "render/overlay.h"
+#include "util/update_check.h"
 
 #include <SDL3/SDL.h>
 
+#include <atomic>
 #include <cstdlib>
+#include <memory>
+#include <thread>
 #include <map>
 #include <mutex>
 #include <functional>
@@ -289,6 +293,11 @@ struct LaunchConfig {
     // crosshairs=1 / 0; "2 - Crosshairs - On / Off.exe"). Off: none drawn in play (the menus' Firing Range still shows them)
     bool crosshairs = true;
     int outputsPort = 8000;
+    // GitHub #17 (user 2026-11-03 "HOTD 2 style reloading"): a mouse crosshair moved onto the screen's edge reloads,
+    // no shot needed (launcher.ini edgereload=)
+    bool edgeReload = false;
+    // setup2: the version that last ran with these settings (launcher.ini lastversion=; another one: What's New once)
+    std::string lastVersion;
     bool attractGore = true;     // Gameplay "Attract Gore": the attract demo blows parts off as the 1998 PC (port::gAttractGore)
     bool scoreDisplay = false;   // scoredisp: the arcade's score line (title code LLLRR's SCORE:%05d) in every offline game
     // skipfix (user 2026-10-27): the cut-scenes' hold-to-skip (main.cpp; only scenes the arcade cannot skip, the bars
@@ -381,13 +390,34 @@ struct LaunchConfig {
     void save(const std::string& file) const;
 };
 
+// setup2 (v1.1.0, user 2026-11-02 "a modern setup"; coordinator: "simple, like a classic game installer"): the setup
+// window (960 x 600, fixed; drawn here, no images but our wordmark). Flat and dark, one accent (the game's red), a row
+// of steps at the top, Back / Next at the bottom. Modes:
+//   Setup     the first start (or a failed files check): Install to (folder, Browse..., free space) > Game files (two
+//             drop zones, Arcade ROMs and PC game: a zip, a folder or a CD image dropped or browsed, checked at once:
+//             green / yellow (accepted with a note) / red and why) > Options (Desktop shortcut, Start menu entry, Add
+//             to Steam, the CD music) > Install (progress; or Play from here) > Play (game/installer.h)
+//   Repair    Options > System > Repair / Change files: the Game files page; an install imports them again
+//   WhatsNew  once after an update (launcher.ini lastversion=), and Options > System > What's New: CHANGELOG.txt's
+//             section of this version
+//   Update    a newer GitHub release (util/update_check.h): its version and changelog, Update / Not now; Update
+//             downloads, checks the SHA-256 and hands over to bin\hotd_launch.exe --update (the game quits)
+// The files check's API (game/files_check.h) decides; this only shows it. Keys: Enter = Next / Play, Esc = Back / Quit.
 class Launcher {
 public:
     enum class Result { None, Start, Quit };
+    enum class Mode { Setup, Repair, WhatsNew, Update };
+    enum Page { kWelcome, kFiles, kOptions, kInstall, kDone, kPages };
+    ~Launcher();
     bool init(std::string& err);
     void handle(const SDL_Event& e, SDL_Window* window);
     // draws the screen; returns Start once the check passed (then `pcOk` / `pcFiles` tell what the PC check found)
     Result frame(int windowWidth, int windowHeight);
+    // another mode (Repair: the Game files page with the current files checked; WhatsNew: `whatsNew`; Update: the
+    // release util::updateInfo found)
+    void open(Mode m);
+    void setPage(int p) { step_ = p; }
+    int page() const { return step_; }
 
     LaunchConfig cfg;
     std::string cacheDir;        // regions, check results, launcher.ini
@@ -396,50 +426,105 @@ public:
     std::map<std::string, std::string> pcFiles;
     std::vector<std::string> notes;    // extra lines under the status (the dev data the teaser still needs)
     // ours: an extra section under the buttons (online co-op: src/net/online_menu.h's rows); a clickable row's label
-    // is its button, extraClick(row) runs it
+    // is its button, extraClick(row) runs it (setup2: not shown any more; online co-op is in the menu)
     struct ExtraLine { std::string label, value; bool clickable = false; };
     std::string extraTitle;
     std::function<std::vector<ExtraLine>()> extraLines;
     std::function<void(int)> extraClick;
-    // extraWhen: whether the extra section is shown (null: always). setup: only while the menu cannot come up (no
-    // PC files), the one way to online co-op then; every other time the menu has it
     std::function<bool()> extraWhen;
     // remakefix (user 2026-10-22 "hide the debug menu at the start"): quiet: nothing drawn (a black screen) while the
     // start-up's own files check runs (the files known: straight on to the menu); a failed check shows the page
     bool quiet = false;
     bool checked = false;        // the files check ran at least once (pcOk is its verdict)
-    std::string wordmarkFile;    // setup: our "ReWrithe" wordmark (data\ui\rewrithe_wordmark.png; empty: text only)
-    // setup: windowed: drawn as the body of its own small window (the host's; the system's title bar and X there);
-    // wantW x wantH: the size it asks for, in units of the display's scale (set by frame())
-    bool windowed = false;
-    float wantW = 300, wantH = 400;
+    std::string wordmarkFile;    // our "ReWrithe" wordmark (data\ui\rewrithe_wordmark.png; empty: text only)
+    bool windowed = false;       // drawn as its own fixed window (the host's)
+    float wantW = 960, wantH = 600;   // the window's size in units of the display's scale
+    // setup2: where this runs from: packageRoot = the package's folder ("" a developer build: Play from here only);
+    // installed = it is an install (hotd_install.txt); version = this build's ("v1.1.0")
+    std::string packageRoot, version;
+    bool installed = false;
+    Mode mode = Mode::Setup;
+    std::string whatsNew;        // the What's New page's text (CHANGELOG.txt's section, markdown)
+    std::string restartArgs;     // (testing) the updater starts the game again with these
+    // testing (HOTD_SETUP_SHOTS): a zone's result put straight in (no check run)
+    void testZone(int which, const std::string& path, int state, const std::string& line, const std::vector<std::string>& more);
+    void testInstallProgress(float f, const std::string& line);
+    void testDone(const std::string& dest);
+    // a zone's source checked on its own thread (0 arcade, 1 PC); its state (1 while it runs)
+    void checkZone(int which, const std::string& path);
+    int zoneState(int which) const;
+    // (testing, HOTD_ZONE_TEST) the box's verdict as one line: state, line, the lines under it, the music found
+    std::string zoneReport(int which) const
+    {
+        const Zone z = zoneCopy(which);
+        std::string s = std::to_string(z.state) + " | " + z.line;
+        for (const std::string& m : z.more) if (!m.empty()) s += " | " + m;
+        return s + " | music " + std::to_string(z.music);
+    }
+    std::string shotFile;        // pchotfix: set: render() writes the page to this PNG instead of drawing it (--setup-shot)
+    // pchotfix: --setup-shot: the files check, then the Game files page (960 x 600) into `png`; returns whether Play is
+    // allowed
+    bool shotPage(const std::string& png)
+    {
+        shotFile = png;
+        windowed = true;
+        const bool ok = runCheck();
+        step_ = kFiles;
+        render(int(wantW), int(wantH));
+        return ok;
+    }
 
 private:
-    // setup (user 2026-10-31 "make the setup similar to the 1998 pc port"): one dialog in the layout of the 1998 PC
-    // CD's "Auto Run" window (THOTDRUN.EXE AUTORUNDIALOG): a title bar with an X, a dark picture at the top (ours: our
-    // wordmark), a column of full-width push buttons (Arcade ROMs, PC Game, Check Files, Play; greyed when not
-    // available), the check's lines, "Exit to Windows". Everything is drawn here (bevels, our wordmark, the data\fonts
-    // font); no art of the originals. Clickable rectangles in window pixels
     struct Hot {
         int x0, y0, x1, y1, action;
+    };
+    // a drop zone: its source, the check's verdict (0 empty, 1 checking, 2 ok, 3 ok with a note, 4 blocked)
+    struct Zone {
+        std::string path;        // as chosen
+        std::string checked;     // what the check read (a disc image: the folder it was copied to)
+        int state = 0;
+        std::string line;        // the verdict, one short line
+        std::vector<std::string> more;   // a few plain lines under it
+        int music = 0;           // (PC) CD tracks found
+        float progress = 0;      // while checking (state 1): 0..1, the box's loading bar (user 2026-11-03)
     };
     Overlay page_;
     std::vector<Hot> hot_;
     std::string drawnKey_;       // what the picture shows (rebuilt only when it changes)
-    float drawX_ = 0, drawY_ = 0;
+    float drawX_ = 0, drawY_ = 0, scale_ = 1;
     std::vector<uint8_t> word_;  // the wordmark's RGBA
     int wordW_ = 0, wordH_ = 0;
     bool wordTried_ = false;
-    bool arcadeOk_ = false;      // the last check passed the arcade ROMs (Play greyed out after a failed one)
-    int pressed_ = -1;           // the button held down (drawn pushed in)
+    bool arcadeOk_ = false;      // the last check passed the arcade ROMs
+    int pressed_ = -1, hover_ = -1, dropHover_ = -1;
     Result pending_ = Result::None;
     bool checkRequested_ = false, startAfterCheck_ = false;
     std::mutex dialogMutex_;
     std::string dialogResult_;
-    int dialogTarget_ = 0;       // 1 arcade, 2 pc
+    int dialogTarget_ = 0;       // 1 arcade, 2 pc, 3 the install folder
+    int step_ = kWelcome;
+    std::string installDir_;
+    bool optDesktop_ = true, optStartMenu_ = true, optSteam_ = false, optMusic_ = true;
+    // the zones' checks (one thread each) and the install / the update download (their own threads)
+    mutable std::mutex zoneMutex_;
+    Zone zone_[2];
+    std::thread zoneThread_[2];
+    std::thread installThread_;
+    std::atomic<int> installState_{0};   // 0 not started, 1 running, 2 done, 3 failed
+    std::atomic<float> installFrac_{0};
+    std::string installLine_, installErr_, installedExe_;
+    std::unique_ptr<util::UpdateDownload> download_;
+    util::UpdateInfo update_;
+    std::string updateErr_;
+    int scroll_ = 0, scrollMax_ = 0;
     void click(int action, SDL_Window* window);
     bool runCheck();
     void render(int windowWidth, int windowHeight);
+    void startInstall();
+    Zone zoneCopy(int which) const { std::lock_guard<std::mutex> l(zoneMutex_); return zone_[which]; }
+    bool zonesReady() const;
+    void next(SDL_Window* window);
+    void back();
 };
 
 } // namespace hotd::game

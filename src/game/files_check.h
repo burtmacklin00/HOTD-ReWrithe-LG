@@ -9,8 +9,11 @@
 // (case-insensitive) and checked by size + SHA-1; a patched install whose patch kept a `.orig` copy passes through
 // that copy; a file not found there (renamed or moved) is looked for once by size + SHA-1 among the folder's files
 // and the place remembered. Every mismatch is reported with the file and the release expected.
+// pchotfix (2026-11-02): a file there of another version (Japanese release, patch, repack) is accepted with a note;
+// only THOTD.EXE and the main data files missing (or not even the file type) block Play; a missing sound is a note.
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <string>
@@ -21,6 +24,7 @@ namespace hotd::game {
 struct CheckReport {
     bool ok = false;
     std::vector<std::string> lines;   // what was found / wrong, one line each (for the launcher and the log)
+    std::vector<std::string> notes;   // pchotfix: short notes for the setup when ok (files of another version accepted ...)
 };
 
 // the arcade set: `where` = a zip or a folder; on success the regions (maincpu.bin, main_data.bin, copro_data.bin,
@@ -43,5 +47,23 @@ namespace hotd::game {
 // chosen place holds: nothing chosen, a .7z / .rar / CD image, a zip of zips, the PC game where the ROMs belong (or the
 // other way round). `arcade`: the place was chosen as the arcade ROMs (else as the PC files)
 std::string placementHint(const std::string& where, bool arcade);
+
+// the European CD's BIGGER.VMC (user 2026-11-02 "patch their BIGGER.VMC for them"): the US file with 5 bits set (5
+// texels of the texture pages a shade off: a mastering fault, not a change). isEuBigger: d is that file (rel: its path
+// in the install, any case / slashes); fixEuBigger: those 5 bytes set back, the US file again (true: patched)
+bool isEuBigger(const std::string& rel, const std::vector<uint8_t>& d);
+bool fixEuBigger(const std::string& rel, std::vector<uint8_t>& d);
+
+} // namespace hotd::game
+
+namespace hotd::game {
+
+// setup2 (the installer, game/installer.h): the arcade set's file names, sizes and CRC-32s (MAME hotd, Revision A), so
+// the setup can copy exactly those 29 files out of the player's zip / folder into the install's data\arcade
+struct ArcadeRomId {
+    const char* name;
+    uint32_t size, crc;
+};
+const ArcadeRomId* arcadeRomIds(int& n);
 
 } // namespace hotd::game

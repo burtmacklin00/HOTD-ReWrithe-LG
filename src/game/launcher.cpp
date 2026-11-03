@@ -3,12 +3,17 @@
 #include "assets/archive.h"
 #include "game/chapters.h"
 #include "game/files_check.h"
+#include "game/installer.h"
 #include "game/lang.h"
 #include "game/sights.h"
+#include "util/disc_image.h"
+#include "util/file64.h"
 #include "util/fullscreen.h"
 #include "util/resolution.h"
+#include "util/png.h"
 #include "util/png_read.h"
 #include "util/utf8.h"
+#include "util/win_shell.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,14 +22,12 @@
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <tuple>
 
 namespace hotd::game {
 
 namespace {
 
-// setup: the dialog's buttons (the settings rows are gone: Options in the menu has them all)
-enum Action { kArcadeFolder = 1, kArcadeZip, kPcFolder, kPcZip, kCheck, kStart, kQuit,
-              kExtraBase = 1000 };   // (kExtraBase + row: the extra section's rows, online co-op)
 
 // a package's path: inside `base` -> relative to it (saving); relative -> under `base` (loading)
 std::string toBase(const std::string& p, const std::string& base)
@@ -249,11 +252,13 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "resolution_fullscreen") { const util::Size s = util::parseSize(v); resFullW = s.w, resFullH = s.h; }
         else if (k == "resolution_window") { const util::Size s = util::parseSize(v); resWinW = s.w, resWinH = s.h; }
         else if (k == "autoreload") autoReload = n != 0;
+        else if (k == "edgereload") edgeReload = n != 0;
         else if (k == "scoredisplay") scoreDisplay = n != 0;
         else if (k == "attractgore") attractGore = n != 0;
         else if (k == "lgupdatecheck") updateCheck = n != 0;
         else if (k == "outputs") outputs = n != 0;
         else if (k == "outputsport") outputsPort = n > 0 && n < 65536 ? n : 8000;
+        else if (k == "lastversion") lastVersion = util::utf8Head(v, 24);
         else if (k == "holdskip") holdSkip = n != 0;
         else if (k == "gamespeed") gameSpeed = v == "auto" || v == "0" ? -1 : v == "arcade" ? 0 : n == 1 || v == "60" ? 1 : -1;   // (the old 0: the default then -> auto)
         else if (k == "continues") continues = std::clamp(n, 0, 9);
@@ -385,7 +390,7 @@ void LaunchConfig::save(const std::string& file) const
     std::ofstream& f = c.f;
     f << "arcade=" << toBase(arcade, base) << "\npc=" << toBase(pc, base) << "\nmodels=" << models << "\nsound=" << sound << "\nplayers=" << players << "\np2input=" << p2Input
       << "\ndifficulty=" << difficulty << "\nlives=" << lives << "\nblood=" << blood << "\ncuts=" << (cuts ? 1 : 0) << "\ntitle=" << (title ? 1 : 0) << "\nfbi=" << (fbi ? 1 : 0) << "\npcsplash=" << (pcSplash ? 1 : 0) << "\ngametext=" << gameText << "\nlang=" << language
-      << "\naspect=" << aspect << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nholdskip=" << (holdSkip ? 1 : 0)
+      << "\naspect=" << aspect << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
       << "\ndisplaymode=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? (exclusive ? 2 : 1) : 0)
       << "\nexclusive=" << (exclusive ? 1 : 0)
       << "\nresolution_fullscreen=" << util::sizeKey({resFullW, resFullH}) << "\nresolution_window=" << util::sizeKey({resWinW, resWinH})
@@ -444,40 +449,42 @@ void LaunchConfig::save(const std::string& file) const
     f << "\n";
 }
 
-bool Launcher::init(std::string& err)
-{
-    return page_.init(err);
-}
 
 namespace {
 
-// setup: the 1998 PC CD's start window (THOTDRUN.EXE) was a plain Windows dialog; its look's colours, drawn by us
-constexpr uint32_t kFace = 0xF0F0F0, kButton = 0xE1E1E1, kLight = 0xFFFFFF, kLite2 = 0xF4F4F4, kShadow = 0xA0A0A0, kDark = 0x404040,
-                   kText = 0x000000, kGreyText = 0x505050, kGreyed = 0xA0A0A0, kRed = 0xB00000, kGreen = 0x107010,
-                   kBlue = 0x000080;
+// setup2: the setup window's look (user 2026-11-02: "the same color style as the 1998 pc port"): the 1998 PC CD's
+// start window (THOTDRUN.EXE) was a plain Windows dialog: a grey face, raised buttons, sunken white fields, black text;
+// its picture at the top (here: the header strip, dark, the title in red, the wordmark)
+constexpr uint32_t kBg = 0xF0F0F0, kButton = 0xE1E1E1, kButtonHi = 0xE8F0F8, kLight = 0xFFFFFF, kLite2 = 0xF4F4F4,
+                   kShadow = 0xA0A0A0, kDark = 0x404040, kText = 0x000000, kDim = 0x404040, kFaint = 0x808080,
+                   kGreyed = 0xA0A0A0, kField = 0xFFFFFF, kBlue = 0x000080, kHead = 0x000000, kHeadText = 0xFFFFFF,
+                   kHeadDim = 0xFFFFFF, kRed = 0xB00000, kRedTitle = 0xC82020, kOk = 0x107010, kWarn = 0x8A5A00, kBad = 0xB00000;
+constexpr float kW = 960, kH = 600;
 
-// the dialog's painter: logical units (the dialog is 380 wide) x s = the picture's pixels; on false: the layout only
+// the actions of the page's clickable places
+enum Action { kNext = 1, kBack, kQuit, kBrowseDir, kZoneA, kZoneP, kFolderA, kFolderP, kOptDesk, kOptStart, kOptSteam,
+              kOptMusic, kDoInstall, kPlayHere, kPlay, kOpenFolder, kUpdate, kNotNow, kDownloadPage, kContinue, kStart };
+
+// the painter: logical units (the window is 960 x 600) x s = the picture's pixels
 struct Painter {
     float s = 1;
-    bool on = false;
     int w = 0, h = 0;
     std::vector<uint8_t> px;
     const render::TtfText* tf = nullptr;   // data\fonts (lang::anyFont); none: SDL's 8 x 8 font
 
     int P(float u) const { return int(std::lround(u * s)); }
-    int t() const { return std::max(1, int(std::lround(s * 0.75f))); }   // a bevel line's thickness
+    int t() const { return std::max(1, int(std::lround(s))); }   // a line's thickness
     void blend(int x, int y, uint32_t c, float a)
     {
-        if (!on || x < 0 || y < 0 || x >= w || y >= h || a <= 0.0f) return;
+        if (x < 0 || y < 0 || x >= w || y >= h || a <= 0.0f) return;
         uint8_t* d = &px[(size_t(y) * size_t(w) + size_t(x)) * 4];
         a = std::min(a, 1.0f);
         for (int k = 0; k < 3; ++k)
             d[k] = uint8_t(float(d[k]) * (1 - a) + float((c >> (16 - 8 * k)) & 0xFF) * a + 0.5f);
-        d[3] = uint8_t(std::max(float(d[3]), a * 255.0f));
+        d[3] = 255;
     }
     void fillPx(int x0, int y0, int x1, int y1, uint32_t c)
     {
-        if (!on) return;
         x0 = std::max(x0, 0), y0 = std::max(y0, 0), x1 = std::min(x1, w), y1 = std::min(y1, h);
         for (int y = y0; y < y1; ++y)
             for (int x = x0; x < x1; ++x) {
@@ -486,14 +493,17 @@ struct Painter {
             }
     }
     void fill(float x, float y, float fw, float fh, uint32_t c) { fillPx(P(x), P(y), P(x + fw), P(y + fh), c); }
-    // a rectangle's outline, top-left and bottom-right colours (Windows' DrawEdge, one line)
+    void frame(float x, float y, float fw, float fh, uint32_t c)
+    {
+        const int x0 = P(x), y0 = P(y), x1 = P(x + fw), y1 = P(y + fh), k = t();
+        fillPx(x0, y0, x1, y0 + k, c), fillPx(x0, y1 - k, x1, y1, c), fillPx(x0, y0, x0 + k, y1, c), fillPx(x1 - k, y0, x1, y1, c);
+    }
+    // Windows' DrawEdge: an outline in two colours (top-left, bottom-right), then the bevels made of two of them
     void edge(int x0, int y0, int x1, int y1, uint32_t tl, uint32_t br)
     {
         const int k = t();
-        fillPx(x0, y0, x1, y0 + k, tl);
-        fillPx(x0, y0, x0 + k, y1, tl);
-        fillPx(x0, y1 - k, x1, y1, br);
-        fillPx(x1 - k, y0, x1, y1, br);
+        fillPx(x0, y0, x1, y0 + k, tl), fillPx(x0, y0, x0 + k, y1, tl);
+        fillPx(x0, y1 - k, x1, y1, br), fillPx(x1 - k, y0, x1, y1, br);
     }
     void bevel(float x, float y, float bw, float bh, uint32_t o1, uint32_t o2, uint32_t i1, uint32_t i2)
     {
@@ -504,12 +514,32 @@ struct Painter {
     void raised(float x, float y, float bw, float bh) { bevel(x, y, bw, bh, kLight, kDark, kLite2, kShadow); }
     void pushed(float x, float y, float bw, float bh) { bevel(x, y, bw, bh, kDark, kLight, kShadow, kLite2); }
     void sunken(float x, float y, float bw, float bh) { bevel(x, y, bw, bh, kShadow, kLight, kDark, kLite2); }
-    void frame(float x, float y, float bw, float bh) { bevel(x, y, bw, bh, kLite2, kDark, kLight, kShadow); }
-    void etched(float x, float y, float bw, float bh)   // a group box's line
+    void etchedLine(float x, float y, float lw)   // a group's dividing line
     {
-        const int x0 = P(x), y0 = P(y), x1 = P(x + bw), y1 = P(y + bh), k = t();
-        edge(x0 + k, y0 + k, x1, y1, kLight, kLight);
-        edge(x0, y0, x1 - k, y1 - k, kShadow, kShadow);
+        fill(x, y, lw, 1 / s, kShadow);
+        fillPx(P(x), P(y) + 1, P(x + lw), P(y) + 2, kLight);
+    }
+    void dashed(float x, float y, float fw, float fh, uint32_t c)   // a thin dashed border (the drop zones)
+    {
+        const int x0 = P(x), y0 = P(y), x1 = P(x + fw), y1 = P(y + fh), k = t(), d = P(6), g = P(4);
+        for (int a = x0; a < x1; a += d + g) fillPx(a, y0, std::min(a + d, x1), y0 + k, c), fillPx(a, y1 - k, std::min(a + d, x1), y1, c);
+        for (int a = y0; a < y1; a += d + g) fillPx(x0, a, x0 + k, std::min(a + d, y1), c), fillPx(x1 - k, a, x1, std::min(a + d, y1), c);
+    }
+    void line(float ax, float ay, float bx, float by, float thick, uint32_t c)   // (the status marks)
+    {
+        const float len = std::hypot(bx - ax, by - ay) * s;
+        const int n = std::max(2, int(len * 2)), r = std::max(1, int(std::lround(thick * s / 2)));
+        for (int i = 0; i <= n; ++i) {
+            const int x = P(ax + (bx - ax) * float(i) / float(n)), y = P(ay + (by - ay) * float(i) / float(n));
+            fillPx(x - r, y - r, x + r, y + r, c);
+        }
+    }
+    // the status mark (a plain check / ! / cross), size = its height
+    void mark(int state, float x, float y, float size, uint32_t c)
+    {
+        if (state == 2) { line(x, y + size * 0.55f, x + size * 0.35f, y + size * 0.9f, 2, c); line(x + size * 0.35f, y + size * 0.9f, x + size * 0.9f, y + size * 0.1f, 2, c); }
+        else if (state == 3) { fill(x + size * 0.38f, y, size * 0.22f, size * 0.62f, c); fill(x + size * 0.38f, y + size * 0.78f, size * 0.22f, size * 0.22f, c); }
+        else if (state == 4) { line(x + size * 0.1f, y + size * 0.1f, x + size * 0.9f, y + size * 0.9f, 2, c); line(x + size * 0.9f, y + size * 0.1f, x + size * 0.1f, y + size * 0.9f, 2, c); }
     }
     int debugK(float cap) const { return std::max(1, int(std::lround(cap * s / 7.0f))); }
     float em(float cap) const { return lang::pxForCap(cap * s, tf); }
@@ -521,7 +551,7 @@ struct Painter {
     // str with its baseline at (x, base)
     void text(const std::string& str, float x, float base, float cap, uint32_t c)
     {
-        if (!on || str.empty()) return;
+        if (str.empty() || px.empty()) return;
         if (tf) {
             tf->draw(str, em(cap), x * s, base * s, [&](int X, int Y, float a) { blend(X, Y, c, a); });
             return;
@@ -547,7 +577,7 @@ struct Painter {
     // an RGBA picture shrunk into (x, y, dw, dh) (a box filter: the wordmark is 3x art)
     void image(const std::vector<uint8_t>& img, int iw, int ih, float x, float y, float dw, float dh)
     {
-        if (!on || iw <= 0 || ih <= 0) return;
+        if (iw <= 0 || ih <= 0) return;
         const int X0 = P(x), Y0 = P(y), W = std::max(1, P(dw)), H = std::max(1, P(dh));
         for (int yy = 0; yy < H; ++yy)
             for (int xx = 0; xx < W; ++xx) {
@@ -569,7 +599,484 @@ struct Painter {
     }
 };
 
+std::string fileName(const std::string& path)
+{
+    std::string n = std::filesystem::path(path).filename().string();
+    return n.empty() ? path : n;
+}
+
+std::string mb(uint64_t bytes)
+{
+    char b[48];
+    if (bytes >= (10ull << 30)) std::snprintf(b, sizeof b, "%.0f GB", double(bytes) / double(1ull << 30));
+    else if (bytes >= (1ull << 30)) std::snprintf(b, sizeof b, "%.1f GB", double(bytes) / double(1ull << 30));
+    else std::snprintf(b, sizeof b, "%.0f MB", double(bytes) / double(1ull << 20));
+    return b;
+}
+
+std::string backslashes(std::string s)
+{
+    std::replace(s.begin(), s.end(), '/', '\\');
+    return s;
+}
+
+// the file a check line names ("MISSING SPRITE/SPR.RBH (1998 PC release)" -> "SPRITE\SPR.RBH")
+std::string namedFile(const std::string& line)
+{
+    std::string s = line.substr(line.find(' '));
+    s.erase(0, s.find_first_not_of(' '));
+    s = s.substr(0, std::min(s.find(':'), s.find(" (")));
+    return backslashes(s);
+}
+
+using Verdict = std::tuple<int, std::string, std::vector<std::string>>;   // state, line, more
+
+// the arcade check's report in one short line (the check decides; this only says it)
+Verdict arcadeVerdict(const std::string& where, const CheckReport& r)
+{
+    auto T = [](const char* s) { return lang::tr(s); };
+    if (r.ok) return {2, T("All 29 ROM files match (Revision A)"), {}};
+    int missing = 0, wrong = 0;
+    std::string first;
+    for (const std::string& l : r.lines) {
+        if (l.rfind("MISSING", 0) == 0) { ++missing; if (first.empty()) first = l; }
+        if (l.rfind("WRONG", 0) == 0) ++wrong;
+    }
+    const std::string hint = placementHint(where, true);
+    if (hint.find("PC game") != std::string::npos && hint.rfind("That is the PC game", 0) == 0)
+        return {4, T("This is the PC game, not the arcade ROMs"), {}};
+    if (wrong) return {4, T("Not Revision A: MAME's \"hotd\" set is needed"), {T("The original release (hotdo) and prototypes do not work.")}};
+    {   // MAME's other sets by their zip's name (hotdp: the prototype, hotdo: the original release)
+        std::string n = std::filesystem::path(where).filename().string();
+        for (char& c : n) c = char(std::tolower(static_cast<unsigned char>(c)));
+        if (n.rfind("hotdp", 0) == 0 || n.rfind("hotdo", 0) == 0)
+            return {4, T("Not Revision A: MAME's \"hotd\" set is needed"), {T("The original release (hotdo) and prototypes do not work.")}};
+    }
+    if (missing >= 29 || missing == 0) return {4, T("No arcade ROM files found here"), {hint.empty() ? std::string() : lang::tr(hint)}};
+    // (the drop test, 2026-11-03) only Revision A's own program ROMs missing (epr-19696a / epr-19697a ...): another
+    // revision's set, not a damaged one
+    bool revOnly = missing <= 4;
+    for (const std::string& l : r.lines)
+        if (l.rfind("MISSING", 0) == 0) revOnly &= l.find("epr-1969") != std::string::npos && l.find("a.") != std::string::npos;
+    if (revOnly)
+        return {4, T("Not Revision A: MAME's \"hotd\" set is needed"), {T("The original release (hotdo) and prototypes do not work.")}};
+    return {4, lang::fmt("{n} of 29 ROM files are missing", {{"n", std::to_string(missing)}}),
+            {lang::fmt("{file} is missing", {{"file", namedFile(first)}})}};
+}
+
+Verdict pcVerdict(const std::string& where, const CheckReport& r)
+{
+    auto T = [](const char* s) { return lang::tr(s); };
+    std::vector<std::string> notes;
+    int missing = 0, wrong = 0;
+    bool exeMissing = false;
+    std::string firstMissing, firstWrong, why;
+    for (const std::string& l : r.lines) {
+        if (l.rfind("MISSING", 0) == 0) { ++missing; if (firstMissing.empty()) firstMissing = l; exeMissing |= l.find("THOTD.EXE") != std::string::npos; }
+        else if (l.rfind("WRONG", 0) == 0) { ++wrong; if (firstWrong.empty()) firstWrong = l; }
+        else if (l.rfind("PC files: ", 0) == 0 && l.find(" match the 1998") == std::string::npos) why = l.substr(10);
+        else if (l.rfind("PC files:", 0) != 0 && l.rfind("Music (", 0) != 0 && l.rfind("moved", 0) != 0 && l.rfind("Some PC files", 0) != 0 &&
+                 l.rfind("DIFFERS", 0) != 0 && l.rfind("note", 0) != 0)
+            notes.push_back(l);   // (an accepted variant: a patched THOTD.EXE ... the check's own words)
+    }
+    // pchotfix: the check's own short notes (files of another version accepted, sounds missing, no menu art) first
+    notes.insert(notes.begin(), r.notes.begin(), r.notes.end());
+    if (r.ok) {
+        if (notes.empty()) return {2, T("The 1998 PC game: all files match"), {}};
+        std::vector<std::string> more;
+        for (size_t i = 0; i < notes.size() && i < 2; ++i) more.push_back(lang::tr(notes[i]));
+        return {3, T("Accepted, with a note:"), more};
+    }
+    if (!why.empty() && missing == 0 && wrong == 0) return {4, lang::tr(why), {}};
+    const std::string hint = placementHint(where, false);
+    if (hint.rfind("Those are the arcade ROMs", 0) == 0) return {4, T("These are the arcade ROMs, not the PC game"), {}};
+    if (hint.rfind("Only THOTD.EXE", 0) == 0)   // (a no-CD patch's zip: the drop test, 2026-11-03)
+        return {4, T("Only THOTD.EXE is here (a no-CD patch?)"), {T("The whole PC game is needed: drop its folder, CD image or zip.")}};
+    if (!exeMissing && missing >= 40) return {4, T("This is the PC demo: the full 1998 PC game is needed"), {}};
+    if (exeMissing && missing >= 40) return {4, T("No PC game files found here"), {hint.empty() ? std::string() : lang::tr(hint)}};
+    if (!firstMissing.empty())
+        return {4, lang::fmt("{file} is missing", {{"file", namedFile(firstMissing)}}),
+                {missing + wrong > 1 ? lang::fmt("{n} files missing or different (all of them: settings\\hotd.log)", {{"n", std::to_string(missing + wrong)}}) : std::string()}};
+    return {4, lang::fmt("{file} is not the 1998 PC version's file", {{"file", namedFile(firstWrong)}}), {}};
+}
+
+namespace fs = std::filesystem;
+
+// a disc image copied out to <cache>\disc_<kind> (a folder of ours: its marker file), then checked there
+std::string discFolder(const std::string& cache, const char* kind)
+{
+    const fs::path d = fs::path(cache) / (std::string("disc_") + kind);
+    std::error_code ec;
+    if (fs::exists(d / "hotd_disc_copy.txt", ec)) fs::remove_all(d, ec);   // (only our own copy)
+    else if (fs::exists(d, ec)) return (fs::path(cache) / (std::string("disc_") + kind + "_" + std::to_string(SDL_GetTicks()))).string();
+    return d.string();
+}
+
 } // namespace
+
+Launcher::~Launcher()
+{
+    for (std::thread& t : zoneThread_) if (t.joinable()) t.join();
+    if (installThread_.joinable()) installThread_.join();
+}
+
+bool Launcher::init(std::string& err)
+{
+    installDir_ = defaultInstallDir();
+    return page_.init(err);
+}
+
+void Launcher::open(Mode m)
+{
+    mode = m;
+    scroll_ = 0;
+    quiet = false;
+    updateErr_.clear();
+    if (m == Mode::Repair) {
+        step_ = kFiles;
+        for (int i = 0; i < 2; ++i) {
+            const std::string& p = i == 0 ? cfg.arcade : cfg.pc;
+            if (!p.empty()) checkZone(i, p);
+        }
+    } else if (m == Mode::Update) {
+        util::updateInfo(update_);
+        download_.reset();
+        if (std::getenv("HOTD_UPDATE_AUTO")) pending_ = Result::None, click(kUpdate, nullptr);   // (the test: Update pressed)
+    }
+}
+
+// the check of one zone's source on its own thread (a new choice while one runs: waits for it)
+void Launcher::checkZone(int which, const std::string& path)
+{
+    if (zoneThread_[which].joinable()) zoneThread_[which].join();
+    {
+        std::lock_guard<std::mutex> l(zoneMutex_);
+        zone_[which] = Zone{};
+        zone_[which].path = path;
+        zone_[which].state = 1;
+        zone_[which].line = lang::tr("Checking ...");
+    }
+    const std::string cache = cacheDir;
+    zoneThread_[which] = std::thread([this, which, path, cache]() {
+        Zone z;
+        z.path = path;
+        z.checked = path;
+        std::string src = path, image = path, unzipped;
+        auto lowered = [](std::string s) { for (char& c : s) if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a'); return s; };
+        struct Cleanup {   // (what was unpacked from a zip: only needed while its files are copied out)
+            std::vector<std::string> files;
+            std::string dir;   // a folder of ours (its marker file) removed whole
+            ~Cleanup()
+            {
+                std::error_code ec;
+                for (const std::string& f : files) fs::remove(f, ec);
+                if (!dir.empty() && fs::exists(fs::path(dir) / "hotd_disc_copy.txt", ec)) fs::remove_all(dir, ec);
+            }
+        } cleanup;
+        // the box's line and loading bar while it works (user 2026-11-03 "add a loading bar")
+        auto stage = [&](const std::string& line, float progress) {
+            std::lock_guard<std::mutex> l(zoneMutex_);
+            if (zone_[which].path != path) return;
+            if (!line.empty()) zone_[which].line = line;
+            zone_[which].progress = std::max(zone_[which].progress, std::clamp(progress, 0.0f, 1.0f));
+        };
+        // a folder holding a CD image and no installed game (user 2026-11-03: the folder of a .cue and its .bin files
+        // said "THOTD.EXE is missing"): its .cue, else its largest .iso / .img / .bin; "" when it is no CD image
+        auto imageIn = [&](const std::string& dir) -> std::string {
+            std::string cue, other;
+            uintmax_t otherSize = 0;
+            bool exe = false;
+            std::error_code ec;
+            for (auto it = fs::recursive_directory_iterator(dir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (ec) break;
+                if (it.depth() > 3) { it.disable_recursion_pending(); continue; }
+                const std::string n = lowered(it->path().filename().string()), e = lowered(it->path().extension().string());
+                exe |= n == "thotd.exe";
+                if (e == ".cue" && cue.empty()) cue = it->path().string();
+                if (e == ".iso" || e == ".img" || e == ".bin") {
+                    const uintmax_t s = it->file_size(ec);
+                    if (s > otherSize) other = it->path().string(), otherSize = s;
+                }
+            }
+            return exe ? std::string() : !cue.empty() ? cue : other;
+        };
+        stage({}, 0.05f);
+        // what is read (the drop test, user 2026-11-03): THOTD.EXE itself dropped = its folder; a zip holding nothing but
+        // another archive (and notes) = that archive, unpacked into the cache first
+        std::string in = path;
+        if (which == 1 && lowered(fs::path(path).filename().string()) == "thotd.exe") in = fs::path(path).parent_path().string();
+        if (lowered(fs::path(in).extension().string()) == ".zip") {
+            ZipFile outer;
+            std::string err;
+            if (outer.open(in, err)) {
+                const ZipFile::Entry* inner = nullptr;
+                bool other = false;
+                for (const ZipFile::Entry& e : outer.entries()) {
+                    const std::string n = lowered(e.name), ext = fs::path(n).extension().string();
+                    if (n.empty() || n.back() == '/') continue;
+                    if (ext == ".zip" || ext == ".7z" || ext == ".rar") { if (inner) other = true; else inner = &e; }
+                    else if (ext != ".txt" && ext != ".nfo" && ext != ".url" && ext != ".diz" && ext != ".htm" && ext != ".html") other = true;
+                }
+                std::vector<uint8_t> d;
+                if (inner && !other && outer.read(*inner, d, err)) {
+                    std::error_code ec;
+                    const fs::path dir = fs::path(cache) / (which == 0 ? "arcade_inner" : "pc_inner");
+                    fs::create_directories(dir, ec);
+                    const std::string f = (dir / fs::path(inner->name).filename()).string();
+                    std::ofstream o(hotd::longPath(f), std::ios::binary | std::ios::trunc);
+                    if (o.write(reinterpret_cast<const char*>(d.data()), std::streamsize(d.size()))) {
+                        o.close();
+                        in = f;
+                        // (kept in the cache: the setup installs from it, and an arcade zip is read at each start)
+                    }
+                }
+            }
+        }
+        src = image = z.checked = in;
+        // a zip holding a CD image (user 2026-11-02 "allow for read it from zip"): its data track (the first track's
+        // .bin, else the .iso / .img / .bin) unpacked into the cache, read as below, then removed
+        // a .7z / .rar (user 2026-11-03 "can we support" it): unpacked into the cache by Windows' own tar (libarchive,
+        // Windows 10 1803 and later) and checked there as a folder; a CD image in it (the .cue first) read as below
+        if (which == 1 && fs::is_directory(in)) {
+            if (const std::string img = imageIn(in); !img.empty()) image = img;
+        } else if (const std::string ext = lowered(fs::path(in).extension().string()); ext == ".7z" || ext == ".rar") {
+            stage(lang::tr("Unpacking ..."), 0.1f);
+            const std::string dir = discFolder(cache, which == 0 ? "arcade_unpacked" : "pc_unpacked");
+            std::error_code ec;
+            fs::create_directories(dir, ec);
+            std::ofstream(fs::path(dir) / "hotd_disc_copy.txt") << "Unpacked from " << path << " by the setup (removed with the next one).\n";
+#ifdef _WIN32
+            const char* root = std::getenv("SystemRoot");
+            const std::string tar = std::string(root && *root ? root : "C:\\Windows") + "\\System32\\tar.exe";
+#else
+            const std::string tar = "tar";
+#endif
+            const int rc = winshell::runHidden(tar, "-xf \"" + in + "\" -C \"" + dir + "\"", 600);
+            bool any = false;
+            for (const auto& e : fs::recursive_directory_iterator(dir, ec))
+                any |= e.is_regular_file(ec) && e.path().filename() != "hotd_disc_copy.txt";
+            if (rc != 0 || !any) {
+                z.state = 4, z.line = lang::fmt("{file} could not be unpacked", {{"file", fileName(path)}});
+                z.more = {lang::tr("Unpack it yourself (for example with 7-Zip) and drop the folder here.")};
+                std::lock_guard<std::mutex> l(zoneMutex_);
+                if (zone_[which].path == path) zone_[which] = z;
+                return;
+            }
+            src = z.checked = dir;
+            stage({}, 0.35f);
+            image = which == 1 ? imageIn(dir) : std::string();   // (a CD image in it: read as below)
+            if (!image.empty()) cleanup.dir = dir;               // (then only needed while its files are copied out)
+        }
+        ZipFile zf;
+        bool zipImage = false;
+        if (which == 1 && lowered(fs::path(in).extension().string()) == ".zip") {
+            std::string err;
+            if (zf.open(in, err)) {
+                const ZipFile::Entry* best = nullptr;
+                bool bestFirst = false, hasExe = false;
+                for (const ZipFile::Entry& e : zf.entries()) {
+                    const std::string n = lowered(e.name);
+                    hasExe |= fs::path(n).filename() == "thotd.exe";
+                    const std::string ext = n.size() > 4 ? n.substr(n.size() - 4) : "";
+                    const bool first = n.find("track 01") != std::string::npos || n.find("track 1)") != std::string::npos;
+                    if ((ext == ".bin" || ext == ".iso" || ext == ".img") && (!best || (first && !bestFirst)))
+                        best = &e, bestFirst = first;
+                }
+                if (best && !hasExe) {
+                    stage(lang::tr("Unpacking the CD image from the zip ..."), 0.1f);
+                    std::error_code ec;
+                    const fs::path dir = fs::path(cache) / "disc_zip";
+                    fs::create_directories(dir, ec);
+                    unzipped = (dir / fs::path(best->name).filename()).string();
+                    cleanup.files.push_back(unzipped);
+                    std::vector<uint8_t> d;
+                    bool ok = zf.read(*best, d, err);
+                    if (ok) {
+                        std::ofstream out(unzipped, std::ios::binary);
+                        ok = bool(out.write(reinterpret_cast<const char*>(d.data()), std::streamsize(d.size())));
+                    }
+                    if (!ok) {
+                        fs::remove(unzipped, ec);
+                        z.state = 4, z.line = lang::tr("The CD image in the zip could not be unpacked");
+                        z.more = {err.empty() ? lang::tr("Not enough disk space?") : err};
+                        std::lock_guard<std::mutex> l(zoneMutex_);
+                        if (zone_[which].path == path) zone_[which] = z;
+                        return;
+                    }
+                    image = unzipped;
+                    zipImage = true;
+                }
+            }
+        }
+        // any track's .bin of a disc with its .cue next to it (the drop test: Track 02, music only, said "not a readable
+        // CD image"): the whole disc through its .cue
+        if (lowered(fs::path(image).extension().string()) == ".bin")
+            if (const std::string cue = disc::cueFor(image); !cue.empty()) image = cue;
+        if (disc::isDiscImage(image)) {   // a CD image: what it is, then its files copied out and checked
+            const disc::Info di = disc::probe(image);
+            if (!di.ok) { z.state = 4; z.line = lang::tr("Not a readable CD image (ISO 9660)"); z.more = {di.err}; }
+            else if (di.system == "saturn") { z.state = 4; z.line = lang::tr("This is the Saturn version"); z.more = {lang::tr("The game needs the 1998 PC version (and the arcade ROMs).")}; }
+            else if (!di.system.empty()) { z.state = 4; z.line = lang::tr("This is a console disc, not the PC game"); }
+            else if (which == 0) { z.state = 4; z.line = lang::tr("This is a CD image, not the arcade ROMs"); }
+            else {
+                const std::string out = discFolder(cache, "pc");
+                stage(lang::tr("Copying the files from the CD image ..."), 0.35f);
+                std::string err;
+                if (!disc::extract(image, out, [&](float f) { stage({}, 0.35f + 0.35f * f); }, err)) { z.state = 4; z.line = lang::tr("The CD image could not be read"); z.more = {err}; }
+                else {
+                    std::ofstream(fs::path(out) / "hotd_disc_copy.txt") << "Files copied from " << path << " by the setup (removed with the next image).\n";
+                    src = z.checked = out;
+                    // the CD music (user 2026-11-02): the image's audio tracks as Music\TrackNN.wav next to its files
+                    // (a zip: its .cue and the other tracks' files unpacked first, one at a time as needed)
+                    std::string cue = disc::cueFor(image);
+                    if (zipImage) {
+                        cue.clear();
+                        const fs::path dir = fs::path(image).parent_path();
+                        for (const ZipFile::Entry& e : zf.entries()) {
+                            const std::string n = lowered(e.name), ext = n.size() > 4 ? n.substr(n.size() - 4) : "";
+                            if (ext != ".cue" && ext != ".bin") continue;
+                            const std::string dst = (dir / fs::path(e.name).filename()).string();
+                            if (dst == image) continue;
+                            stage(lang::tr("Copying the CD music ..."), 0.72f);
+                            std::vector<uint8_t> d;
+                            std::string e2;
+                            if (!zf.read(e, d, e2)) continue;
+                            std::ofstream o(dst, std::ios::binary);
+                            o.write(reinterpret_cast<const char*>(d.data()), std::streamsize(d.size()));
+                            cleanup.files.push_back(dst);
+                            if (ext == ".cue") cue = dst;
+                        }
+                    }
+                    if (!cue.empty()) {
+                        stage(lang::tr("Copying the CD music ..."), 0.8f);
+                        std::string rerr;
+                        const fs::path music = fs::path(out) / "Music";
+                        const int n = disc::ripAudio(cue, music.string(), rerr);
+                        // the US disc (the dump the user checked, 2026-11-02) has tracks 2 and 6 the other way round
+                        // from the EU and Japanese discs and from what the game asks for (track 2 = the title song,
+                        // the arcade's ~1 minute one; 6 = the boss, ~5 minutes): a longer 02 than 06 swapped back
+                        std::error_code ec;
+                        const fs::path t2 = music / "Track02.wav", t6 = music / "Track06.wav", tmp = music / "Track02.tmp";
+                        if (fs::exists(t2, ec) && fs::exists(t6, ec) && fs::file_size(t2, ec) > 2 * fs::file_size(t6, ec)) {
+                            fs::rename(t2, tmp, ec), fs::rename(t6, t2, ec), fs::rename(tmp, t6, ec);
+                            SDL_Log("[files] CD music: tracks 2 and 6 swapped (this disc has them the other way round)");
+                        }
+                        SDL_Log("[files] CD music: %d track(s) from %s%s%s", n, cue.c_str(), rerr.empty() ? "" : ": ", rerr.c_str());
+                    }
+                }
+            }
+            if (z.state == 4) {
+                std::lock_guard<std::mutex> l(zoneMutex_);
+                if (zone_[which].path == path) zone_[which] = z;
+                return;
+            }
+        }
+        stage(lang::tr("Checking the files ..."), 0.9f);
+        Verdict v;
+        if (which == 0) {
+            const CheckReport r = checkArcade(src, cache + "arcade_regions", false);
+            for (const std::string& s : r.lines) SDL_Log("[files] %s", s.c_str());
+            v = arcadeVerdict(src, r);
+        } else {
+            std::map<std::string, std::string> found;
+            const CheckReport r = checkPc(src, cache + "pc_files.tsv", found);
+            for (const std::string& s : r.lines) SDL_Log("[files] %s", s.c_str());
+            v = pcVerdict(src, r);
+            z.music = musicTracks(src);
+        }
+        z.state = std::get<0>(v), z.line = std::get<1>(v), z.more = std::get<2>(v);
+        std::lock_guard<std::mutex> l(zoneMutex_);
+        if (zone_[which].path == path) zone_[which] = z;
+    });
+}
+
+bool Launcher::zonesReady() const
+{
+    std::lock_guard<std::mutex> l(zoneMutex_);
+    return (zone_[0].state == 2 || zone_[0].state == 3) && (zone_[1].state == 2 || zone_[1].state == 3);
+}
+
+void Launcher::testZone(int which, const std::string& path, int state, const std::string& line, const std::vector<std::string>& more)
+{
+    std::lock_guard<std::mutex> l(zoneMutex_);
+    zone_[which] = Zone{path, path, state, line, more, which == 1 ? 11 : 0};
+}
+
+void Launcher::testInstallProgress(float f, const std::string& line)
+{
+    installState_ = 1;
+    installFrac_ = f;
+    std::lock_guard<std::mutex> l(zoneMutex_);
+    installLine_ = line;
+}
+
+void Launcher::testDone(const std::string& dest)
+{
+    installState_ = 2;
+    installDir_ = dest;
+    step_ = kDone;
+}
+
+void Launcher::startInstall()
+{
+    if (installState_ == 1) return;
+    if (installThread_.joinable()) installThread_.join();
+    InstallOptions o;
+    const bool repairHere = mode == Mode::Repair && installed;
+    o.dest = repairHere ? packageRoot : installDir_;
+    o.programRoot = packageRoot;
+    o.arcade = cfg.arcade, o.pc = cfg.pc;
+    o.settingsFrom = cacheDir + "launcher.ini";
+    o.desktop = optDesktop_ && !repairHere, o.startMenu = optStartMenu_ && !repairHere, o.steam = optSteam_ && !repairHere;
+    o.music = optMusic_;
+    o.version = version;
+    installState_ = 1;
+    installFrac_ = 0;
+    installErr_.clear();
+    installThread_ = std::thread([this, o]() {
+        const InstallResult r = installGame(o, [this](float f, const std::string& s) {
+            installFrac_ = f;
+            std::lock_guard<std::mutex> l(zoneMutex_);
+            installLine_ = s;
+        });
+        std::lock_guard<std::mutex> l(zoneMutex_);
+        installErr_ = r.err;
+        installedExe_ = r.gameExe;
+        installState_ = r.ok ? 2 : 3;
+    });
+}
+
+// Next: the page's own step (the files: kept in launcher.ini as chosen, a CD image as its copied folder)
+void Launcher::next(SDL_Window* window)
+{
+    (void)window;
+    if (step_ == kWelcome) {
+        if (installDirProblem(installDir_, packageRoot).empty() || packageRoot.empty()) step_ = kFiles;
+        for (int i = 0; i < 2; ++i) {   // (the files already known: checked as the page opens)
+            const std::string& p = i == 0 ? cfg.arcade : cfg.pc;
+            if (!p.empty() && zoneCopy(i).state == 0) checkZone(i, p);
+        }
+        return;
+    }
+    if (step_ == kFiles) {
+        if (!zonesReady()) return;
+        cfg.arcade = zoneCopy(0).checked;
+        cfg.pc = zoneCopy(1).checked;
+        cfg.save(cacheDir + "launcher.ini");
+        if (mode == Mode::Repair && !installed) { click(kStart, window); return; }   // (a portable copy: these files, play)
+        step_ = mode == Mode::Repair ? kInstall : kOptions;
+        return;
+    }
+    if (step_ == kOptions) { step_ = kInstall; return; }
+}
+
+void Launcher::back()
+{
+    if (installState_ == 1) return;
+    if (step_ == kInstall && installState_ == 3) installState_ = 0;
+    if (mode == Mode::Repair) { if (step_ == kInstall) step_ = kFiles; return; }
+    if (step_ > kWelcome && step_ < kDone) --step_;
+}
 
 void Launcher::render(int ww, int wh)
 {
@@ -579,229 +1086,417 @@ void Launcher::render(int ww, int wh)
         if (wordmarkFile.empty() || !readPngRgba(wordmarkFile, wordW_, wordH_, word_, err) || wordW_ <= 0 || wordH_ <= 0)
             wordW_ = wordH_ = 0;
     }
-    std::vector<ExtraLine> rows;
-    if (extraLines && (!extraWhen || extraWhen()))
-        rows = extraLines();
-    // Play is greyed out until the arcade ROMs are chosen (and, once checked, passed)
-    const bool canPlay = checked && arcadeOk_ && pcOk && !checkRequested_;   // (greyed until both pass, user 2026-10-31)
+    const Zone za = zoneCopy(0), zp = zoneCopy(1);
+    std::string instLine, instErr;
+    {
+        std::lock_guard<std::mutex> l(zoneMutex_);
+        instLine = installLine_, instErr = installErr_;
+    }
+    const int ist = installState_;
+    if (ist == 2 && step_ == kInstall) step_ = kDone;
     // what the picture shows: drawn again only when it changes
-    std::string key = std::to_string(ww) + 'x' + std::to_string(wh) + '|' + cfg.arcade + '|' + cfg.pc + '|' +
-                      std::to_string(pressed_) + '|' + std::to_string(lang::gen()) + '|' + extraTitle + (canPlay ? "+" : "-") + (windowed ? "w" : "");
-    for (const std::string& s : status) key += '\n' + s;
-    for (const std::string& s : notes) key += '\r' + s;
-    for (const ExtraLine& r : rows) key += '\t' + r.label + '\v' + r.value + (r.clickable ? '1' : '0');
+    std::string key = std::to_string(ww) + 'x' + std::to_string(wh) + '|' + std::to_string(int(mode)) + '|' + std::to_string(step_) + '|' +
+                      std::to_string(pressed_) + '|' + std::to_string(hover_) + '|' + std::to_string(dropHover_) + '|' +
+                      std::to_string(lang::gen()) + '|' + installDir_ + '|' + std::to_string(scroll_) + '|' +
+                      std::to_string(optDesktop_) + std::to_string(optStartMenu_) + std::to_string(optSteam_) + std::to_string(optMusic_);
+    for (const Zone* z : {&za, &zp}) {
+        key += '\n' + z->path + '\t' + std::to_string(z->state) + z->line + '\t' + std::to_string(int(z->progress * 100));
+        for (const std::string& s : z->more) key += '\v' + s;
+    }
+    key += '\r' + std::to_string(ist) + std::to_string(int(installFrac_ * 200)) + instLine + instErr + updateErr_;
+    if (download_) key += '\a' + std::to_string(int(download_->state())) + std::to_string(int(download_->progress() * 200)) + download_->message();
+    for (const std::string& s : status) key += '\f' + s;
     if (key == drawnKey_) {
         page_.drawAnchored(ww, wh, drawX_, drawY_, 0.0f, 0.0f);
         return;
     }
     drawnKey_ = key;
-
     auto T = [](const char* s) { return lang::tr(s); };
-    // THOTDRUN.EXE's AUTORUNDIALOG (177 x 220 dialog units): a picture at the top (15, 10, 149 x 98), then a column of
-    // full-width buttons (15, 119 / 135 / 156 / 172, 149 x 14), a gap, "Exit to Windows" (194). Ours: the same column,
-    // a little wider for the files' names; 1 unit = 1 pixel at scale 1
-    constexpr float W = 300, M = 16, BW = W - 2 * M, BH = 24;
-    float height = 0;                  // (the last pass's: the frame)
-    std::vector<Hot> hots;             // (canvas pixels)
-    auto paint = [&](Painter& p) -> float {
-        auto hotAt = [&](float x, float y, float bw, float bh, int action) {
-            if (p.on) hots.push_back({p.P(x), p.P(y), p.P(x + bw), p.P(y + bh), action});
-        };
-        auto fitText = [&](const std::string& s, float maxW, float cap, bool tail) {
-            if (p.textW(s, cap) <= maxW) return s;
-            for (size_t n = s.size(); n > 4; --n) {
-                const std::string cut = tail ? "..." + util::utf8Tail(s, n) : util::utf8Head(s, n) + "...";
-                if (cut.size() < s.size() + 3 && p.textW(cut, cap) <= maxW) return cut;
-            }
-            return std::string("...");
-        };
-        // a classic push button (raised; pushed in while held; greyed text: not available)
-        auto button = [&](const std::string& label, float x, float y, float bw, float bh, int action, bool enabled) {
-            p.fill(x, y, bw, bh, kButton);
-            const bool down = enabled && pressed_ == action;
-            if (down) p.pushed(x, y, bw, bh);
-            else p.raised(x, y, bw, bh);
-            const float cap = 7.0f, off = down ? 1.0f : 0.0f;
-            const std::string shown = fitText(label, bw - 12, cap, false);
-            p.text(shown, x + (bw - p.textW(shown, cap)) / 2 + off, y + bh / 2 + cap / 2 + off, cap, enabled ? kText : kGreyed);
-            if (enabled) hotAt(x, y, bw, bh, action);
-        };
-        auto fileName = [](const std::string& path) {
-            std::string n = std::filesystem::path(path).filename().string();
-            return n.empty() ? path : n;
-        };
-        // the window: its frame, the title bar (the reference's: light, the title, an X at the right). windowed: the
-        // setup's own small window has the system's title bar and X: the body only
-        p.fill(0, 0, W, height, kFace);
-        if (!windowed) p.frame(0, 0, W, height);
-        const float tb = windowed ? 0.0f : 3.0f, th = windowed ? 0.0f : 26.0f;
-        if (!windowed) {
-            p.fill(tb, tb, W - 2 * tb, th, kLight);
-            p.text(T("The House of the Dead: ReWrithe Setup"), tb + 9, tb + th / 2 + 4, 7.5f, kText);
-        }
-        if (!windowed) {   // the close box (= Exit)
-            const float cb = 26, cx = W - tb - cb, cy = tb;
-            if (pressed_ == kQuit) p.fill(cx, cy, cb, th, 0xE81123);
-            const int k = std::max(1, p.t()), n = p.P(9), x0 = p.P(cx + cb / 2) - n / 2, y0 = p.P(cy + th / 2) - n / 2;
-            const uint32_t c = pressed_ == kQuit ? kLight : kText;
-            for (int i = 0; i < n; ++i) {
-                p.fillPx(x0 + i, y0 + i, x0 + i + k, y0 + i + k, c);
-                p.fillPx(x0 + n - 1 - i, y0 + i, x0 + n - 1 - i + k, y0 + i + k, c);
-            }
-            hotAt(cx, cy, cb, th, kQuit);
-        }
-        // the picture (the original: the logo over a zombie; ours: the title and our wordmark on a dark ground)
-        float y = tb + th + 12;
-        const float ph = 118;
-        p.sunken(M, y, BW, ph);
-        {
-            const float k = float(2 * p.t()) / p.s;
-            p.fill(M + k, y + k, BW - 2 * k, ph - 2 * k, 0x120505);
-        }
-        {
-            const std::string t = "THE HOUSE OF THE DEAD";
-            p.text(t, M + (BW - p.textW(t, 9.0f)) / 2, y + 34, 9.0f, 0xC82020);
-        }
-        if (wordW_ > 0) {
-            const float dw = BW - 30, dh = dw * float(wordH_) / float(wordW_);
-            p.image(word_, wordW_, wordH_, M + 15, y + 42, dw, dh);
-        } else {
-            p.text("REWRITHE", M + (BW - p.textW("REWRITHE", 16.0f)) / 2, y + 80, 16.0f, 0xE8E0D0);
-        }
-        {
-            const std::string t = T("Unofficial. Plays from your own arcade ROMs and 1998 PC game.");
-            const std::string s = fitText(t, BW - 16, 5.5f, false);
-            p.text(s, M + (BW - p.textW(s, 5.5f)) / 2, y + ph - 12, 5.5f, 0xA89E90);
-        }
-        y += ph + 12;
-        // the files (user 2026-10-31): each a label with the chosen name, two equal buttons (a zip or a folder, either
-        // works for both), a small line on what it is
-        const float half = (BW - 6) / 2;
-        auto fileRow = [&](const std::string& label, const std::string& path, int aZip, int aFolder, const std::string& note) {
-            const std::string name = path.empty() ? T("(not chosen)") : fileName(path);
-            p.text(label, M, y + 9, 7.0f, kText);
-            p.text(fitText(name, BW - p.textW(label, 7.0f) - 6, 7.0f, true), M + p.textW(label, 7.0f) + 6, y + 9, 7.0f,
-                   path.empty() ? kGreyed : kBlue);
-            y += 14;
-            button(T("Choose Zip..."), M, y, half, BH - 2, aZip, true);
-            button(T("Choose Folder..."), M + half + 6, y, half, BH - 2, aFolder, true);
-            y += BH + 1;
-            for (const std::string& r : lang::wrapBy(note, BW, [&](const std::string& x) { return p.textW(x, 5.5f); })) {
-                p.text(r, M, y + 7, 5.5f, kGreyText);
-                y += 10;
-            }
-            y += 8;
-        };
-        fileRow(T("Arcade ROMs:"), cfg.arcade, kArcadeZip, kArcadeFolder,
-                T("Sega Model 2 arcade, Revision A (MAME set \"hotd\"). Any file name."));
-        fileRow(T("PC Game:"), cfg.pc, kPcZip, kPcFolder, T("The 1998 PC version: its installed folder or a zip of it. Any name. Its CD music is optional (the arcade's is used)."));
-        button(T("Check Files"), M, y, BW, BH, kCheck, !cfg.arcade.empty() || !cfg.pc.empty());
-        y += BH + 6;
-        button(T("Play The House of the Dead: ReWrithe"), M, y, BW, BH + 6, kStart, canPlay);
-        y += BH + 6 + 10;
-        // the check's result: OK, or CANNOT START and what to do
-        {
-            const float cap = 6.0f, lineH = 11;
-            std::vector<std::pair<std::string, uint32_t>> lines;
-            auto add = [&](const std::string& s, uint32_t c) {
-                const std::string shown = lang::active() ? lang::tr(s) : s;
-                for (const std::string& r : lang::wrapBy(shown, BW, [&](const std::string& x) { return p.textW(x, cap); }))
-                    lines.push_back({r, c});
-            };
-            for (const std::string& s : status) {
-                const size_t lead = s.find_first_not_of(' ');
-                const std::string t = lead == std::string::npos ? std::string() : s.substr(lead);
-                const uint32_t c = t.rfind("CANNOT START", 0) == 0 || t.rfind("Cannot start", 0) == 0 ? kRed
-                                   : t.rfind("->", 0) == 0                                               ? kBlue
-                                   : t.rfind("OK", 0) == 0                                               ? kGreen
-                                                                                                         : kText;
-                add(t, c);
-            }
-            if (status.empty())
-                add(T("Choose both, then Check Files."), kText);
-            for (const std::string& s : notes)
-                add(s, kGreyText);
-            for (const auto& [l, c] : lines) {
-                p.text(l, M, y + 8, cap, c);
-                y += lineH;
-            }
-            y += 14;   // (the original's gap before Exit)
-        }
-        if (false && !rows.empty()) {   // online co-op: not in the setup (user 2026-10-31: both files are needed; online is in the menu)
-            p.text(lang::tr(extraTitle), M, y + 9, 7.0f, kText);
-            y += 16;
-            for (size_t i = 0; i < rows.size(); ++i) {
-                const ExtraLine& r = rows[i];
-                if (r.clickable)
-                    button(r.label, M, y, 150, BH - 4, kExtraBase + int(i), true);
-                else
-                    p.text(r.label, M, y + 15, 7.0f, kText);
-                if (!r.value.empty())
-                    p.text(fitText(r.value, BW - 160, 6.5f, false), M + 160, y + 15, 6.5f, kGreyText);
-                y += BH;
-            }
-            y += 8;
-        }
-        button(T("Exit to Windows"), M, y, BW, BH, kQuit, true);
-        return y + BH + 16;
-    };
+
     Painter p;
     p.tf = lang::anyFont();
-    const float h1 = paint(p);   // (s = 1: the height, then the scale that fits the window)
-    float s = std::min({(float(ww) - 16.0f) / W, float(wh) * 0.96f / h1, float(ww) * 0.6f / W});
-    if (windowed)   // the setup's own window: the body fills its width (the host sizes it to wantW x wantH x the DPI scale)
-        s = float(ww) / W;
-    s = std::clamp(s, 0.5f, 4.0f);
-    wantW = W;
-
-    p.s = s;
-    height = paint(p);           // (at that scale: the text wraps the same, mostly)
-    wantH = height;
-    hots.clear();
-    p.w = int(std::ceil(W * s)) + 1;
-    p.h = int(std::ceil(height * s)) + 1;
+    p.s = scale_ = std::clamp(std::min(float(ww) / kW, float(wh) / kH), 0.5f, 4.0f);
+    p.w = std::max(1, int(std::ceil(kW * p.s)));
+    p.h = std::max(1, int(std::ceil(kH * p.s)));
     p.px.assign(size_t(p.w) * size_t(p.h) * 4, 0);
-    p.on = true;
-    paint(p);
+    std::vector<Hot> hots;
+    auto hotAt = [&](float x, float y, float bw, float bh, int action) { hots.push_back({p.P(x), p.P(y), p.P(x + bw), p.P(y + bh), action}); };
+    auto fitText = [&](const std::string& s, float maxW, float cap, bool tail) {
+        if (p.textW(s, cap) <= maxW) return s;
+        for (size_t n = s.size(); n > 4; --n) {
+            const std::string cut = tail ? "..." + util::utf8Tail(s, n) : util::utf8Head(s, n) + "...";
+            if (cut.size() < s.size() + 3 && p.textW(cut, cap) <= maxW) return cut;
+        }
+        return std::string("...");
+    };
+    auto wrap = [&](const std::string& s, float maxW, float cap) {
+        return lang::wrapBy(s, maxW, [&](const std::string& x) { return p.textW(x, cap); });
+    };
+    // a classic push button (raised; pushed in while held; greyed text: not available); primary = the default
+    // button (Windows': a black line around it)
+    auto button = [&](const std::string& label, float x, float y, float bw, float bh, int action, bool enabled, bool primary) {
+        const bool down = enabled && pressed_ == action;
+        p.fill(x, y, bw, bh, enabled && hover_ == action ? kButtonHi : kButton);
+        const float k = primary && enabled ? 1.0f : 0.0f;
+        if (k > 0) p.frame(x, y, bw, bh, kText);
+        if (down) p.pushed(x + k, y + k, bw - 2 * k, bh - 2 * k);
+        else p.raised(x + k, y + k, bw - 2 * k, bh - 2 * k);
+        const float cap = 9.0f, off = down ? 1.0f : 0.0f;
+        const std::string shown = fitText(label, bw - 16, cap, false);
+        p.text(shown, x + (bw - p.textW(shown, cap)) / 2 + off, y + bh / 2 + cap / 2 + off, cap, enabled ? kText : kGreyed);
+        if (enabled) hotAt(x, y, bw, bh, action);
+    };
+    // a sunken white field
+    auto field = [&](float x, float y, float fw, float fh) {
+        p.fill(x, y, fw, fh, kField);
+        p.sunken(x, y, fw, fh);
+    };
+    auto para = [&](const std::string& s, float x, float& y, float maxW, float cap, uint32_t c) {
+        for (const std::string& l : wrap(s, maxW, cap)) {
+            p.text(l, x, y + cap, cap, c);
+            y += cap * 1.9f;
+        }
+    };
+    auto progressBar = [&](float x, float y, float bw, float frac) {
+        field(x, y, bw, 18);   // (Windows 98's: blue blocks)
+        const float inner = bw - 8, filled = inner * std::clamp(frac, 0.0f, 1.0f);
+        for (float bx = 0; bx + 1 < filled; bx += 10) p.fill(x + 4 + bx, y + 4, std::min(8.0f, filled - bx), 10, kBlue);
+    };
+    auto stateColour = [](int st) { return st == 2 ? kOk : st == 3 ? kWarn : st == 4 ? kBad : kDim; };
+
+    // the window: the header (the 1998 start window's picture: dark, the title in red, our wordmark; the steps), the
+    // page on the grey face, an etched line over the buttons
+    p.fill(0, 0, kW, kH, kBg);
+    p.fill(0, 0, kW, 64, kHead);
+    p.fill(0, 64, kW, 1, kShadow);
+    p.fill(0, 65, kW, 1, kLight);
+    if (wordW_ > 0) {   // (user 2026-11-02: the wordmark only)
+        const float dh = std::min(40.0f, 260.0f * float(wordH_) / float(wordW_)), dw = dh * float(wordW_) / float(wordH_);
+        p.image(word_, wordW_, wordH_, 24, (64 - dh) / 2, dw, dh);
+    } else {
+        p.text("REWRITHE", 24, 40, 14, kHeadText);
+    }
+    std::vector<std::string> steps;
+    int cur = -1;
+    if (mode == Mode::Setup) steps = {T("Install to"), T("Game files"), T("Options"), T("Install"), T("Play")}, cur = step_;
+    else if (mode == Mode::Repair) steps = {T("Game files"), T("Import"), T("Play")}, cur = step_ == kFiles ? 0 : step_ == kInstall ? 1 : 2;
+    else if (mode == Mode::Update) steps = {T("Update")}, cur = 0;
+    else steps = {T("What's new")}, cur = 0;
+    {
+        float x = kW - 24;
+        for (int i = int(steps.size()) - 1; i >= 0; --i) {
+            const std::string s = steps.size() > 1 ? std::to_string(i + 1) + "  " + steps[size_t(i)] : steps[size_t(i)];
+            const float w = p.textW(s, 8.5f);
+            x -= w;
+            p.text(s, x, 37, 8.5f, i == cur ? kHeadText : kHeadDim);
+            if (i == cur) p.fill(x, 45, w, 2, kRedTitle);
+            x -= 22;
+        }
+    }
+    p.etchedLine(24, kH - 58, kW - 48);
+    const float L = 48, R = kW - 48, CW = R - L, BY = kH - 44, BH = 30;
+    const bool busy = ist == 1 || (download_ && download_->state() == util::UpdateDownload::Running);
+    auto title = [&](const std::string& s) { p.text(s, L, 98, 16, kText); };
+    float y = 120;
+
+    if (mode == Mode::Setup && step_ == kWelcome) {
+        title(T("Install to"));
+        y = 124;
+        para(T("The game and your game files are copied to this folder. The originals are only read."), L, y, CW, 9, kDim);
+        y += 10;
+        field(L, y, CW - 140, 30);
+        p.text(fitText(installDir_, CW - 160, 9.5f, true), L + 10, y + 20, 9.5f, kText);
+        button(T("Browse..."), R - 128, y, 128, 30, kBrowseDir, !packageRoot.empty(), false);
+        y += 46;
+        const int64_t free = freeBytes(installDir_);
+        p.text(lang::fmt("Free space: {free}    Needed: about {need}", {{"free", free >= 0 ? mb(uint64_t(free)) : T("unknown")}, {"need", "450 MB"}}),
+               L, y + 9, 9, kDim);
+        y += 26;
+        const std::string why = packageRoot.empty() ? std::string() : installDirProblem(installDir_, packageRoot);
+        if (!why.empty()) {
+            p.mark(4, L, y, 11, kBad);
+            float yy = y;
+            para(lang::tr(why), L + 20, yy, CW - 20, 9, kBad);
+            y = yy;
+        }
+        y = std::max(y, 330.0f);
+        if (packageRoot.empty())
+            para(T("This is a developer build: it can only play from here (Install needs the release package)."), L, y, CW, 9, kFaint);
+        else if (!installed)
+            para(T("You can also play from this folder without installing (on the Install page)."), L, y, CW, 9, kFaint);
+        button(T("Exit"), L, BY, 110, BH, kQuit, true, false);
+        button(T("Next"), R - 130, BY, 130, BH, kNext, why.empty() || packageRoot.empty(), true);
+    } else if ((mode == Mode::Setup || mode == Mode::Repair) && step_ == kFiles) {
+        title(T("Game files"));
+        y = 124;
+        para(T("Drop a zip / .7z, a folder or a CD image on each box, or click it to choose. They are checked at once."), L, y, CW, 9, kDim);
+        const float zy = 162, zh = 290, gap = 24, zw = (CW - gap) / 2;
+        const struct { const Zone* z; const char* name; const char* sub; int click, folder; } zs[2] = {
+            {&za, "Arcade ROMs", "Revision A (MAME set \"hotd\")", kZoneA, kFolderA},
+            {&zp, "PC game", "The 1998 PC version", kZoneP, kFolderP}};
+        for (int i = 0; i < 2; ++i) {
+            const Zone& z = *zs[i].z;
+            const float x = L + float(i) * (zw + gap);
+            const bool hi = dropHover_ == i || hover_ == zs[i].click;
+            field(x, zy, zw, zh);
+            p.frame(x + 6, zy + 6, zw - 12, zh - 12, hi ? kBlue : z.state == 2 ? kOk : z.state == 3 ? kWarn : z.state == 4 ? kBad : kShadow);
+            hotAt(x, zy, zw, zh, zs[i].click);
+            float yy = zy + 34;
+            p.text(T(zs[i].name), x + 20, yy, 13, kText);
+            yy += 22;
+            p.text(T(zs[i].sub), x + 20, yy, 8.5f, kDim);
+            yy += 40;
+            if (z.path.empty()) {
+                const std::string a = T("Drop it here"), b = T("or click to choose a zip or CD image");
+                p.text(a, x + (zw - p.textW(a, 11)) / 2, zy + zh / 2 + 10, 11, kDim);
+                p.text(b, x + (zw - p.textW(b, 8.5f)) / 2, zy + zh / 2 + 34, 8.5f, kFaint);
+                if (i == 1) {   // (user 2026-11-03: the .cue is the one that works best; the .bin files are the music)
+                    float hy = zy + zh / 2 + 52;
+                    for (const std::string& l : wrap(T("A CD image: choose its .cue file (its .bin files hold the CD music)"), zw - 40, 8.5f)) {
+                        p.text(l, x + (zw - p.textW(l, 8.5f)) / 2, hy + 8.5f, 8.5f, kFaint);
+                        hy += 16;
+                    }
+                }
+            } else {
+                p.text(fitText(fileName(z.path), zw - 40, 10, false), x + 20, yy, 10, kText);
+                yy += 18;
+                p.text(fitText(backslashes(z.path), zw - 40, 7.5f, true), x + 20, yy, 7.5f, kFaint);
+                yy += 30;
+                const uint32_t c = stateColour(z.state);
+                p.mark(z.state, x + 20, yy - 10, 11, c);
+                float ly = yy - 11;
+                para(z.line, x + 40, ly, zw - 60, 9.5f, c);
+                ly += 4;
+                if (z.state == 1) {   // (checking: the loading bar)
+                    progressBar(x + 40, ly, zw - 80, z.progress);
+                    ly += 28;
+                }
+                for (const std::string& m : z.more)
+                    if (!m.empty()) para(m, x + 40, ly, zw - 60, 8.5f, kDim);
+                if (i == 1 && (z.state == 2 || z.state == 3))
+                    p.text(z.music ? lang::fmt("{n} CD music tracks found", {{"n", std::to_string(z.music)}}) : T("No CD music (the arcade's music plays)"),
+                           x + 40, ly + 9, 8.5f, kFaint);
+            }
+            button(T("Folder..."), x + zw - 130, zy + zh - 46, 110, 28, zs[i].folder, true, false);
+        }
+        if (mode == Mode::Repair) button(T("Cancel"), L, BY, 110, BH, installed || checked ? kNotNow : kQuit, true, false);
+        else button(T("Back"), L, BY, 110, BH, kBack, true, false);
+        const bool ready = zonesReady();
+        button(mode == Mode::Repair && !installed ? T("Play") : T("Next"), R - 130, BY, 130, BH, kNext, ready, true);
+    } else if (mode == Mode::Setup && step_ == kOptions) {
+        title(T("Options"));
+        y = 150;
+        auto box = [&](bool on, const std::string& label, const std::string& note, int action, bool enabled) {
+            const float bs = 16;
+            p.fill(L, y, bs, bs, enabled ? kField : kBg);
+            p.sunken(L, y, bs, bs);
+            if (on && enabled) p.mark(2, L + 3, y + 3, 10, kText);
+            p.text(label, L + 30, y + 13, 10, enabled ? kText : kFaint);
+            if (!note.empty()) p.text(note, L + 30 + p.textW(label, 10) + 14, y + 13, 8.5f, kFaint);
+            if (enabled) hotAt(L - 4, y - 6, std::max(300.0f, p.textW(label, 10) + 40), bs + 12, action);
+            y += 40;
+        };
+        box(optDesktop_, T("Desktop shortcut"), "", kOptDesk, true);
+        box(optStartMenu_, T("Start menu entry"), "", kOptStart, true);
+        box(optSteam_, T("Add to Steam"), T("(Steam must be closed)"), kOptSteam, true);
+        box(optMusic_ && zp.music > 0, T("Import the CD music"),
+            zp.music ? lang::fmt("({n} tracks found)", {{"n", std::to_string(zp.music)}}) : T("(none found in your PC game)"), kOptMusic, zp.music > 0);
+        button(T("Back"), L, BY, 110, BH, kBack, true, false);
+        button(T("Next"), R - 130, BY, 130, BH, kNext, true, true);
+    } else if ((mode == Mode::Setup || mode == Mode::Repair) && step_ == kInstall) {
+        const bool repairHere = mode == Mode::Repair && installed;
+        title(repairHere ? T("Import") : T("Install"));
+        y = 140;
+        auto row = [&](const std::string& k, const std::string& v) {
+            p.text(k, L, y + 10, 9.5f, kDim);
+            p.text(fitText(v, CW - 170, 9.5f, true), L + 170, y + 10, 9.5f, kText);
+            y += 26;
+        };
+        row(T("Install to"), repairHere ? backslashes(packageRoot) : installDir_);
+        row(T("Arcade ROMs"), backslashes(cfg.arcade));
+        row(T("PC game"), backslashes(cfg.pc));
+        y += 18;
+        if (ist == 1) {
+            progressBar(L, y, CW, installFrac_);
+            p.text(fitText(instLine, CW, 8.5f, false), L, y + 36, 8.5f, kDim);
+        } else if (ist == 3) {
+            p.mark(4, L, y, 11, kBad);
+            float yy = y;
+            para(instErr, L + 20, yy, CW - 20, 9.5f, kBad);
+        } else if (packageRoot.empty()) {
+            para(T("Install needs the release package; this developer build plays from here."), L, y, CW, 9, kFaint);
+        } else {
+            para(repairHere ? T("The game files are imported into the game's folder again.")
+                            : T("Copies the game and only the files it needs: the 29 arcade ROM files and the PC game's files (and the music if chosen)."),
+                 L, y, CW, 9, kDim);
+        }
+        button(T("Back"), L, BY, 110, BH, kBack, !busy, false);
+        if (!repairHere && mode == Mode::Setup)
+            button(T("Play from here"), R - 300, BY, 160, BH, kPlayHere, !busy, false);
+        button(repairHere ? T("Import") : T("Install"), R - 130, BY, 130, BH, kDoInstall, !busy && !packageRoot.empty(), true);
+    } else if ((mode == Mode::Setup || mode == Mode::Repair) && step_ == kDone) {
+        title(mode == Mode::Repair ? T("Files imported") : T("Installed"));
+        y = 140;
+        para(mode == Mode::Repair ? T("The game uses the new files from now on.")
+                                  : lang::fmt("The game is in {dir}. Start it with the shortcut from now on.", {{"dir", installDir_}}),
+             L, y, CW, 9.5f, kDim);
+        button(T("Play"), L + (CW - 240) / 2, 260, 240, 56, kPlay, true, true);
+        if (mode == Mode::Setup) {
+            const std::string o = T("Open the install folder");
+            const float w = p.textW(o, 9.5f);
+            p.text(o, L + (CW - w) / 2, 352, 9.5f, hover_ == kOpenFolder ? kRed : kBlue);
+            p.fill(L + (CW - w) / 2, 355, w, 1, hover_ == kOpenFolder ? kRed : kBlue);
+            hotAt(L + (CW - w) / 2 - 4, 336, w + 8, 24, kOpenFolder);
+        }
+        button(T("Exit"), L, BY, 110, BH, kQuit, true, false);
+    } else {   // What's New / Update: a scrolling text (markdown: headings, bullets), the buttons under it
+        std::string text = mode == Mode::Update ? update_.body : whatsNew;
+        if (mode == Mode::Update) {
+            title(T("Update available"));
+            p.text(lang::fmt("Version {new} is out (you have {old}).", {{"new", update_.tag}, {"old", version}}), L, 124, 9.5f, kDim);
+        } else {
+            title(lang::fmt("What's new in {v}", {{"v", version}}));
+        }
+        const float ty = 140, th = mode == Mode::Update ? 300.0f : 370.0f;
+        field(L, ty, CW, th);
+        std::vector<std::pair<std::string, float>> lines;   // (text, cap: 12 a heading); colour by cap
+        std::istringstream in(text);
+        for (std::string l; std::getline(in, l);) {
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            for (size_t k; (k = l.find("**")) != std::string::npos;) l.erase(k, 2);
+            l.erase(std::remove(l.begin(), l.end(), '`'), l.end());
+            if (l.rfind("# ", 0) == 0) continue;   // (the file's title)
+            if (l.rfind("<!--", 0) == 0) continue;
+            float cap = 8.5f;
+            std::string lead;
+            if (l.rfind("## ", 0) == 0 || l.rfind("### ", 0) == 0) { cap = 11; l = l.substr(l.find(' ') + 1); }
+            else if (l.rfind("- ", 0) == 0 || l.rfind("* ", 0) == 0) { lead = "-  "; l = l.substr(2); }
+            else if (l.rfind("  ", 0) == 0) { lead = "   "; l.erase(0, l.find_first_not_of(' ')); }
+            if (l.empty()) { lines.push_back({"", 4}); continue; }
+            bool first = true;
+            for (const std::string& w : wrap(l, CW - 40 - p.textW("-  ", cap), cap)) {
+                lines.push_back({(first ? lead : std::string(lead.size(), ' ')) + w, cap});
+                first = false;
+            }
+        }
+        float total = 0;
+        for (const auto& [s, cap] : lines) total += cap == 4 ? 8 : cap * 2.0f;
+        scrollMax_ = std::max(0, int(total - (th - 24)));
+        scroll_ = std::clamp(scroll_, 0, scrollMax_);
+        float ly = ty + 14 - float(scroll_);
+        for (const auto& [s, cap] : lines) {
+            const float hgt = cap == 4 ? 8 : cap * 2.0f;
+            if (ly >= ty + 4 && ly + hgt <= ty + th - 4 && !s.empty())
+                p.text(s, L + 20, ly + cap * 1.4f, cap, cap > 9 ? kText : kDim);
+            ly += hgt;
+        }
+        if (scrollMax_ > 0) {   // a plain scroll bar
+            const float bh = std::max(30.0f, (th - 8) * (th - 24) / total), by = ty + 4 + (th - 8 - bh) * float(scroll_) / float(scrollMax_);
+            p.fill(R - 18, ty + 2, 16, th - 4, kLite2);
+            p.fill(R - 18, by, 16, bh, kButton);
+            p.raised(R - 18, by, 16, bh);
+        }
+        if (mode == Mode::Update) {
+            const bool canUpdate = !packageRoot.empty();
+            float yy = ty + th + 18;
+            if (download_ && download_->state() == util::UpdateDownload::Running) {
+                progressBar(L, yy, CW, download_->progress());
+                p.text(download_->total() ? lang::fmt("{got} of {all}", {{"got", mb(download_->bytes())}, {"all", mb(download_->total())}})
+                                          : mb(download_->bytes()), L, yy + 32, 8.5f, kDim);
+            } else if (!updateErr_.empty() || (download_ && download_->state() == util::UpdateDownload::Failed)) {
+                p.mark(4, L, yy, 11, kBad);
+                para(updateErr_.empty() ? download_->message() : updateErr_, L + 20, yy, CW - 20, 9, kBad);
+            } else if (!canUpdate) {
+                para(T("This copy cannot update itself (a developer build): use the download page."), L, yy, CW, 9, kFaint);
+            }
+            button(T("Not now"), L, BY, 130, BH, kNotNow, !busy, false);
+            if (canUpdate) button(T("Update"), R - 130, BY, 130, BH, kUpdate, !busy, true);
+            else button(T("Download page"), R - 170, BY, 170, BH, kDownloadPage, true, true);
+        } else {
+            button(T("Continue"), R - 130, BY, 130, BH, kContinue, true, true);
+        }
+    }
+    // the start-up check's own lines (a failed check: the Game files page shows its zones; the rest here)
+    if (!notes.empty() && mode == Mode::Setup) {
+        float ny = kH - 76;
+        for (const std::string& n : notes) { p.text(fitText(n, CW, 7.5f, false), L, ny, 7.5f, kFaint); ny -= 12; }
+    }
+    wantW = kW, wantH = kH;
     drawX_ = std::floor((float(ww) - float(p.w)) / 2.0f);
     drawY_ = std::floor(std::max(0.0f, (float(wh) - float(p.h)) / 2.0f));
     hot_.clear();
     for (const Hot& h : hots)
         hot_.push_back({h.x0 + int(drawX_), h.y0 + int(drawY_), h.x1 + int(drawX_), h.y1 + int(drawY_), h.action});
+    if (!shotFile.empty()) {   // pchotfix: --setup-shot: the page into a PNG, nothing drawn
+        drawnKey_.clear();
+        if (!writePngRgba(shotFile, p.w, p.h, p.px))
+            std::fprintf(stderr, "setup shot: cannot write %s\n", shotFile.c_str());
+        return;
+    }
     page_.setImage(p.px, p.w, p.h);
     page_.drawAnchored(ww, wh, drawX_, drawY_, 0.0f, 0.0f);
 }
 
 void Launcher::click(int action, SDL_Window* window)
 {
-    if (action >= kExtraBase) {   // an extra row (online co-op)
-        if (extraClick) extraClick(action - kExtraBase);
-        return;
-    }
-    switch (action) {
-    case kArcadeFolder:
-    case kArcadeZip:
-    case kPcFolder:
-    case kPcZip: {
-        dialogTarget_ = action == kPcFolder || action == kPcZip ? 2 : 1;
+    auto dialog = [&](int target, bool folder) {
+        dialogTarget_ = target;
         auto cb = [](void* self, const char* const* files, int) {
             Launcher* l = static_cast<Launcher*>(self);
             std::lock_guard<std::mutex> lock(l->dialogMutex_);
             l->dialogResult_ = files && files[0] ? files[0] : "";
         };
-        const std::string& cur = action == kPcFolder || action == kPcZip ? cfg.pc : cfg.arcade;
+        const std::string cur = target == 3 ? installDir_ : target == 2 ? cfg.pc : cfg.arcade;
         const char* start = cur.empty() ? nullptr : cur.c_str();
-        if (action == kArcadeZip || action == kPcZip) {   // pczip: the PC game may stay zipped too
-            static const SDL_DialogFileFilter filter[] = {{"Zip archives", "zip"}};
-            SDL_ShowOpenFileDialog(cb, this, window, filter, 1, start, false);
-        } else {
+        if (folder) {
             SDL_ShowOpenFolderDialog(cb, this, window, start, false);
+        } else {
+            static const SDL_DialogFileFilter filter[] = {{"Zip, 7z or CD image (.cue)", "zip;7z;rar;cue;iso;bin;img"}, {"All files", "*"}};
+            SDL_ShowOpenFileDialog(cb, this, window, filter, 2, start, false);
         }
+    };
+    switch (action) {
+    case kNext: next(window); break;
+    case kBack: back(); break;
+    case kQuit: pending_ = Result::Quit; break;
+    case kBrowseDir: dialog(3, true); break;
+    case kZoneA: dialog(1, false); break;
+    case kZoneP: dialog(2, false); break;
+    case kFolderA: dialog(1, true); break;
+    case kFolderP: dialog(2, true); break;
+    case kOptDesk: optDesktop_ = !optDesktop_; break;
+    case kOptStart: optStartMenu_ = !optStartMenu_; break;
+    case kOptSteam: optSteam_ = !optSteam_; break;
+    case kOptMusic: optMusic_ = !optMusic_; break;
+    case kDoInstall: startInstall(); break;
+    case kPlayHere: click(kStart, window); return;
+    case kPlay: {
+        const bool fresh = mode == Mode::Setup && !installedExe_.empty();
+        if (fresh && winshell::launch(installedExe_, "", fs::path(installedExe_).parent_path().string())) {
+            pending_ = Result::Quit;   // (the installed copy runs now)
+            return;
+        }
+        mode = Mode::Setup;
+        click(kStart, window);
+        return;
+    }
+    case kOpenFolder: SDL_OpenURL(("file:///" + backslashes(installDir_)).c_str()); break;
+    case kDownloadPage: SDL_OpenURL(util::kReleasesPage); break;
+    case kUpdate: {
+        updateErr_.clear();
+        if (packageRoot.empty()) { SDL_OpenURL(util::kReleasesPage); break; }
+        if (!download_) download_ = std::make_unique<util::UpdateDownload>();
+        download_->start(update_, packageRoot + "/settings/update");
         break;
     }
-    case kCheck: checkRequested_ = true; startAfterCheck_ = false; status = {"Checking the files ..."}; break;
+    case kNotNow:
+    case kContinue:
+        mode = Mode::Setup;
+        scroll_ = 0;
+        if (checked && pcOk && arcadeOk_) pending_ = Result::Start;   // (back to the menu: the files passed already)
+        else click(kStart, window);
+        return;
     case kStart: checkRequested_ = true; startAfterCheck_ = true; status = {"Checking the files ..."}; break;
-    case kQuit: pending_ = Result::Quit; break;
     default: break;
     }
     cfg.save(cacheDir + "launcher.ini");
@@ -809,33 +1504,77 @@ void Launcher::click(int action, SDL_Window* window)
 
 void Launcher::handle(const SDL_Event& e, SDL_Window* window)
 {
+    int lw = 1, lh = 1, pw = 1, ph = 1;
+    if (window) {
+        SDL_GetWindowSize(window, &lw, &lh);
+        SDL_GetWindowSizeInPixels(window, &pw, &ph);
+    }
+    auto at = [&](float fx, float fy) {
+        const int mx = int(fx * float(pw) / float(std::max(lw, 1))), my = int(fy * float(ph) / float(std::max(lh, 1)));
+        int a = -1;
+        for (const Hot& h : hot_)
+            if (mx >= h.x0 && mx < h.x1 && my >= h.y0 && my < h.y1) a = h.action;
+        return a;
+    };
+    const bool filesPage = (mode == Mode::Setup || mode == Mode::Repair) && step_ == kFiles;
+    if (e.type == SDL_EVENT_DROP_POSITION && filesPage) {   // a file dragged over: the zone under it lit
+        const int a = at(e.drop.x, e.drop.y);
+        dropHover_ = a == kZoneA || a == kFolderA ? 0 : a == kZoneP || a == kFolderP ? 1 : -1;
+        return;
+    }
+    if (e.type == SDL_EVENT_DROP_COMPLETE) { dropHover_ = -1; return; }
+    if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) {
+        dropHover_ = -1;
+        int which = -1;
+        if (filesPage) {
+            const int a = at(e.drop.x, e.drop.y);
+            which = a == kZoneA || a == kFolderA ? 0 : a == kZoneP || a == kFolderP ? 1 : -1;
+        }
+        if (which < 0 && filesPage) which = zoneCopy(0).path.empty() ? 0 : 1;   // (dropped elsewhere: the empty one)
+        if (which >= 0) checkZone(which, e.drop.data);
+        return;
+    }
+    if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+        scroll_ = std::clamp(scroll_ - int(e.wheel.y * 40), 0, scrollMax_);
+        return;
+    }
     if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
-        if (e.key.key == SDLK_ESCAPE)
-            pending_ = Result::Quit;
-        else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)
-            click(kStart, window);
+        const bool text = mode == Mode::WhatsNew || mode == Mode::Update;
+        if (text && (e.key.key == SDLK_DOWN || e.key.key == SDLK_PAGEDOWN)) scroll_ = std::min(scroll_ + (e.key.key == SDLK_DOWN ? 40 : 300), scrollMax_);
+        else if (text && (e.key.key == SDLK_UP || e.key.key == SDLK_PAGEUP)) scroll_ = std::max(scroll_ - (e.key.key == SDLK_UP ? 40 : 300), 0);
+        else if (e.key.key == SDLK_ESCAPE) {
+            if (mode == Mode::Update) click(kNotNow, window);
+            else if (mode == Mode::WhatsNew) click(kContinue, window);
+            else if (step_ == kWelcome || mode == Mode::Repair) pending_ = Result::Quit;
+            else back();
+        } else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) {
+            // Enter: the files known (a portable copy with data\, the input test): straight to the check and Play;
+            // else the page's main button
+            if (mode == Mode::WhatsNew) click(kContinue, window);
+            else if (mode == Mode::Update) click(kNotNow, window);
+            else if (!cfg.arcade.empty() && !cfg.pc.empty() && step_ != kInstall && step_ != kDone && installState_ != 1) click(kStart, window);
+            else if (step_ == kDone) click(kPlay, window);
+            else next(window);
+        }
+        return;
+    }
+    if (e.type == SDL_EVENT_MOUSE_MOTION) {
+        hover_ = at(e.motion.x, e.motion.y);
         return;
     }
     const bool down = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN, up = e.type == SDL_EVENT_MOUSE_BUTTON_UP;
     if ((!down && !up) || e.button.button != SDL_BUTTON_LEFT)
         return;
-    int lw, lh, pw, ph;
-    SDL_GetWindowSize(window, &lw, &lh);
-    SDL_GetWindowSizeInPixels(window, &pw, &ph);
-    const int mx = int(e.button.x * float(pw) / float(std::max(lw, 1))), my = int(e.button.y * float(ph) / float(std::max(lh, 1)));
-    int at = -1;
-    for (const Hot& h : hot_)
-        if (mx >= h.x0 && mx < h.x1 && my >= h.y0 && my < h.y1)
-            at = h.action;
-    // as a Windows button: pushed in while held, done on the release over the same button
+    const int a = at(e.button.x, e.button.y);
+    // as a Windows button: done on the release over the same button
     if (down) {
-        pressed_ = at;
+        pressed_ = a;
         return;
     }
     const int was = pressed_;
     pressed_ = -1;
-    if (at >= 0 && at == was)
-        click(at, window);
+    if (a >= 0 && a == was)
+        click(a, window);
 }
 
 bool Launcher::runCheck()
@@ -851,33 +1590,24 @@ bool Launcher::runCheck()
         SDL_Log("[files] %s", s.c_str());
     pcOk = p.ok;
     arcadeOk_ = a.ok;
-    // setup (user 2026-10-31): one short result: OK, or CANNOT START and what to do (the files' list: hotd.log)
+    // the setup's zones show the result (a failed check: the Game files page)
+    for (int i = 0; i < 2; ++i) {
+        if (zoneThread_[i].joinable()) zoneThread_[i].join();
+        const Verdict v = i == 0 ? arcadeVerdict(cfg.arcade, a) : pcVerdict(cfg.pc, p);
+        const std::string& path = i == 0 ? cfg.arcade : cfg.pc;
+        std::lock_guard<std::mutex> l(zoneMutex_);
+        zone_[i] = Zone{path, path, path.empty() ? 0 : std::get<0>(v), std::get<1>(v), std::get<2>(v), i == 1 ? musicTracks(path) : 0};
+    }
     if (a.ok && p.ok)
         status.push_back("OK: the arcade ROMs (Revision A) and the PC game are ready.");
     else if (a.ok)
         status.push_back("CANNOT START: the PC game did not pass (the game needs both the arcade ROMs and the 1998 PC game).");
     else
         status.push_back("CANNOT START: the arcade ROMs did not pass.");
-    auto show = [&](const CheckReport& r, bool arcade) {
-        if (r.ok) return;
-        bool wrong = false;
-        int named = 0;   // relfix: the first few wrong / missing files by name (all of them: hotd.log)
-        for (const std::string& s : r.lines) {
-            const bool bad = s.rfind("MISSING", 0) == 0 || s.rfind("WRONG", 0) == 0;
-            const bool d = bad || s.rfind("moved", 0) == 0;
-            wrong |= s.rfind("WRONG", 0) == 0;
-            if (!d)
-                status.push_back(s);
-            else if (bad && named++ < 3)   // "WRONG   THOTD.EXE" / "MISSING SOUND/X.RBH": the name, not the hashes
-                status.push_back(s.substr(0, std::min(s.find(':'), s.find(" (1998"))));
-        }
-        if (arcade && wrong)   // (files of the set's names, other contents: another revision or a bad dump)
-            status.push_back("-> These are not Revision A ROMs: the game needs MAME's \"hotd\" set (Revision A); the original release (hotdo) and prototypes do not work.");
-        else if (const std::string h = placementHint(arcade ? cfg.arcade : cfg.pc, arcade); !h.empty())
-            status.push_back("-> " + h);
-    };
-    show(a, true);
-    show(p, false);
+    if (!(a.ok && p.ok) && mode == Mode::Setup) {
+        // the first start with nothing chosen: from the beginning; a failed check of known files: the Game files page
+        step_ = cfg.arcade.empty() && cfg.pc.empty() ? kWelcome : kFiles;
+    }
     return a.ok && p.ok;
 }
 
@@ -886,13 +1616,29 @@ Launcher::Result Launcher::frame(int ww, int wh)
     {
         std::lock_guard<std::mutex> lock(dialogMutex_);
         if (!dialogResult_.empty()) {
-            (dialogTarget_ == 2 ? cfg.pc : cfg.arcade) = dialogResult_;
+            if (dialogTarget_ == 3) installDir_ = installDirFor(dialogResult_);
+            else checkZone(dialogTarget_ - 1, dialogResult_);   // (a new choice: checked at once)
             dialogResult_.clear();
-            cfg.save(cacheDir + "launcher.ini");
-            // a new choice: checked at once (Play stays grey until the check passes)
-            checkRequested_ = true, startAfterCheck_ = false;
-            status = {"Checking the files ..."};
         }
+    }
+    if (download_ && download_->state() == util::UpdateDownload::Verified) {   // the update: hand over and quit
+        std::string msg;
+        if (util::handOverUpdate(packageRoot, download_->zipPath(), restartArgs, msg)) {
+            SDL_Log("update: %s (%s)", msg.c_str(), download_->zipPath().c_str());
+            std::printf("UPDATE: downloaded and verified %s, handed over to the updater\n", download_->zipPath().c_str());
+            std::fflush(stdout);
+            download_.reset();
+            pending_ = Result::Quit;
+        } else {
+            updateErr_ = "The updater could not start: " + msg;
+            download_.reset();
+        }
+    }
+    if (std::getenv("HOTD_UPDATE_AUTO") && download_ && download_->state() == util::UpdateDownload::Failed) {
+        std::printf("UPDATE: failed: %s\n", download_->message().c_str());   // (the test: the reason, then quit)
+        std::fflush(stdout);
+        pending_ = Result::Quit;
+        download_.reset();
     }
     static bool drawnChecking = false;
     if (checkRequested_ && drawnChecking) {
@@ -913,6 +1659,15 @@ Launcher::Result Launcher::frame(int ww, int wh)
     const Result r = pending_;
     pending_ = Result::None;
     return r;
+}
+
+} // namespace hotd::game
+
+namespace hotd::game {
+
+int Launcher::zoneState(int which) const
+{
+    return zoneCopy(which).state;
 }
 
 } // namespace hotd::game

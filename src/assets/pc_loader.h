@@ -22,6 +22,13 @@ bool pcBloodPages(const std::string& installDir, int blood, const std::vector<ui
                   std::vector<std::vector<uint8_t>>& out, std::string& err, const std::vector<uint8_t>* tbl = nullptr,
                   const std::vector<uint8_t>* pal = nullptr);
 
+// pchotfix (players 2026-11-02, GitHub #2 / #21): a VMC's page numbering. The Japanese PC release (and the copies
+// made from it: its BIGGER.VMC is 54,293,628 bytes, the B_<colour>.VMC sets smaller too) has 7 fewer pages below 512:
+// its pages 1..330 are the US / European release's 8..337 (those added pages 1-7: the grey menu font and a picture);
+// the world pages 512 and up are the same. Returns what to add to the file's page numbers below 512 (7 for the
+// Japanese layout, else 0); read once per file (its chunk headers)
+int pcVmcPageShift(const std::string& path);
+
 class PcSource : public AssetSource {
 public:
     explicit PcSource(PcConfig cfg);

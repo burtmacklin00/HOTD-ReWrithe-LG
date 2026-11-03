@@ -5,25 +5,37 @@ with OBS as usual. For anything odd, note **chapter, place, model source (arcade
 whether the game froze or only something looked / sounded wrong**. Tick what works, write a line for what doesn't.
 
 ## 1. Start-up and menus
-- [ ] **New setup window** (2026-10-31, setup): the package has `HOTDReWritheSetup.bat` (no `Play.bat` any more;
-      `Play (Safe Mode).bat` is still there). Copy the package somewhere, empty `data\arcade` / `data\pc`, delete
-      `settings\launcher.ini`, double-click `HOTDReWritheSetup.bat`: a small window like the 1998 CD's Auto Run window
-      (the ReWrithe wordmark on a dark picture, a column of buttons), centred, only an X in its title bar (no
-      minimize / maximize), it cannot be resized; F11 does nothing there. "Play" is grey until the check passes.
-      No welcome paragraph, health warning, music line or debug rows on it.
-  - [ ] After Play the game opens the way you set it (fullscreen / borderless / exclusive, or your window size), also
-        after Options -> System -> Files Check and back.
-  - [ ] Arcade ROMs and PC Game each have **Choose Zip...** and **Choose Folder...**: both work for both (a zip with any
-        name, a folder with any name); the chosen file / folder's real name shows next to the label, and the check runs
-        by itself right after a choice.
-  - [ ] **Check Files** shows one result: green OK, or red CANNOT START and a blue "->" hint (ROMs of another revision:
-        it says they are not Revision A).
-  - [ ] Options -> System -> Language Japanese / Korean / Arabic / Hebrew: the setup window's texts are translated.
-  - [ ] **Play** (or Enter) checks and opens the menu. Quit, start again: straight to the menu, no setup window.
-  - [ ] **Exit to Windows**, the X and Esc close it. A button pressed and dragged off does nothing (as in Windows).
-  - [ ] No settings rows any more: models, players, inputs, difficulty, lives, blood, frame rate, CRT ... are all in
-        Options and keep their values from an older `launcher.ini`.
-  - [ ] Options -> System -> Files Check opens the same window.
+- [ ] **New setup (v1.1.0, setup2)**: copy the package somewhere, empty `data\arcade` / `data\pc`, delete
+      `settings\launcher.ini`, double-click `HOTDReWritheSetup.bat`: a 960 x 600 window, dark, the ReWrithe wordmark
+      small at the top left, steps at the top right (Install to, Game files, Options, Install, Play), Back / Next at the
+      bottom. It cannot be resized; F11 does nothing there.
+  - [ ] **Install to**: `C:\Games\HOTD ReWrithe`, Browse... picks another folder (a folder with files in it gets
+        `\HOTD ReWrithe` added), free space shown. A folder in Program Files is refused with a red reason, Next grey.
+  - [ ] **Game files**: drag your ROM zip from Explorer onto "Arcade ROMs" and the PC game folder (or its zip) onto
+        "PC game": each turns green with a check mark. Click a box: a file dialog (zip or CD image); "Folder..." picks a
+        folder. Try a wrong file (the PC zip on Arcade ROMs, a folder without THOTD.EXE): red with a plain reason.
+        If you have a CD image (.iso / .bin+.cue) of the PC CD, drop it on "PC game" and note what it says.
+  - [ ] **Options**: Desktop shortcut and Start menu entry on, Add to Steam off, Import the CD music on with the
+        number of tracks found.
+  - [ ] **Install**: the bar fills, then **Play**. The game starts from the new folder (`C:\Games\HOTD ReWrithe`), its
+        desktop / Start menu shortcuts have your PC game's icon. "Open the install folder" opens it in Explorer.
+  - [ ] The installed folder works without your originals: rename your ROM zip / PC folder for a moment, start the game
+        from the shortcut: it goes straight to the menu.
+  - [ ] Windows Settings > Apps > Installed apps lists "The House of the Dead: ReWrithe" (version 1.1.0). Uninstall:
+        it asks first, then asks about your settings and high scores; afterwards the folder (or only `settings\`) and
+        the shortcuts are gone. Your original ROM zip / PC game are untouched.
+  - [ ] **Play from here** (on the Install page) plays without installing, as before.
+  - [ ] Options -> System -> **Repair / Change Files**: the Game files page; Cancel goes back to the menu.
+  - [ ] Options -> System -> **What's New**: this version's changes; Continue goes back to the menu. The page also
+        shows once by itself the first time a new version starts.
+  - [ ] Language Japanese / Korean / Arabic / Hebrew: the setup's texts are translated.
+  - [ ] **PC files of another version** (2026-11-02, pchotfix): drop a PC copy whose BIGGER.VMC differs (for example
+        the Japanese release): yellow "Accepted, with a note:" and a short note, Next works; the main menu's text and the
+        hand cursor look normal, PC models' textures look normal.
+  - [ ] A PC game one folder down (`data\pc\<folder>\Game Files\`): the main menu shows (not straight into the game).
+  - [ ] Drop a SEGA Saturn disc image (or its zip) on "PC game": red, "This is the Saturn version".
+- [ ] **Auto-update** (when a newer release is on GitHub): the page shows its version and changelog, Not now goes to
+      the menu, Update shows a progress bar, then the game closes and starts again in the new version; settings kept.
 - [ ] The game opens straight in borderless fullscreen (no small window). F11 / Alt+Enter leaves it; quit and restart:
       it opens the way you left it. Options -> "Start Fullscreen" Off / On works.
 - [ ] The viewer also opens fullscreen; F11 toggles.

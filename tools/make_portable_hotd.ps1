@@ -102,8 +102,8 @@ foreach ($d in "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "vcruntime140
 # 3. Start file and README
 @'
 @echo off
-rem Starts The House of the Dead: ReWrithe. The first time (or while files are missing) its setup window comes up:
-rem pick your arcade ROMs and PC game there, then Play; after that it goes straight to the menu.
+rem The House of the Dead: ReWrithe's setup: it always opens the setup window (install, or change the game files),
+rem also when it ran before. To play, use the shortcut / "The House of the Dead ReWrithe.exe" it makes, or bin\hotd.exe.
 rem Only paths relative to this file: works from any drive.
 rem Personal portable copy: put your own arcade ROM zip in data\arcade (or at data\hotd.zip) and your PC game files,
 rem in data\pc (a .zip of them, or unpacked: THOTD.EXE there or one folder down); the game finds them by itself, also when
@@ -112,7 +112,13 @@ rem Music: the PC release played CD audio; put your TrackNN.ogg files in data\mu
 rem .mp3 works too, any name ending in the track number ("House of the Dead 02.mp3"), or a .zip of them.
 setlocal
 cd /d "%~dp0"
-start "" "%~dp0bin\hotd.exe" %*
+if not exist "%~dp0bin\hotd.exe" (
+  echo bin\hotd.exe is missing. If Windows Defender removed it, restore it in Windows Security ^> Protection history
+  echo ^(a false positive^), or unzip the whole package again.
+  pause
+  exit /b 1
+)
+start "" "%~dp0bin\hotd.exe" --setup %*
 '@ | Set-Content -LiteralPath (Join-Path $Out "HOTDReWritheSetup.bat") -Encoding ascii
 @'
 @echo off
@@ -213,7 +219,8 @@ An unofficial rewrite. This package contains NO game data: you need your own cop
 
 How to run
 ----------
-Double-click HOTDReWritheSetup.bat. In the setup window, choose your Arcade ROMs and your PC Game (Choose Zip... or Choose Folder... for either; any names), then Play. The setup then makes "The House of the Dead ReWrithe.exe" here: use it from then on. The PC game's CD music is optional: without it the arcade's music plays.
+Double-click HOTDReWritheSetup.bat. In the setup window, drop (or click to choose) your Arcade ROMs and your PC game: a zip, a .7z, a folder or a CD image (choose its .cue); any names. Then Install (or Play from here). The PC game's CD music is optional: without it the arcade's music plays. HOTDReWritheSetup.bat always opens the setup again (to change the files).
+If your PC copy does not pass, try another one: copies of the 1998 PC game differ, and the US and European releases work best. When the setup says a file is missing or damaged, it is missing or damaged in that copy itself, wherever it came from: not a problem of the setup or the game. Keeping a second copy (US or European) at hand is recommended.
 Your own files only: put your arcade ROM zip in data\arcade and your PC game files (a .zip of them, or unpacked)
 in data\pc for a copy you carry to another PC of yours; the game then finds them by itself (also when started from bin\hotd.exe, e.g. by Steam). Never share a package
 with game files in it.
@@ -330,6 +337,7 @@ foreach ($d in "ui", "fonts", "lang", "mods") {
 Copy-Item -LiteralPath (Join-Path $repo "LICENSE") -Destination (Join-Path $Out "LICENSE.txt")
 Copy-Item -LiteralPath (Join-Path $repo "NOTICE.md") -Destination (Join-Path $Out "NOTICE.txt")
 Copy-Item -LiteralPath (Join-Path $repo "docs/release/CREDITS.txt") -Destination (Join-Path $Out "CREDITS.txt")
+Copy-Item -LiteralPath (Join-Path $repo "CHANGELOG.md") -Destination (Join-Path $Out "CHANGELOG.txt")   # setup2: What's New reads it
 # online co-op step by step (hosting, the share code, the LAN, port forwarding, the firewall, the messages)
 Copy-Item -LiteralPath (Join-Path $repo "docs\online_howto.md") -Destination (Join-Path $Out "ONLINE HOWTO.txt")
 

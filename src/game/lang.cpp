@@ -595,6 +595,20 @@ std::vector<std::string> wrapBy(const std::string& s, float maxW, const std::fun
             lines.push_back(trimEnd(line));
             line.clear();
         }
+        // a word wider than the whole line (a long file path, user 2026-11-03): broken where it fills the line
+        if (line.empty() && width(trimEnd(u)) > maxW) {
+            for (size_t i = 0; i < u.size();) {
+                const size_t at = i;
+                render::utf8Next(u, i);
+                const std::string ch = u.substr(at, i - at);
+                if (!line.empty() && width(line + ch) > maxW) {
+                    lines.push_back(line);
+                    line.clear();
+                }
+                line += ch;
+            }
+            continue;
+        }
         line += u;
     }
     if (!line.empty() || lines.empty()) lines.push_back(trimEnd(line));

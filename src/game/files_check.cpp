@@ -8,6 +8,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -93,7 +94,7 @@ std::string baseName(const std::string& p)
 
 bool readWhole(const std::string& path, std::vector<uint8_t>& out)
 {
-    FILE* f = std::fopen(path.c_str(), "rb");
+    FILE* f = hotd::fopenLong(path);
     if (!f)
         return false;
     hotd::fseek64(f, 0, SEEK_END);
@@ -116,7 +117,8 @@ std::string fileStamp(const fs::path& p)
     return std::to_string(size) + " " + std::to_string(t);
 }
 
-// the files of `where` (a file, or a folder searched up to 4 levels deep)
+// the files of `where` (a file, or a folder searched up to 6 levels deep; pchotfix: was 4, which missed the PC game
+// two folders down, e.g. data\pc\<rip>\Game Files\ART\STAGE1\WORLD\WORLD1.RBH)
 std::vector<fs::path> listFiles(const fs::path& where)
 {
     std::vector<fs::path> files;
@@ -127,7 +129,7 @@ std::vector<fs::path> listFiles(const fs::path& where)
     }
     fs::recursive_directory_iterator it(where, fs::directory_options::skip_permission_denied, ec), end;
     for (; !ec && it != end; it.increment(ec)) {
-        if (it.depth() > 4) {
+        if (it.depth() > 6) {
             it.disable_recursion_pending();
             continue;
         }
@@ -294,6 +296,28 @@ CheckReport checkArcade(const std::string& where, const std::string& regionsDir,
     return r;
 }
 
+namespace {
+const struct { size_t at; uint8_t eu, us; } kEuBits[] = {
+    {17109976, 0xFD, 0xBD}, {20519160, 0xFD, 0xBD}, {20648664, 0xFE, 0xDE}, {36476376, 0xFD, 0xBD}, {42048312, 0xEE, 0xCE}};
+} // namespace
+
+bool isEuBigger(const std::string& rel, const std::vector<uint8_t>& d)
+{
+    std::string r = rel;
+    for (char& c : r) c = c == '\\' ? '/' : char(std::tolower(static_cast<unsigned char>(c)));
+    if (r != "art/stage1/creature/bigger.vmc" || d.size() != 55211636) return false;
+    for (const auto& b : kEuBits)
+        if (d[b.at] != b.eu) return false;
+    return true;
+}
+
+bool fixEuBigger(const std::string& rel, std::vector<uint8_t>& d)
+{
+    if (!isEuBigger(rel, d)) return false;
+    for (const auto& b : kEuBits) d[b.at] = b.us;
+    return true;
+}
+
 // pczip: the PC game as a folder or a .zip (assets/pc_files.h; in a zip the install may be one folder down). Every
 // file is an item: its lower-case path relative to the install, the path to read it by (a real file, or
 // "<zip>/<entry>"), its size and its identity for remembered results (size + date; in a zip: the zip's + the CRC-32)
@@ -385,27 +409,20 @@ CheckReport checkPc(const std::string& folder, const std::string& cacheFile, std
         }
         if (backup)
             continue;
-        // relfix (players 2026-11-01: "155 of 156"): a patched THOTD.EXE (music / no-CD / Windows fixes) is accepted:
-        // ReWrithe reads only its sound cue table and icon from it (Audio::loadCueTable says so if they are gone)
-        if (at != byPath.end() && rel == "thotd.exe") {
-            std::vector<uint8_t> d;
-            if (pcfs::readFile(at->second.path, d) && d.size() > 0x400 && d[0] == 'M' && d[1] == 'Z') {
-                found[want.path] = at->second.path;
-                stamps[at->second.path] = at->second.stamp;
-                r.lines.push_back("Patched THOTD.EXE found: accepted (an unpatched 1998 PC copy is recommended)");
-                continue;
-            }
-        }
-        if (at != byPath.end()) {
-            ++bad;
-            r.lines.push_back(std::string("WRONG   ") + want.path + ": " + at->second.path + " is not the 1998 PC release's file (size " +
-                              std::to_string(want.size) + ", SHA-1 " + want.sha1 + " expected)");
-            continue;
-        }
-        lost.push_back(&want);
+        lost.push_back(&want);   // pchotfix: a different file at its path is looked for elsewhere first (below)
     }
-    // not at its path: looked for by size + SHA-1 among the folder's (zip's) files (once; the place is remembered)
+    // not at its path (or another file there): looked for by size + SHA-1 among the folder's (zip's) files (once; the
+    // place is remembered)
+    // pchotfix (players 2026-11-02, GitHub #21 / #2, the trailer's comments): a file that is there but differs from the
+    // 1998 release (another version: the Japanese release, a patch, a repack) is ACCEPTED with a note, no longer a
+    // block: the loaders read such files defensively (sprites_pc.cpp, pc_loader.cpp: the Japanese page numbers,
+    // damaged pages passed over). Only what the game cannot work without blocks Play: THOTD.EXE (a Windows program),
+    // GAMESNDS.RBH, the world / creature models and BIGGER.VMC missing entirely or not even the file type. A missing
+    // SOUND\O_*.RBH (one voice / sound effect) is a note: that sound stays silent.
+    std::set<std::string> variants;   // accepted different files (not remembered as matches)
+    int differ = 0, silent = 0;
     for (const PcFile* want : lost) {
+        const std::string rel = lower(want->path);
         const Item* hit = nullptr;
         auto m = memo.find(want->path);
         if (m != memo.end())
@@ -422,16 +439,96 @@ CheckReport checkPc(const std::string& folder, const std::string& cacheFile, std
             found[want->path] = hit->path;
             stamps[hit->path] = hit->stamp;
             r.lines.push_back(std::string("moved   ") + want->path + " found as " + hit->path);
-        } else {
+            continue;
+        }
+        // another version of the file: at its path, else under the same name one or more folders down (a copy of the
+        // CD in a sub-folder)
+        const Item* other = nullptr;
+        if (auto at = byPath.find(rel); at != byPath.end())
+            other = &at->second;
+        for (const auto& [k, it] : byPath)
+            if (!other && k.size() > rel.size() && k.compare(k.size() - rel.size(), rel.size(), rel) == 0 &&
+                (k[k.size() - rel.size() - 1] == '/' || k[k.size() - rel.size() - 1] == '\\'))
+                other = &it;
+        const bool sound = rel.rfind("sound/o_", 0) == 0;
+        if (other) {
+            std::vector<uint8_t> head;
+            const bool read = pcfs::readFile(other->path, head) && !head.empty();
+            const bool exe = rel == "thotd.exe";
+            const bool typeOk = read && (exe ? head.size() > 0x400 && head[0] == 'M' && head[1] == 'Z'
+                                             : head.size() >= 64 && std::memcmp(head.data(), "PIFF", 4) == 0);
+            if (typeOk) {
+                found[want->path] = other->path;
+                variants.insert(other->path);
+                ++differ;
+                std::string what = "a different version of the file";
+                if (exe)
+                    what = "a patched or other version of THOTD.EXE";   // relfix: only its sound cue table and icon are read
+                else if (rel == "art/stage1/creature/bigger.vmc" && other->size == 54293628)
+                    what = "the Japanese PC release's version (read with its own page numbers)";
+                else if (isEuBigger(rel, head))
+                    what = "the European CD's version (5 bits off; set back to the US file when installed)";
+                else if (other->size == want->size)
+                    what = "a few bytes differ (another pressing of the CD, or a read error while copying it)";
+                r.lines.push_back(std::string("DIFFERS ") + want->path + ": " + what + ", accepted (size " +
+                                  std::to_string(other->size) + "; the 1998 release's: " + std::to_string(want->size) + ")");
+                continue;
+            }
+            if (sound) {
+                ++silent;
+                r.lines.push_back(std::string("note    ") + want->path + " cannot be read (" + other->path + "): that sound stays silent");
+                continue;
+            }
             ++bad;
-            r.lines.push_back(std::string("MISSING ") + want->path + " (1998 PC release)");
+            r.lines.push_back(std::string("WRONG   ") + want->path + ": " + other->path + " is not a " +
+                              (exe ? "Windows program" : "House of the Dead data file") + " (empty, cut or another file; size " +
+                              std::to_string(other->size) + ", the 1998 release's: " + std::to_string(want->size) + ")");
+            continue;
+        }
+        if (sound) {
+            ++silent;
+            r.lines.push_back(std::string("note    ") + want->path + " missing: that sound stays silent");
+            continue;
+        }
+        ++bad;
+        r.lines.push_back(std::string("MISSING ") + want->path + " (1998 PC release)");
+    }
+    // pchotfix (GitHub #13): the PC game one or more folders down ("moved" files): the files the check does not list
+    // (SPRITE\SPR.RBH: the menu's pictures, MENU / TITLE / STAGEn palettes, B_<colour>.VMC ...) are found the same way,
+    // from the folder THOTD.EXE is in (else the menu fell back to the text launcher and went straight to the game)
+    std::map<std::string, std::string> extra;
+    if (const auto exe = found.find("THOTD.EXE"); exe != found.end()) {
+        const std::string& e = exe->second;
+        const size_t cut = e.size() >= 9 ? e.size() - 9 : 0;   // "thotd.exe"
+        if (lower(e.substr(cut)) == "thotd.exe" && cut > 0) {
+            const std::string root = lower(e.substr(0, cut));
+            for (const Item& it : all) {
+                const std::string p = lower(it.path);
+                if (p.size() > root.size() && p.compare(0, root.size(), root) == 0) {
+                    std::string k = p.substr(root.size());
+                    for (char& c : k)
+                        if (c == '\\') c = '/';
+                    extra.emplace(k, it.path);
+                }
+            }
         }
     }
     {
         std::ofstream f(cacheFile);
         for (const auto& [rel, real] : found)
-            f << rel << '\t' << real << '\t' << stamps[real] << '\n';
+            if (!variants.count(real))
+                f << rel << '\t' << real << '\t' << stamps[real] << '\n';
     }
+    {   // (after the remembered list: those are the checked files only)
+        std::set<std::string> listed;
+        for (const auto& [rel, real] : found)
+            listed.insert(lower(rel));
+        for (const auto& [k, real] : extra)
+            if (!listed.count(k))
+                found[k] = real;
+    }
+    if (!found.count("sprite/spr.rbh") && !pcfs::exists(folder + "/SPRITE/SPR.RBH"))
+        r.lines.push_back("note    SPRITE/SPR.RBH not found: the menu's pictures cannot be shown (the simple menu instead)");
     int music = 0;
     for (int t = 2; t <= 30; ++t) {
         char name[32];
@@ -439,12 +536,36 @@ CheckReport checkPc(const std::string& folder, const std::string& cacheFile, std
         music += byPath.count(name) ? 1 : 0;
     }
     r.ok = bad == 0;
-    r.lines.push_back("PC files: " + std::to_string(std::size(kPcFiles) - size_t(bad)) + " of " + std::to_string(std::size(kPcFiles)) +
+    const int matching = int(std::size(kPcFiles)) - bad - differ - silent;
+    r.lines.push_back("PC files: " + std::to_string(matching) + " of " + std::to_string(std::size(kPcFiles)) +
                       " match the 1998 PC release" + (pcfs::isZip(folder) ? " (in the zip)" : "") +
-                      (moved ? " (" + std::to_string(moved) + " found elsewhere in the " + (pcfs::isZip(folder) ? "zip" : "folder") + ")" : ""));
+                      (moved ? " (" + std::to_string(moved) + " found elsewhere in the " + (pcfs::isZip(folder) ? "zip" : "folder") + ")" : "") +
+                      (differ ? ", " + std::to_string(differ) + " another version (accepted)" : "") +
+                      (silent ? ", " + std::to_string(silent) + " sound(s) missing (silent)" : ""));
     r.lines.push_back("Music (optional, not checked): " + std::to_string(music) + " CD track(s) found (Music\\TrackNN.ogg)");
     if (!r.ok)
-        r.lines.push_back("Some PC files are missing or different: sound and the PC models need the 1998 PC release's files.");
+        r.lines.push_back("Some PC files are missing or not readable: the game needs the 1998 PC release's files.");
+    // pchotfix: the setup's short notes (yellow under the green OK)
+    for (const std::string& s : r.lines) {
+        if (s.rfind("DIFFERS ", 0) == 0 && r.notes.size() < 3) {
+            const std::string name = s.substr(8, s.find(':') - 8);
+            const bool ja = s.find("Japanese") != std::string::npos;
+            if (s.find("European CD's") != std::string::npos) {
+                r.notes.push_back(baseName(name) + ": the European CD's version (5 bits off), made the US file when installed.");
+                continue;
+            }
+            r.notes.push_back(baseName(name) + ": " +
+                              (ja ? "the Japanese PC release's version" : name == "THOTD.EXE" ? "a patched or other version" : "a different version of the file") +
+                              ", accepted; an unpatched 1998 copy is recommended.");
+        }
+    }
+    if (differ > 3)
+        r.notes.push_back(std::to_string(differ - 3) + " more file(s) of another version accepted (the list: settings\\hotd.log).");
+    if (silent)
+        r.notes.push_back(std::to_string(silent) + " sound file(s) missing: those sounds stay silent.");
+    for (const std::string& s : r.lines)
+        if (s.rfind("note    SPRITE", 0) == 0)
+            r.notes.push_back("SPRITE\\SPR.RBH not found: the simple menu instead of the PC game's menu art.");
     return r;
 }
 
@@ -467,9 +588,47 @@ std::string placementHint(const std::string& where, bool arcade)
     const std::string ext = lower(p.extension().string());
     if (ext == ".7z" || ext == ".rar")
         return "A " + ext + " archive is not read: unpack it (or repack it as a .zip) and choose that.";
-    if (ext == ".iso" || ext == ".bin" || ext == ".cue" || ext == ".img" || ext == ".mdf" || ext == ".nrg" || ext == ".chd")
-        return arcade ? "That is a disc image, not the arcade ROMs: the arcade ROMs are MAME's hotd zip."
-                      : "A CD image is not read: install the PC game (or copy the CD's files to a folder) and choose that folder.";
+    // pchotfix (player copies 2026-11-02): a disc image's kind from its first sectors: the SEGA Saturn version (its
+    // boot sector "SEGA SEGASATURN") or a PC CD (ISO 9660); raw 2352-byte sectors or 2048-byte ones
+    auto discKind = [](const std::vector<uint8_t>& d) -> int {   // 1 Saturn, 2 a PC CD, 0 unknown
+        auto at = [&](size_t off, const char* s) {
+            const size_t n = std::strlen(s);
+            return d.size() >= off + n && std::memcmp(d.data() + off, s, n) == 0;
+        };
+        if (at(0, "SEGA SEGASATURN") || at(16, "SEGA SEGASATURN") || at(24, "SEGA SEGASATURN"))
+            return 1;
+        if (at(16 * 2048 + 1, "CD001") || at(16 * 2352 + 16 + 1, "CD001") || at(16 * 2352 + 24 + 1, "CD001"))
+            return 2;
+        return 0;
+    };
+    auto discHint = [&](int kind) -> std::string {
+        if (kind == 1)
+            return "That is the SEGA Saturn version (a disc image), not the PC game: ReWrithe needs the 1998 Windows PC version.";
+        if (arcade)
+            return "That is a disc image, not the arcade ROMs: the arcade ROMs are MAME's hotd zip.";
+        return "A CD image is not read: copy all the files of the PC game's CD (open or mount the image) into a folder and "
+               "choose that folder.";
+    };
+    auto fileHead = [](const std::string& path) {
+        std::vector<uint8_t> d(17 * 2352 + 64);
+        FILE* f = hotd::fopenLong(path);
+        d.resize(f ? std::fread(d.data(), 1, d.size(), f) : 0);
+        if (f) std::fclose(f);
+        return d;
+    };
+    if (ext == ".iso" || ext == ".bin" || ext == ".cue" || ext == ".img" || ext == ".mdf" || ext == ".nrg" || ext == ".chd") {
+        std::string image = where;
+        if (ext == ".cue") {   // its first FILE "..."
+            std::ifstream cue(where);
+            std::string line;
+            while (std::getline(cue, line))
+                if (const size_t a = line.find('"'), b = line.rfind('"'); line.find("FILE") != std::string::npos && a != b) {
+                    image = (p.parent_path() / line.substr(a + 1, b - a - 1)).string();
+                    break;
+                }
+        }
+        return discHint(discKind(fileHead(image)));
+    }
     // what the place holds: the names of up to a few thousand files (a zip's entries, or a folder a few levels deep)
     std::vector<std::string> names;
     bool zipInZip = false;
@@ -487,15 +646,32 @@ std::string placementHint(const std::string& where, bool arcade)
         std::string err;
         if (!z.open(where, err))
             return "That file is not a zip (or it is damaged): choose " + what + " as a .zip or a folder.";
+        const ZipFile::Entry* image = nullptr;   // pchotfix: a disc image in the zip (its first track)
+        bool imageFirst = false;
         for (const ZipFile::Entry& e : z.entries()) {
             const std::string n = lower(baseName(e.name));
             names.push_back(n);
             const std::string ne = lower(e.name);
+            const std::string ie = ne.size() > 4 ? ne.substr(ne.size() - 4) : "";
+            const bool firstTrack = ne.find("track 01") != std::string::npos || ne.find("track 1)") != std::string::npos;
+            if ((ie == ".bin" || ie == ".iso" || ie == ".img") && (!image || (firstTrack && !imageFirst))) {
+                image = &e;
+                imageFirst = firstTrack;
+            }
             if (ne.size() > 4 && (ne.compare(ne.size() - 4, 4, ".zip") == 0 || ne.compare(ne.size() - 3, 3, ".7z") == 0 ||
                                   ne.compare(ne.size() - 4, 4, ".rar") == 0)) {
                 zipInZip = true;
                 if (innerZip.empty()) innerZip = e.name;
             }
+        }
+        if (image && std::find(names.begin(), names.end(), "thotd.exe") == names.end()) {
+            std::vector<uint8_t> d;
+            std::string rerr;
+            if (z.read(*image, d, rerr)) {
+                d.resize(std::min(d.size(), size_t(17 * 2352 + 64)));
+                return discHint(discKind(d));
+            }
+            return discHint(0);
         }
     }
     bool hasPcExe = false, hasRomName = false, hasMameOther = false;
@@ -514,7 +690,26 @@ std::string placementHint(const std::string& where, bool arcade)
         return "These look like ROMs of another game (or another revision): The House of the Dead needs MAME's hotd set (Revision A).";
     if (!arcade && !hasPcExe)
         return "No THOTD.EXE in there: choose the folder the PC game was installed to (where THOTD.EXE is), or a .zip of it.";
+    if (!arcade && names.size() < 10)   // pchotfix: a no-CD patch's zip (THOTD.EXE alone)
+        return "Only THOTD.EXE in there (a patch?): the PC game's other files (ART, SOUND, SPRITE ...) are needed too: "
+               "choose the whole installed folder, or copy the patched THOTD.EXE into it.";
     return {};
+}
+
+} // namespace hotd::game
+
+namespace hotd::game {
+
+const ArcadeRomId* arcadeRomIds(int& n)
+{
+    static std::vector<ArcadeRomId> ids = [] {
+        std::vector<ArcadeRomId> v;
+        for (const Rom& r : kRoms)
+            v.push_back({r.name, r.size, r.crc});
+        return v;
+    }();
+    n = int(ids.size());
+    return ids.data();
 }
 
 } // namespace hotd::game

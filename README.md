@@ -76,7 +76,7 @@ arcade version's more detailed models and textures or the PC's.
 >
 > **Made with AI assistance:** Anthropic's Claude assisted with the reverse engineering and with rewriting and combining
 > the existing code, directed and tested by the project's author (Tawhid);
-> the translations are machine-made and marked as such. No AI-generated images are shipped (the button icons are CC0
+> the translations are machine-made and marked as such. No AI-generated images/assets are shipped (the button icons are CC0
 > packs, the menu wordmark was set in a free font). Details: [docs/release/compliance_v1.0.0.md](docs/release/compliance_v1.0.0.md).
 
 > **Expect bugs:** v1.0.0 is the first public release. Every chapter plays from start to end, but not every mode,
@@ -86,21 +86,34 @@ arcade version's more detailed models and textures or the PC's.
 
 ## Quick start (players)
 
-1. Download the release zip (`hotd-rewrithe-v1.0.0-win64.zip`, GitHub Releases) and unzip it anywhere (not into Program Files).
-2. Put your own arcade ROM zip in `data\arcade`. It must be a **Revision A** dump: MAME's `hotd` set (the original
-   release `hotdo`, prototypes and other revisions are not supported; the game checks every file).
-3. Put your own 1998 PC game (its installed folder, or a `.zip` of it) in `data\pc`; the CD music (`TrackNN.ogg`) in `data\music`.
-4. Double-click `HOTDReWritheSetup.bat` once: choose the files, then Play. The setup then makes
-   **`The House of the Dead ReWrithe.exe`** in the same folder (with your PC game's icon): from then on start the game
-   with that. The PC game's CD music is optional (the arcade's music is used). An **unpatched** 1998 PC copy is
-   recommended; a patched THOTD.EXE (music / no-CD / Windows fixes) is accepted too. The mouse is the gun (left shoot, right reload).
-5. Something missing? The setup window says what and where it goes; details in `settings\hotd.log` (a crash also leaves
+1. Download the release zip (`hotd-rewrithe-v1.1.0-win64.zip`, GitHub Releases) and unzip it anywhere.
+2. Double-click `HOTDReWritheSetup.bat`. The setup window opens:
+   - **Install to**: the folder for the game (default `C:\Games\HOTD ReWrithe`; anywhere you like, but not Program Files).
+   - **Game files**: drop your **Arcade ROMs** (MAME's `hotd` set, **Revision A** only) and your **1998 PC game** on
+     the two boxes, as a zip, a folder or a CD image (`.iso`, `.bin` / `.cue`), or click a box to choose. Each is
+     checked at once: green is good, yellow is accepted with a note, red says why not ("This is the Saturn version",
+     "This is the PC demo", "SOUND\GAMESNDS.RBH is missing" ...).
+   - **Options**: Desktop shortcut, Start menu entry (both on), Add to Steam, import the CD music (`TrackNN.ogg`).
+   - **Install**: copies the game and only the files it needs (the 29 ROM files, the PC game's files, the music)
+     into the folder, so your originals are not needed any more. Or **Play from here** without installing.
+   - **Play**. From then on start the game with its shortcut; it opens at the main menu.
+3. Uninstall: Windows Settings > Apps > Installed apps > The House of the Dead: ReWrithe (no administrator needed). It
+   asks before deleting your settings and high scores.
+4. Change the game files later: Options > System > Repair / Change Files. What changed in a version: Options > System >
+   What's New (also shown once after an update).
+5. Something missing? The Game files page says what and why; details in `settings\hotd.log` (a crash also leaves
    `settings\crash-<date>.txt`: attach both to a bug report, never game files).
 
-6. First start without the files: the setup window (laid out like the 1998 PC CD's Auto Run window but I might update it in the future for something modern) opens
-   by itself; use **Choose Zip...** or **Choose Folder...** for the Arcade ROMs and the PC Game (any names), then **Play**. The check runs
-   once; after that the game opens at the main menu (every setting is in Options; Options -> System -> Files Check
-   brings the setup back).
+Portable use still works: put the ROM zip in `data\arcade`, the PC game in `data\pc` and the music in `data\music` of the
+unzipped folder, and start `bin\hotd.exe`: with the files found it goes straight to the menu. (`HOTDReWritheSetup.bat`
+always opens the setup.)
+An **unpatched** 1998 PC copy is recommended; a patched THOTD.EXE or PC files of another version (the Japanese release, repacks) are accepted with a
+note. The mouse is the gun (left shoot, right reload).
+
+> **If your PC copy does not pass the check, try another one.** Copies of the 1998 PC game differ: the US and the
+> European releases work best (a CD image: choose its `.cue`). When the setup says a file is missing or damaged, that
+> file is missing or damaged in the copy itself, wherever it came from: it is not a problem of the setup or the game.
+> Keeping a second copy (US or European) at hand is recommended.
 
 System requirements (Windows): Windows 10 / 11, 64-bit; graphics with **OpenGL 3.3**, or else a
 **DirectX 10.1-class GPU** (Intel HD 2000 / 3000 and newer, Radeon HD 3000+, GeForce GT 200+): Options > Video >
@@ -293,7 +306,7 @@ music, read from your PC files), reorganised:
   Sonic Mode, title / attract, FBI screen, **PC Start-up Screens** (the 1998 PC's SEGA screen and zombie title art at
   start-up; off by default); **Advanced**: game speed, music numbering, Trailer Mode, the 4P
   boss hit points and enemy toughness, guards), **Mods** (each mod On / Off, its Settings page) and **System** (Language,
-  Files Check (the setup window), desktop shortcut, Add to Steam). Most tabs end with **Reset to Defaults** (it asks
+  Repair / Change Files (the setup window), Check for Updates, What's New, desktop shortcut, Add to Steam). Most tabs end with **Reset to Defaults** (it asks
   first). Long lists show a scroll bar. **Live Background** Off shows the attract's scenes as stills in turn.
 
 **Boss Mode** (the PC port's): pick the Chariot, the Hangedman, the Hermit, the Magician or All Bosses (the four in a
@@ -380,7 +393,7 @@ shoulders previous / next, a stick click the source, East back.
 The line at the bottom explains the item under the hand. Mouse, keyboard (the arrows move the hand, Enter / Space
 click, Esc back), a gamepad (d-pad / stick, South / Start, East / Back) and a light gun's pointer all work. The whole
 640 x 480 picture always fits the window (side or top / bottom bars). Every setting is still in `launcher.ini` and the
-setup window (Options -> System -> Files Check) picks the game files.
+setup window (Options -> System -> Repair / Change Files) picks the game files.
 
 ### Secrets
 
@@ -556,9 +569,12 @@ what does not fit). The bundled Noto Sans fonts (Korean, Japanese, Arabic, Hebre
 ## Updates
 
 At start-up the game asks GitHub once whether a newer release of this project is out (Windows; one request to
-api.github.com, nothing else is sent). If there is one, the main menu asks whether to open the download page: unzip the new
-version over the old folder, the settings are kept. Nothing is downloaded or installed by itself. Off: Options > System >
-Check for Updates.
+api.github.com, nothing else is sent). If there is one, a page shows the new version and its changelog with **Update** /
+**Not now**. Update downloads the release's Windows zip (with a progress bar), checks it against the release's
+`SHA256SUMS.txt` (a mismatch is refused and deleted), then the game closes, the new version is unpacked over the
+game's folder (your `settings\` and the game files in `data\` are kept; nothing outside the folder is touched) and the
+game starts again, showing What's New. Nothing is downloaded unless you press Update. Off: Options > System > Check
+for Updates. Changes per version: [CHANGELOG.md](CHANGELOG.md) (`CHANGELOG.txt` in the package).
 
 ## Known issues
 
@@ -571,7 +587,7 @@ report what you find ([Reporting problems](docs/release/notes_v1.0.0.md#reportin
 
 The program is not code-signed, so Windows SmartScreen may show "Windows protected your PC / unknown publisher":
 click **More info**, then **Run anyway**. To check a download, compare its hash with the SHA-256 values published in the
-release notes (the hashes of the package files are printed by `tools\package_hashes.ps1`): `Get-FileHash .\hotd-rewrithe-v1.0.0-win64.zip -Algorithm SHA256` (PowerShell).
+release notes (the hashes of the package files are printed by `tools\package_hashes.ps1`): `Get-FileHash .\hotd-rewrithe-v1.1.0-win64.zip -Algorithm SHA256` (PowerShell).
 
 ## Icon and desktop shortcut
 

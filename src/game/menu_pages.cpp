@@ -194,7 +194,7 @@ void menuReset(LaunchConfig& c, int page)
         for (int p = 0; p < 4; ++p) c.gunDev[p].clear(), c.gunName[p].clear();   // (ipolish: Light Guns: Assign)
         break;
     case kCatGameplay:
-        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
+        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
         break;
     case kResetAdvanced:
@@ -626,6 +626,8 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         }
         r.push_back({"Auto Reload", [&c]() { return onOff(c.autoReload); }, [&c, save]() { c.autoReload = !c.autoReload; save(); },
                      "An empty gun reloads by itself (not in the originals): every player, 3P / 4P too; online the host's"});
+        r.push_back({"Edge Reload", [&c]() { return onOff(c.edgeReload); }, [&c, save]() { c.edgeReload = !c.edgeReload; save(); },
+                     "As The House of the Dead 2: moving the mouse crosshair onto the screen's edge reloads, no shot needed"});
         // skipfix (user 2026-10-27): the hold-to-skip of the cut-scenes the arcade cannot skip (main.cpp)
         // feat29 (user 2026-10-29: "Add Free Play in the settings"): the Cheat screen's Free-Play (THOTD.EXE 0xD5B35C,
         // launcher.ini freeplay=): PC Mode's continues never run out. Arcade games are free play already (no coins)
@@ -666,11 +668,14 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                          "Mods go in the data\\mods folder; how to make one: docs/modding.md"});
         break;
     case kCatSystem:
-        r.push_back({"Files Check", []() { return page("Setup"); }, [h]() { if (h.filesCheck) h.filesCheck(); },
-                     "Leave the menu for the setup: the game's files (arcade ROMs, PC game) and the files check"});
+        // setup2 (v1.1.0): the setup's Game files page (choose / import the arcade ROMs and the PC game again)
+        r.push_back({"Repair / Change Files", []() { return page("Setup"); }, [h]() { if (h.filesCheck) h.filesCheck(); },
+                     "The setup's Game files page: check or change your arcade ROMs and PC game (an install imports them again)"});
         r.push_back({"Check for Updates", [&c]() { return onOff(c.updateCheck); },
                      [&c, save]() { c.updateCheck = !c.updateCheck; save(); },
-                     "At start-up, ask GitHub whether a newer version is out (nothing is downloaded by itself). Next start"});
+                     "At start-up, ask GitHub whether a newer version is out; it is installed only when you press Update. Next start"});
+        r.push_back({"What's New", []() { return page("Open"); }, [h]() { if (h.whatsNew) h.whatsNew(); },
+                     "The changes in this version (CHANGELOG.txt)"});
         r.push_back({"Desktop Shortcut", [h]() { return h.shortcutValue ? h.shortcutValue() : std::string("Create"); },
                      [h]() { if (h.shortcut) h.shortcut(); }, "Put a shortcut to the game on the desktop (and the Start menu)"});
         // Add to Steam (util/steam_shortcut.h): its own page, the pictures to pick, then Add (Steam closed)

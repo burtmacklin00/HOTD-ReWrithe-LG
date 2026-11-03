@@ -270,7 +270,7 @@ bool ZipFile::open(const std::string& path, std::string& err)
 {
     path_ = path;
     entries_.clear();
-    FILE* f = std::fopen(path.c_str(), "rb");
+    FILE* f = hotd::fopenLong(path);
     if (!f) {
         err = path + ": cannot open";
         return false;
@@ -323,7 +323,7 @@ bool ZipFile::open(const std::string& path, std::string& err)
 
 bool ZipFile::read(const Entry& e, std::vector<uint8_t>& out, std::string& err) const
 {
-    FILE* f = std::fopen(path_.c_str(), "rb");
+    FILE* f = hotd::fopenLong(path_);
     if (!f) {
         err = path_ + ": cannot open";
         return false;
@@ -352,7 +352,7 @@ bool ZipFile::read(const Entry& e, std::vector<uint8_t>& out, std::string& err) 
 
 bool ZipFile::dataOffset(const Entry& e, uint64_t& off, std::string& err) const
 {
-    FILE* f = std::fopen(path_.c_str(), "rb");
+    FILE* f = hotd::fopenLong(path_);
     if (!f) {
         err = path_ + ": cannot open";
         return false;

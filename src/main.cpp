@@ -92,6 +92,7 @@
 #include "game/game_outputs.h"
 #include "game/lightgun_hid.h"
 #include "game/launcher.h"
+#include "game/installer.h"
 #include "game/lang.h"
 #include "game/view.h"
 #include "net/net_game.h"
@@ -191,9 +192,45 @@ static void mouseUsed(SDL_MouseID id)
 // during play): the off-screen shot (reload). edgereload (user 2026-10-22, a Surface tablet): not for a touch / pen,
 // which puts the gun on the picture directly (SDL clamps a touch to 0 .. w-1: a tap at the edge landed there and
 // reloaded); their reload: a second finger, the pen's barrel / eraser button, a 4:3 bar, the keys, Auto reload
+// GitHub #15 / #31 (user 2026-11-03: "borderless does not account for the border on the display"): the part of the
+// window the display shows, in window coordinates (w 0: all of it). Borderless is one pixel taller than its display
+// (util/fullscreen.h), so the window's last row is never on screen and the mouse never reached it: the edge is the
+// display's outermost pixel row / column instead (gunVisibleArea, each frame of play)
+static SDL_Rect gGunArea{0, 0, 0, 0};
+// --setup (HOTDReWritheSetup.bat; user 2026-11-03: a friend could not get back into the setup after Windows Defender
+// stopped it, the files being known): the setup window always comes up, even with the files known
+static bool gForceSetup = false;
+static void gunVisibleArea(SDL_Window* window, int lw, int lh)
+{
+    gGunArea = SDL_Rect{0, 0, lw, lh};
+    SDL_Rect d{};
+    int wx = 0, wy = 0;
+    if (!SDL_GetDisplayBounds(SDL_GetDisplayForWindow(window), &d) || !SDL_GetWindowPosition(window, &wx, &wy))
+        return;
+    const int x0 = std::max(0, d.x - wx), y0 = std::max(0, d.y - wy);
+    const int x1 = std::min(lw, d.x + d.w - wx), y1 = std::min(lh, d.y + d.h - wy);
+    if (x1 - x0 >= lw / 2 && y1 - y0 >= lh / 2)   // (a window mostly off its display: the window's own edges)
+        gGunArea = SDL_Rect{x0, y0, x1 - x0, y1 - y0};
+}
 static bool gunAtEdge(const game::GunState& g, int lw, int lh)
 {
-    return !g.pointer && (g.x < 1.0f || g.x > float(lw) - 2.0f || g.y < 1.0f || g.y > float(lh) - 2.0f);
+    const SDL_Rect a = gGunArea.w > 0 ? gGunArea : SDL_Rect{0, 0, lw, lh};
+    return !g.pointer && (g.x < float(a.x) + 1.0f || g.x > float(a.x + a.w) - 2.0f || g.y < float(a.y) + 1.0f ||
+                          g.y > float(a.y + a.h) - 2.0f);
+}
+// GitHub #17 (user 2026-11-03): Options > Gameplay "Edge Reload", as The House of the Dead 2: a player in play with
+// rounds fired whose mouse crosshair arrives on the screen's edge reloads (an off-screen pull, the original's reload),
+// once per arrival; only while shots are on (an off-screen pull in a cut-scene would skip it)
+static bool gEdgeWas[4] = {};
+static bool edgeReloadNow(game::Runtime& rt, int p, bool atEdge, bool on)
+{
+    const bool arrived = atEdge && !gEdgeWas[p & 3];
+    gEdgeWas[p & 3] = atEdge;
+    if (!on || !arrived || rt.pm_on())
+        return false;
+    const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
+    return rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && rt.mem.u32(game::A::G::shot_enable) != 0 && pl.state == 5 &&
+           pl.rounds < 6 && rt.mem.u32(game::A::G::ammo_enabled) != 0;
 }
 // the game area's half width in arcade units (the screen is +-192 high) for the launcher's Aspect: widescreen = the
 // window's; 4:3 = the arcade's 496-wide screen (248) at most; aspect1610: 16:10 = 192 x 1.6 = 307.2 at most
@@ -1988,6 +2025,31 @@ std::string packageFolder()
     return std::filesystem::exists(pkg / "hotd_package.txt", ec) ? pkg.string() : std::string();
 }
 
+// setup2: What's New: this version's section of the changelog (the package's CHANGELOG.txt, else the repository's
+// CHANGELOG.md): from its "## [1.1.0]" / "## v1.1.0" heading to the next "## "; "" when there is none
+std::string changelogSection(const std::string& root, const std::string& version)
+{
+    const std::string v = !version.empty() && version[0] == 'v' ? version.substr(1) : version;
+    for (const std::string& f : {packageFolder() + "/CHANGELOG.txt", root + "/CHANGELOG.md"}) {
+        std::ifstream in(f);
+        if (!in) continue;
+        std::string out, line;
+        bool on = false;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.rfind("## ", 0) == 0) {
+                if (on) break;
+                const size_t k = line.find(v);
+                on = k != std::string::npos && (k + v.size() >= line.size() || !std::isdigit(uint8_t(line[k + v.size()])));
+                continue;
+            }
+            if (on) out += line + "\n";
+        }
+        if (!out.empty()) return out;
+    }
+    return {};
+}
+
 // remake2: the arcade regions folder for the menu's art (the Remake style's blood) without the files check: the regions
 // chosen, else the ones a files check wrote before (the cache), else a developer's extracted ones; "" none
 std::string menuRegionsGuess(const std::string& regions, const std::string& cache, const std::string& root)
@@ -2168,6 +2230,8 @@ int checkFiles(const std::string& arcade, const std::string& pc, bool force)
     game::CheckReport p = game::checkPc(pc, cache + "pc_files.tsv", found, progress);
     for (const std::string& l : p.lines)
         std::printf("%s\n", l.c_str());
+    for (const std::string& l : p.notes)   // pchotfix: what the setup shows in yellow
+        std::printf("note: %s\n", l.c_str());
     if (const std::string h = a.ok ? std::string() : game::placementHint(arcade, true); !h.empty())   // firstrun
         std::printf("arcade hint: %s\n", h.c_str());
     if (const std::string h = p.ok ? std::string() : game::placementHint(pc, false); !h.empty())
@@ -2358,6 +2422,87 @@ static int langTool(const game::LaunchConfig& cfg, const std::string& exportCode
         "OK: the arcade ROMs are ready. The PC game did not pass: the game plays without sound and with the arcade models.",
         "CANNOT START: the arcade ROMs did not pass.",
         "-> These are not Revision A ROMs: the game needs MAME's \"hotd\" set (Revision A); the original release (hotdo) and prototypes do not work.",
+        // setup2 (v1.1.0): the setup window's pages, the updater, What's New (game/launcher.cpp)
+        "Install to",
+        "Game files",
+        "Options",
+        "Install",
+        "Play",
+        "Import",
+        "Update",
+        "What's new",
+        "Exit",
+        "Next",
+        "Back",
+        "Browse...",
+        "Cancel",
+        "Continue",
+        "Not now",
+        "Download page",
+        "Folder...",
+        "Play from here",
+        "Open the install folder",
+        "The game and your game files are copied to this folder. The originals are only read.",
+        "Free space: {free}    Needed: about {need}",
+        "unknown",
+        "This is a developer build: it can only play from here (Install needs the release package).",
+        "You can also play from this folder without installing (on the Install page).",
+        "Drop a zip, a folder or a CD image on each box, or click it to choose. They are checked at once.",
+        "Arcade ROMs",
+        "PC game",
+        "Revision A (MAME set \"hotd\")",
+        "The 1998 PC version",
+        "Drop it here",
+        "or click to choose a zip or CD image",
+        "{n} CD music tracks found",
+        "No CD music (the arcade's music plays)",
+        "Desktop shortcut",
+        "Start menu entry",
+        "Add to Steam",
+        "(Steam must be closed)",
+        "Import the CD music",
+        "({n} tracks found)",
+        "(none found in your PC game)",
+        "Install needs the release package; this developer build plays from here.",
+        "The game files are imported into the game's folder again.",
+        "Copies the game and only the files it needs: the 29 arcade ROM files and the PC game's files (and the music if chosen).",
+        "Files imported",
+        "Installed",
+        "The game uses the new files from now on.",
+        "The game is in {dir}. Start it with the shortcut from now on.",
+        "Update available",
+        "Version {new} is out (you have {old}).",
+        "What's new in {v}",
+        "{got} of {all}",
+        "This copy cannot update itself (a developer build): use the download page.",
+        "Checking ...",
+        "Copying the files from the CD image ...",
+        "All 29 ROM files match (Revision A)",
+        "This is the PC game, not the arcade ROMs",
+        "Not Revision A: MAME's \"hotd\" set is needed",
+        "The original release (hotdo) and prototypes do not work.",
+        "No arcade ROM files found here",
+        "{n} of 29 ROM files are missing",
+        "{file} is missing",
+        "The 1998 PC game: all files match",
+        "Accepted, with a note:",
+        "These are the arcade ROMs, not the PC game",
+        "This is the PC demo: the full 1998 PC game is needed",
+        "No PC game files found here",
+        "{n} files missing or different (all of them: settings\\hotd.log)",
+        "{file} is not the 1998 PC version's file",
+        "Not a readable CD image (ISO 9660)",
+        "This is the Saturn version",
+        "The game needs the 1998 PC version (and the arcade ROMs).",
+        "This is a console disc, not the PC game",
+        "This is a CD image, not the arcade ROMs",
+        "The CD image could not be read",
+        "Repair / Change Files",
+        "The setup's Game files page: check or change your arcade ROMs and PC game (an install imports them again)",
+        "What's New",
+        "The changes in this version (CHANGELOG.txt)",
+        "At start-up, ask GitHub whether a newer version is out; it is installed only when you press Update. Next start",
+        "Patched THOTD.EXE found: accepted (an unpatched 1998 PC copy is recommended)",
         // misc17: the Players page's seats (game/frontend.cpp pickSeatText), the PC font's words in play (game/hud.cpp:
         // drawn as text in a language), the chapter's end screen (a chapter not playable yet)
         "Player {n}: Human", "Player {n}: CPU Easy", "Player {n}: CPU Normal", "Player {n}: CPU Hard",
@@ -2511,6 +2656,7 @@ int main(int argc, char* argv[])
     // --frontend-shot <png> [--frontend-cursor X,Y] [--size WxH] (menuart): the ported PC main menu drawn from the PC
     // files into a PNG (default 1280 x 720, the pointer at 321, 222 = on Arcade, as the harness capture), then exit
     std::string frontendPng;
+    std::string setupShot;   // pchotfix: --setup-shot <png> (with --check-files): the setup page as a PNG
     int frontendX = 321, frontendY = 222;
     int seatBotOpt[4] = {-1, -1, -1, -1};   // --seat-bot P:L (computer teammates)
     bool frontendSize = false;
@@ -2607,9 +2753,25 @@ int main(int argc, char* argv[])
     bool rankingLowOpt = false;                // --ranking-low (testing): any score places (the name entry headless)
     net::NetArgs netArgs;   // online co-op (docs/netplay.md)
     std::string netErr;
+    // setup2: --uninstall [--yes] [--remove-settings | --keep-settings] (Apps & features' uninstaller: this install);
+    // --setup-test <folder> (testing: the setup's install into that folder from this package with --arcade / --pc,
+    // headless; the shortcuts and the uninstall entry go to HOTD_SETUP_SANDBOX when set)
+    bool uninstallOpt = false, uninstallYes = false;
+    int uninstallSettings = -1;
+    std::string setupTestDest;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
+        if (a == "--uninstall" || a == "--yes" || a == "--remove-settings" || a == "--keep-settings") {
+            uninstallOpt |= a == "--uninstall";
+            uninstallYes |= a == "--yes";
+            if (a == "--yes") shortcutYes = true;   // (also the --shortcut question's)
+            if (a == "--remove-settings") uninstallSettings = 1;
+            if (a == "--keep-settings") uninstallSettings = 0;
+            continue;
+        }
+        if (a == "--setup-test") { setupTestDest = next(); continue; }
+        if (a == "--setup") { gForceSetup = true; continue; }
         if (a == "--make-game-exe") {   // (testing: util/game_exe.h for this package and a PC folder / zip, then quit)
             std::string m;
             const bool ok = util::makeGameExe(packageFolder(), next(), m);
@@ -2649,7 +2811,7 @@ int main(int argc, char* argv[])
         else if (a == "--mute") mute = true;
         else if (a == "--audio-wav") audioWav = next();
         else if (a == "--check-files") check = true;
-        else if (a == "--frontend-shot") frontendPng = next();
+        else if (a == "--frontend-shot" || a == "--setup-shot") (a == "--setup-shot" ? setupShot : frontendPng) = next();
         else if (a == "--frontend-screen") frontendScreen = std::atoi(next().c_str());
         else if (a == "--frontend-cursor") std::sscanf(next().c_str(), "%d,%d", &frontendX, &frontendY);
         else if (a == "--force-check") forceCheck = true;
@@ -2995,7 +3157,7 @@ int main(int argc, char* argv[])
     if ((!std::getenv("HOTD_PREF_DIR") && (frames >= 0 || !inputTestFile.empty() || !frontendPng.empty() ||
                                           !shotAt.empty() || !checkpoints.empty() || autoStart)))
         game::LaunchConfig::readOnly = true;
-    cfg.load(cache + "launcher.ini");
+    const bool cfgExisted = cfg.load(cache + "launcher.ini");   // (setup2: an older version's settings: What's New)
     hotd::port::gAttractGore = cfg.attractGore;   // Gameplay "Attract Gore"
     // menufix: the input test starts from the default settings (only the game files' folders kept) and never writes
     // launcher.ini: a settings folder that ran other tests (models=1, menustyle=1, ...) once failed its menu walks, and
@@ -3286,8 +3448,35 @@ int main(int argc, char* argv[])
         std::printf("%s\n", msg.c_str());
         return r == winshell::ShortcutResult::Created ? 0 : 1;
     }
+    if (check && !setupShot.empty()) {   // pchotfix: --check-files --setup-shot <png>: the setup page with the result
+        game::Launcher shot;
+        shot.cfg = cfg;
+        shot.cacheDir = cacheDir();
+        shot.wordmarkFile = game::Frontend::wordmarkFile;
+        const bool ok = shot.shotPage(setupShot);
+        std::printf("setup shot: %s (%s)\n", setupShot.c_str(), ok ? "OK" : "CANNOT START");
+        for (const std::string& s : shot.status)
+            std::printf("  %s\n", s.c_str());
+        return ok ? 0 : 1;
+    }
     if (check)
         return checkFiles(cfg.arcade, cfg.pc, forceCheck);
+    if (uninstallOpt)   // setup2: Apps & features' uninstaller (game/installer.h)
+        return game::uninstallGame(packageFolder(), uninstallYes, uninstallSettings);
+    if (!setupTestDest.empty()) {   // setup2 (testing): the setup's install, headless
+        game::InstallOptions o;
+        o.dest = setupTestDest;
+        o.programRoot = packageFolder();
+        o.arcade = cfg.arcade, o.pc = cfg.pc;
+        o.version = HOTD_VERSION_TEXT;
+        int lastPct = -1;
+        const game::InstallResult r = game::installGame(o, [&](float f, const std::string& s) {
+            if (int(f * 100) / 10 != lastPct) { lastPct = int(f * 100) / 10; std::printf("SETUP TEST: %3d%% %s\n", int(f * 100), s.c_str()); }
+        });
+        for (const std::string& l : r.lines) std::printf("SETUP TEST: %s\n", l.c_str());
+        std::printf("SETUP TEST: %s%s (game exe: %s)\n", r.ok ? "installed" : "FAILED: ", r.err.c_str(), r.gameExe.c_str());
+        return r.ok ? 0 : 1;
+    }
     // lang (docs/translating.md): --export-lang <code> [--lang-out <file>]: the language file with every key (each menu
     // screen drawn from the PC files in both styles, every Gallery entry, the Online Co-op pages, the in-game notes,
     // the cut-scene subtitles); --lang-check <code>: the same screens in that language, the texts that do not fit and
@@ -3309,6 +3498,11 @@ int main(int argc, char* argv[])
             }
             return true;
         };
+        {   // pchotfix: the files as the game finds them (moved / nested PC folders, files of another version)
+            std::map<std::string, std::string> found;
+            if (game::checkPc(cfg.pc, cacheDir() + "pc_files.tsv", found).ok)
+                setPcFileMap(found);
+        }
         if (menuStyleOpt >= 0)   // remakemenu: --menu-style remake|classic = HOTD_FE_STYLE (leftovers: the CRT's copy)
             putEnvCrt("HOTD_FE_STYLE", menuStyleOpt == 1 ? "remake" : "classic");
         if (const std::string rg = menuRegionsGuess(regions, cache, root); !rg.empty() && !std::getenv("HOTD_FE_REGIONS"))
@@ -4490,6 +4684,9 @@ int main(int argc, char* argv[])
                            std::getenv("HOTD_RES_LOG") != nullptr ||       // (the resolution test: hidden)
                            std::getenv("HOTD_MENU_SEQ") != nullptr ||      // (menuperf: the menu's picture sequence: hidden too)
                            std::getenv("HOTD_MENU_PERF") != nullptr ||     // (the menu's frame times: hidden too)
+                           std::getenv("HOTD_SETUP_SHOTS") != nullptr ||   // (setup2: the setup pages' pictures, hidden)
+                           std::getenv("HOTD_ZONE_TEST") != nullptr ||     // (the setup boxes' drop test: hidden)
+                           std::getenv("HOTD_UPDATE_AUTO") != nullptr ||   // (setup2: the updater's test, hidden)
                            std::getenv("HOTD_SETUP_TEST") != nullptr;      // (setup: the setup window's switch, hidden)
     // borderless fullscreen at the start (user 2026-10-19): launcher.ini fullscreen= (default on; the state the player
     // left it in), --fullscreen / --windowed over it. Automated runs never (hidden / off-screen); a developer run
@@ -4505,7 +4702,7 @@ int main(int argc, char* argv[])
     gl::setShaderCacheFile(cacheDir() + "angle_shaders.bin");   // (angle: ANGLE's compiled shaders, kept for the next start)
     gl::prepareWindow(cfg.renderer);   // (angle: ANGLE sets the window up for EGL)
     int backend = cfg.renderer;
-    if (cfg.updateCheck && !automated) util::updateCheckStart(HOTD_VERSION_TEXT);   // Options > System > Check for Updates
+    if ((cfg.updateCheck && !automated) || std::getenv("HOTD_UPDATE_URL")) util::updateCheckStart(HOTD_VERSION_TEXT);   // Options > System > Check for Updates
     if (!automated) outputsStart(cfg, cacheDir());   // Light Gun Edition: Hook of the Reaper's outputs
     SDL_Window* window = SDL_CreateWindow("The House of the Dead: ReWrithe", w, h,
                                           SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (automated ? SDL_WINDOW_HIDDEN : 0));
@@ -4679,6 +4876,27 @@ int main(int argc, char* argv[])
     menu.cfg = cfg;
     menu.cacheDir = cache;
     menu.wordmarkFile = game::Frontend::wordmarkFile;   // setup: our wordmark in its picture strip
+    menu.packageRoot = packageFolder();                 // setup2: the setup's install / the updater (game/installer.h)
+    // (testing) HOTD_ZONE_TEST=<a text file, one path a line; "A:" before a path: the arcade box>: each path dropped
+    // on the setup's PC game box in turn, its verdict printed ("ZONE: <path> => <state> | <line> | ..."), then the end
+    if (const char* zt = std::getenv("HOTD_ZONE_TEST"); zt && *zt) {
+        std::ifstream in(zt);
+        for (std::string l; std::getline(in, l);) {
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            if (l.empty()) continue;
+            const int which = l.rfind("A:", 0) == 0 ? 0 : 1;
+            const std::string p = which == 0 ? l.substr(2) : l;
+            menu.checkZone(which, p);
+            while (menu.zoneState(which) == 1) SDL_Delay(50);
+            std::printf("ZONE: %s => %s\n", p.c_str(), menu.zoneReport(which).c_str());
+            std::fflush(stdout);
+        }
+        return 0;
+    }
+    while (!menu.packageRoot.empty() && (menu.packageRoot.back() == '\\' || menu.packageRoot.back() == '/')) menu.packageRoot.pop_back();
+    menu.installed = game::isInstall(menu.packageRoot);
+    menu.version = HOTD_VERSION_TEXT;
+    if (const char* ra = std::getenv("HOTD_UPDATE_RESTART_ARGS")) menu.restartArgs = ra;   // (testing: the restart's arguments)
     if (!snapshot.empty())
         menu.notes.push_back("Developer: work RAM from " + std::filesystem::path(snapshot).filename().string() +
                              (std::filesystem::exists(snapshot) ? "" : " (NOT FOUND)"));
@@ -4884,9 +5102,29 @@ int main(int argc, char* argv[])
     // remakefix (user 2026-10-22 "hide the debug menu at the start"): whatever else launcher.ini lacks (defaults), and
     // the launcher draws nothing meanwhile (quiet: black); setup (2026-10-31): the launcher is one setup dialog for
     // everyone (the files and the check; every other setting is Options in the menu)
-    bool autoMenu = launcher && inputTestFile.empty() && !cfg.arcade.empty() && !cfg.pc.empty();
+    bool autoMenu = launcher && inputTestFile.empty() && !cfg.arcade.empty() && !cfg.pc.empty() &&
+                    !std::getenv("HOTD_SETUP_SHOTS") &&   // (the setup pages' pictures: the setup window stays)
+                    !gForceSetup;
+    if (gForceSetup && launcher && menu.installed)   // (an installed copy: its Game files page, as Options' Repair)
+        menu.open(game::Launcher::Mode::Repair);
     (void)filesFromData;
     menu.quiet = autoMenu && !setupTest;
+    // setup2: What's New once on the first start of a new version (launcher.ini lastversion= another one, or settings
+    // from before it existed); HOTD_WHATSNEW_TEST=1 shows it in a test run too
+    if (launcher && (!automated || std::getenv("HOTD_WHATSNEW_TEST")) && inputTestFile.empty()) {
+        const bool newer = (cfgExisted && cfg.lastVersion != HOTD_VERSION_TEXT) || std::getenv("HOTD_WHATSNEW_TEST");
+        menu.whatsNew = changelogSection(root, HOTD_VERSION_TEXT);
+        // Light Gun Edition: never by itself (no pop-ups in a front-end such as LaunchBox); Options > System > What's
+        // New still shows it
+        if (newer && !menu.whatsNew.empty() && std::getenv("HOTD_WHATSNEW_TEST")) {
+            menu.open(game::Launcher::Mode::WhatsNew);
+            autoMenu = false;
+        }
+        if (menu.cfg.lastVersion != HOTD_VERSION_TEXT) {
+            menu.cfg.lastVersion = HOTD_VERSION_TEXT;
+            menu.cfg.save(cache + "launcher.ini");
+        }
+    }
     bool running = true, paused = false, step = false, shot = false, debugLines = devLines;
     // the PC port's in-game pause (game/pause.h, THOTD.EXE 0x41ADF0 ..): Escape / P in play; `paused` mirrors it
     game::Pause pause;
@@ -9159,6 +9397,7 @@ int main(int argc, char* argv[])
                 fe.screenExtras();
             };
             hooks.filesCheck = [&]() { feAction = 4; };
+            hooks.whatsNew = [&]() { feAction = 47; };   // setup2: Options > System > What's New
             hooks.shortcut = [&]() {
                 std::string msg;
                 const auto r = winshell::createShortcut("", true, menu.cfg.pc, false, msg);
@@ -9822,6 +10061,66 @@ int main(int argc, char* argv[])
                 } else if (enterGame())
                     screen = Screen::Game;
             }
+            // setup2 (testing): HOTD_SETUP_SHOTS=<folder>: every page of the setup window as a PNG (the window's size),
+            // hidden: the files from HOTD_SHOT_ARCADE / HOTD_SHOT_PC (checked for real), HOTD_SHOT_PC_NOTE (accepted with
+            // a note), HOTD_SHOT_PC_BAD (blocked), HOTD_SHOT_PC_SATURN (optional, a Saturn image); the install's
+            // progress and its end set directly; the Update page from HOTD_UPDATE_URL; What's New; then the run ends
+            if (static const char* shots = std::getenv("HOTD_SETUP_SHOTS"); shots && *shots) {
+                static int st = 0, frames = 0;
+                static bool entered = false;
+                static const auto env = [](const char* n) { const char* v = std::getenv(n); return std::string(v ? v : ""); };
+                struct Shot { const char* name; std::function<void()> setup; std::function<bool()> ready; };
+                static const std::vector<Shot> seq = {
+                    {"01_welcome", [&]() { menu.open(game::Launcher::Mode::Setup); menu.setPage(game::Launcher::kWelcome); }, nullptr},
+                    {"02_files_empty", [&]() { menu.setPage(game::Launcher::kFiles); }, nullptr},
+                    {"03_files_ok", [&]() {   // (dropped as Explorer would: SDL's drop events at each box's middle)
+                         static std::string paths[2];
+                         paths[0] = env("HOTD_SHOT_ARCADE"), paths[1] = env("HOTD_SHOT_PC");
+                         int sw = 960, sh = 600;
+                         SDL_GetWindowSize(window, &sw, &sh);
+                         for (int z = 0; z < 2; ++z) {
+                             SDL_Event ev{};
+                             ev.type = SDL_EVENT_DROP_FILE;
+                             ev.drop.windowID = SDL_GetWindowID(window);
+                             ev.drop.x = float(z == 0 ? 258 : 702) * float(sw) / 960.0f;
+                             ev.drop.y = 307.0f * float(sh) / 600.0f;
+                             ev.drop.data = paths[z].c_str();
+                             menu.handle(ev, window);
+                         }
+                     },
+                     [&]() { return menu.zoneState(0) != 1 && menu.zoneState(1) != 1; }},
+                    {"04_files_pc_note", [&]() { menu.checkZone(1, env("HOTD_SHOT_PC_NOTE")); }, [&]() { return menu.zoneState(1) != 1; }},
+                    {"05_files_pc_blocked", [&]() { menu.checkZone(1, env("HOTD_SHOT_PC_BAD")); }, [&]() { return menu.zoneState(1) != 1; }},
+                    {"05b_files_saturn", [&]() { if (!env("HOTD_SHOT_PC_SATURN").empty()) menu.checkZone(1, env("HOTD_SHOT_PC_SATURN")); },
+                     [&]() { return menu.zoneState(1) != 1; }},
+                    {"06_options", [&]() { menu.checkZone(1, env("HOTD_SHOT_PC")); },
+                     [&]() { if (menu.zoneState(1) == 1) return false; menu.setPage(game::Launcher::kOptions); return true; }},
+                    {"07_installing", [&]() { menu.cfg.arcade = env("HOTD_SHOT_ARCADE"); menu.cfg.pc = env("HOTD_SHOT_PC"); menu.setPage(game::Launcher::kInstall); menu.testInstallProgress(0.46f, "Importing mpr-19715.17"); }, nullptr},
+                    {"08_done", [&]() { menu.testDone(game::defaultInstallDir()); }, nullptr},
+                    {"09_update", [&]() {}, [&]() { std::string t; if (!util::updateAvailable(t)) return false; menu.open(game::Launcher::Mode::Update); return true; }},
+                    {"10_whatsnew", [&]() { menu.whatsNew = changelogSection(root, HOTD_VERSION_TEXT); menu.open(game::Launcher::Mode::WhatsNew); }, nullptr},
+                };
+                if (st < int(seq.size())) {
+                    if (!entered) { seq[size_t(st)].setup(); entered = true; frames = 0; }
+                    const bool skip = (std::string(seq[size_t(st)].name) == "05b_files_saturn" && env("HOTD_SHOT_PC_SATURN").empty()) ||
+                                      (std::string(seq[size_t(st)].name) == "09_update" && env("HOTD_UPDATE_URL").empty());
+                    if (!skip && (!seq[size_t(st)].ready || seq[size_t(st)].ready())) ++frames;
+                    if (skip || frames == 4) {   // (the page drawn again after the change: then its picture)
+                        if (!skip) {
+                            Renderer grab;
+                            std::filesystem::create_directories(shots);
+                            const std::string f = std::string(shots) + "/" + seq[size_t(st)].name + ".png";
+                            writePng(f, ww, wh, grab.readBack(ww, wh));
+                            std::printf("SETUP SHOT: %s (%d x %d)\n", f.c_str(), ww, wh);
+                            std::fflush(stdout);
+                        }
+                        ++st;
+                        entered = false;
+                    }
+                } else {
+                    running = false;
+                }
+            }
             if (static bool told = false; !told && std::getenv("HOTD_STARTUP_TIME")) {   // perf: the launcher's first frame
                 told = true;
                 std::printf("startup: the launcher's first frame at %.0f ms\n", sinceStartMs());
@@ -9848,6 +10147,18 @@ int main(int argc, char* argv[])
             continue;
         }
         if (screen == Screen::Menu) {
+            // setup2: a newer release found (util/update_check.h): once, the setup window's Update page (its version,
+            // its changelog, Update / Not now; Not now comes back here)
+            if (static bool updateShown = false; !updateShown && !gNet) {
+                std::string tag;
+                if (util::updateAvailable(tag)) {
+                    updateShown = true;
+                    audio.silence();
+                    menu.open(game::Launcher::Mode::Update);
+                    screen = Screen::Launcher;
+                    continue;
+                }
+            }
             // menuperf: the frame's CPU time from here, its GPU time (HOTD_MENU_PERF_TOUR: the page it belongs to)
             const auto menuLoopT0 = std::chrono::steady_clock::now();
             static int tourPage = -1, tourFrame = 0;
@@ -11591,8 +11902,10 @@ int main(int argc, char* argv[])
                     screen = Screen::Game;
                 else
                     screen = Screen::Launcher;   // its status says why
-            } else if (action == 4) {   // Options > System > Files Check: the setup dialog (the files, the check)
+            } else if (action == 4 || action == 47) {   // Options > System > Repair / Change files, What's New: the setup window
                 audio.silence();
+                if (action == 47) menu.whatsNew = changelogSection(root, HOTD_VERSION_TEXT);
+                menu.open(action == 4 ? game::Launcher::Mode::Repair : game::Launcher::Mode::WhatsNew);
                 screen = Screen::Launcher;
             } else if (action == 5) {   // Quit (0x420F80) / Escape
                 running = false;
@@ -11789,6 +12102,7 @@ int main(int argc, char* argv[])
             if (want != SDL_GetWindowMouseGrab(window))
                 SDL_SetWindowMouseGrab(window, want);
         }
+        gunVisibleArea(window, lw, lh);   // (#15: the display's edge, also in Borderless)
         // the window's size changed (resize, maximize, fullscreen): every gun keeps its point of the game's screen
         // (P1's desktop cursor: until its next motion)
         if ((lw != gunW || lh != gunH) && gunW > 0 && gunH > 0 && lw > 0 && lh > 0) {
@@ -12633,7 +12947,7 @@ int main(int argc, char* argv[])
                         float bx, by, gx2 = guns[1].x, gy2 = guns[1].y;
                         gCrt.toSource(gx2, gy2, lw, lh);
                         view->toArcade(gx2, gy2, lw, lh, bx, by);
-                        const bool edge2 = guns[1].x < 1.0f || guns[1].x > float(lw) - 2.0f || guns[1].y < 1.0f || guns[1].y > float(lh) - 2.0f;
+                        const bool edge2 = gunAtEdge(guns[1], lw, lh);
                         if (!guns[1].reload && !edge2 && std::abs(by) < 192.0f)
                             in.flags2 |= net::Input::kOnScreen;
                         if (guns[1].trigger || guns[1].reload)
@@ -12655,7 +12969,8 @@ int main(int argc, char* argv[])
                     // the keyboard's trigger / reload keys count too (player 2 on the keyboard); a second mouse / pad / gun
                     // configured as player 2 on this PC is not this PC's player
                     const bool keys = cfg.p2Input == 1;
-                    const bool reload = guns[0].reload || (keys && guns[1].reload);
+                    const bool reload = guns[0].reload || (keys && guns[1].reload) ||
+                                        edgeReloadNow(rt, gNet->localPlayer(), atEdge, cfg.edgeReload);   // (#17)
                     if (!reload && !atEdge && std::abs(ax) < halfW - 1e-3f && std::abs(ay) < 192.0f)
                         in.flags |= net::Input::kOnScreen;
                     if (guns[0].trigger || (keys && guns[1].trigger) || reload)
@@ -12725,10 +13040,11 @@ int main(int argc, char* argv[])
                 // window during play (two monitors: it slid onto the other one, user 2026-10-16), so pushing it against
                 // an edge is the off-screen shot (reload), in widescreen and 4:3 alike (a touch / pen: gunAtEdge)
                 const bool atEdge = gunAtEdge(guns[p], lw, lh);
+                const bool edgeReload = edgeReloadNow(rt, p, atEdge, cfg.edgeReload);   // (#17: HOTD 2's reload)
                 g.onScreen = !guns[p].reload && !atEdge && std::abs(ax) < halfW - 1e-3f && std::abs(ay) < 192.0f;
                 g.x = ax;
                 g.y = ay;
-                g.trigger = guns[p].trigger || guns[p].reload;
+                g.trigger = guns[p].trigger || guns[p].reload || edgeReload;
                 guns[p].trigger = guns[p].reload = false;
             }
             if (nameSwap) std::swap(guns[0], guns[2]), std::swap(guns[1], guns[3]);

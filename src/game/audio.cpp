@@ -125,6 +125,9 @@ struct Audio::Music {
     drmp3 mp3{};
     bool mp3Open = false;
 #endif
+    // a .wav (16-bit PCM: the setup's rips of a CD image's audio tracks): its samples in data, read directly
+    const int16_t* pcm = nullptr;
+    uint64_t pcmFrames = 0, pcmPos = 0;
     int channels = 2, rate = kRate;
     bool loop = true;
     uint64_t played = 0, total = 0;   // frames since the start (or the last loop) / in the file (0: not known)
@@ -145,6 +148,16 @@ struct Audio::Music {
     // up to 2048 frames, stereo, into tmp (4096 floats); 0 at the end
     int decode(float* tmp)
     {
+        if (pcm) {
+            const int ch = std::max(1, channels);
+            int n = 0;
+            for (; n < 2048 && pcmPos < pcmFrames; ++n, ++pcmPos) {
+                const int16_t* f = pcm + pcmPos * uint64_t(ch);
+                tmp[n * 2] = float(f[0]) / 32768.0f;
+                tmp[n * 2 + 1] = float(f[ch > 1 ? 1 : 0]) / 32768.0f;
+            }
+            return n;
+        }
 #ifdef HOTD_HAVE_STB_VORBIS
         if (v)
             return stb_vorbis_get_samples_float_interleaved(v, 2, tmp, 4096);
@@ -165,6 +178,7 @@ struct Audio::Music {
     }
     void rewind()
     {
+        pcmPos = 0;
 #ifdef HOTD_HAVE_STB_VORBIS
         if (v) stb_vorbis_seek_start(v);
 #endif
@@ -198,6 +212,7 @@ struct Audio::Music {
     // the Jukebox: to frame f (the next() after it reads from there)
     void seek(uint64_t f)
     {
+        pcmPos = std::min(f, pcmFrames);
 #ifdef HOTD_HAVE_STB_VORBIS
         if (v) stb_vorbis_seek(v, unsigned(f));
 #endif
@@ -675,7 +690,7 @@ void Audio::indexTracks()
         if (dot == std::string::npos)
             return;
         const std::string ext = name.substr(dot + 1), base = name.substr(0, dot);
-        bool ok = false;
+        bool ok = ext == "wav";   // (the setup's CD rips)
 #ifdef HOTD_HAVE_STB_VORBIS
         ok |= ext == "ogg";
 #endif
@@ -770,6 +785,24 @@ void Audio::indexTracks()
             if (from == c.number)
                 put(to, c, c.where + " (Saturn " + std::to_string(c.number) + ")");
     }
+    // the US PC CD has tracks 2 and 6 the other way round from the EU and Japanese CDs and from what the game asks for
+    // (GitHub #12; checked 2026-11-02 against the arcade: 2 = the title song, about a minute; 6 = the boss song, about
+    // five): rips of it put back (a 02 file over twice the size of the 06 file, same format)
+    if (!saturn) {
+        auto t2 = tracks_.find(2), t6 = tracks_.find(6);
+        if (t2 != tracks_.end() && t6 != tracks_.end()) {
+            uint64_t s2 = 0, s6 = 0;
+            for (const Cand& c : cands) {
+                if (c.path == t2->second.path) s2 = c.size;
+                if (c.path == t6->second.path) s6 = c.size;
+            }
+            const std::string e2 = lower(fs::path(t2->second.path).extension().string()), e6 = lower(fs::path(t6->second.path).extension().string());
+            if (e2 == e6 && s6 > 0 && s2 > 2 * s6) {
+                std::swap(t2->second, t6->second);
+                note("music: tracks 2 and 6 swapped (the US CD's order: its track 2 is the boss song, 6 the title song)");
+            }
+        }
+    }
     note("music: " + std::to_string(tracks_.size()) + " track(s) found");
 }
 
@@ -795,8 +828,31 @@ void Audio::playTrack(int track, bool loop)
         return;
     }
     const bool mp3 = tf.path.size() > 4 && SDL_strcasecmp(tf.path.c_str() + tf.path.size() - 4, ".mp3") == 0;
+    const bool wav = tf.path.size() > 4 && SDL_strcasecmp(tf.path.c_str() + tf.path.size() - 4, ".wav") == 0;
     bool ok = false;
-    if (!mp3) {
+    if (wav) {   // RIFF / WAVE: "fmt " (PCM, 16 bits) and "data"
+        const std::vector<uint8_t>& d = m->data;
+        auto u32 = [&](size_t at) { return uint32_t(d[at]) | uint32_t(d[at + 1]) << 8 | uint32_t(d[at + 2]) << 16 | uint32_t(d[at + 3]) << 24; };
+        auto u16 = [&](size_t at) { return unsigned(d[at]) | unsigned(d[at + 1]) << 8; };
+        bool fmtOk = false;
+        if (d.size() >= 12 && std::memcmp(d.data(), "RIFF", 4) == 0 && std::memcmp(d.data() + 8, "WAVE", 4) == 0)
+            for (size_t at = 12; at + 8 <= d.size();) {
+                const uint32_t len = u32(at + 4);
+                const size_t body = at + 8, have = std::min<size_t>(len, d.size() - body);
+                if (std::memcmp(d.data() + at, "fmt ", 4) == 0 && have >= 16) {
+                    m->channels = int(u16(body + 2));
+                    m->rate = int(u32(body + 4));
+                    fmtOk = u16(body) == 1 && u16(body + 14) == 16 && m->channels > 0 && m->rate > 0;
+                } else if (std::memcmp(d.data() + at, "data", 4) == 0 && fmtOk) {
+                    m->pcm = reinterpret_cast<const int16_t*>(d.data() + body);
+                    m->pcmFrames = have / (2 * size_t(m->channels));
+                    m->total = m->pcmFrames;
+                    ok = m->pcmFrames > 0;
+                    break;
+                }
+                at = body + len + (len & 1);
+            }
+    } else if (!mp3) {
 #ifdef HOTD_HAVE_STB_VORBIS
         int error = 0;
         m->v = stb_vorbis_open_memory(m->data.data(), int(m->data.size()), &error, nullptr);
