@@ -807,6 +807,15 @@ void Frontend::langOverflow(const std::string& s, int x, int tw, int ww, const W
 // Escape: Pads::menuKey). The top of the main menu quits with Escape; a group (More Modes / Extras) goes back
 std::string Frontend::hintFor() const
 {
+    if (gunPrompts) {   // Light Gun Edition: the gun's buttons
+        switch (screen_) {
+        case 1: return mainGroup_ ? "Shoot: Choose    Reload (right click): Back" : "Shoot: Choose    Reload (right click): Quit";
+        case 15: return "Shoot the letters    Enter: Done";
+        case 16: case 17: case 19: return "";
+        case 21: return "Shoot: Choose    Reload (right click): No";
+        default: return "Shoot: Choose    Reload (right click): Back";
+        }
+    }
     switch (screen_) {
     case 1: return mainGroup_ ? "Enter/A Choose    Esc/B Back" : "Enter/A Choose    Esc/B Quit";
     case 15: return "Type a name    Backspace/B Delete    Enter Done";

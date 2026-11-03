@@ -8380,6 +8380,7 @@ int main(int argc, char* argv[])
         if (!launcher || feFailed)
             return false;
         cfg = menu.cfg;
+        fe.gunPrompts = menu.cfg.p1Input == 3 && !menu.cfg.gunDev[0].empty();   // Light Gun Edition: before the first screen
         setPcFileMap(menu.pcOk ? menu.pcFiles : std::map<std::string, std::string>{});
         if (!menu.pcOk)
             return false;
@@ -10805,8 +10806,15 @@ int main(int argc, char* argv[])
                     fe.handAlpha = 1.0f;
                 }
                 if (pull) in.press = in.anyKey = in.click = true;
-                if (alt) in.anyKey = in.alt = true;
+                // Light Gun Edition: the gun's reload button is Back (Escape) in the menus; on the name entry it stays
+                // the right click
+                if (alt) {
+                    in.anyKey = true;
+                    if (fe.screen() == 15) in.alt = true;
+                    else in.escape = true;
+                }
             }
+            fe.gunPrompts = p1Menu || (menu.cfg.p1Input == 3 && !menu.cfg.gunDev[0].empty());   // (the prompts name the gun)
             in.ctrl = in.ctrl || (SDL_GetModState() & SDL_KMOD_CTRL) != 0;   // (DIK 0x1D / 0x9D held)
             {   // HOTD_MENU_TYPE="N:TEXT[;M:X,Y]" (developer, pc_cheats): at the menu's N-th frame TEXT typed with Ctrl held;
                 // at frame M a click at (X, Y) (640 x 480): for HOTD_MENU_SHOT pictures of the secret screens

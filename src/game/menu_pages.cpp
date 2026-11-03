@@ -391,148 +391,34 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
     case kCatControls:
         // pads: each player's input (a gamepad: its Controller page; a light gun: F9 in the game calibrates)
         // (uxpolish: a light gun is experimental: the tag while one is chosen)
-        r.push_back({"Player 1 Input", [&c]() { return std::string(c.p1Input == 2 ? "Gamepad" : c.p1Input == 3 ? "Light Gun" : "Mouse"); },
-                     [&c, save]() { c.p1Input = c.p1Input == 0 ? 2 : c.p1Input == 2 ? 3 : 0; save(); },
-                     "Player 1 aims with the mouse, a gamepad or a light gun"});
-        listed(r, {"Mouse", "Gamepad", "Light Gun"});
-        experimental(r, [&c]() { return c.p1Input == 3; });
-        r.push_back({"Player 2 Input", [&c]() {
-                         static const char* const k[4] = {"Mouse 2", "Keyboard", "Gamepad", "Light Gun"};
-                         return std::string(k[std::clamp(c.p2Input, 0, 3)]);
-                     },
-                     [&c, save]() { c.p2Input = (c.p2Input + 1) % 4; save(); },
-                     "Player 2: a second mouse, the keyboard, a gamepad or a light gun (the keys always work)"});
-        listed(r, {"Mouse 2", "Keyboard", "Gamepad", "Light Gun"});
-        experimental(r, [&c]() { return c.p2Input == 3; });
-        // the experimental 4P mode (Players 3 / 4, docs/coop4.md): players 3 / 4's input (a gamepad each by default)
-        // (1 = the keyboard only; its keys always work: player 3 W A S D / F / R / 3, player 4 I J K L / H / Y / 4)
-        for (int p = 2; p < 4; ++p) {
-            int& in = p == 2 ? c.p3Input : c.p4Input;
-            r.push_back({"Player " + std::to_string(p + 1) + " Input (4P)", [&in, p]() {
-                             const char* const k[4] = {p == 2 ? "Mouse 3" : "Mouse 4", "Keyboard", "Gamepad", "Light Gun"};
-                             return std::string(k[std::clamp(in, 0, 3)]);
+        // Light Gun Edition: each player's input: a light gun, a mouse or (players 2-4) the keyboard; no gamepads
+        r.push_back({"Player 1 Input", [&c]() { return std::string(c.p1Input == 3 ? "Light Gun" : "Mouse"); },
+                     [&c, save]() { c.p1Input = c.p1Input == 3 ? 0 : 3; save(); },
+                     "Player 1 aims with a light gun or the mouse"});
+        indexed(r, {"Light Gun", "Mouse"}, [&c]() { return c.p1Input == 3 ? 0 : 1; },
+                [&c, save](int k) { c.p1Input = k == 0 ? 3 : 0; save(); });
+        for (int p = 1; p < 4; ++p) {
+            int& in = p == 1 ? c.p2Input : p == 2 ? c.p3Input : c.p4Input;
+            r.push_back({"Player " + std::to_string(p + 1) + " Input" + (p >= 2 ? " (4P)" : ""), [&in]() {
+                             return std::string(in == 3 ? "Light Gun" : in == 1 ? "Keyboard" : "Mouse");
                          },
-                         [&in, save]() { in = in == 2 ? 3 : in == 3 ? 0 : in == 0 ? 1 : 2; save(); },
-                         p == 2 ? "Player 3 (4 players mode): a gamepad, a light gun, a mouse or the keyboard (W A S D aim, F fire, R reload, 3 start; Keys & Buttons)"
-                                : "Player 4 (4 players mode): a gamepad, a light gun, a mouse or the keyboard (I J K L aim, H fire, Y reload, 4 start; Keys & Buttons)"});
-            listed(r, {p == 2 ? "Mouse 3" : "Mouse 4", "Keyboard", "Gamepad", "Light Gun"});
-            experimental(r);
+                         [&in, save]() { in = in == 3 ? 0 : in == 0 ? 1 : 3; save(); },
+                         "Player " + std::to_string(p + 1) + ": a light gun, a mouse of their own or the keyboard (Keys & Buttons)"});
+            indexed(r, {"Light Gun", "Mouse", "Keyboard"}, [&in]() { return in == 3 ? 0 : in == 1 ? 2 : 1; },
+                    [&in, save](int k) { in = k == 0 ? 3 : k == 2 ? 1 : 0; save(); });
         }
         // keybind (game/keybinds.h): every player's keyboard keys and gamepad buttons (uxpolish: right under the
         // inputs, before the per-player controller pages; its value says it opens a page, as every page row's does)
         r.push_back({"Keys & Buttons", []() { return page("Rebind"); }, [h]() { if (h.bindPage) h.bindPage(); },
-                     "Change any player's keyboard keys and gamepad buttons (fire, reload, start, pause, aim)"});
-        // padglyphs: whose buttons the prompts show (Auto: each pad its own model's, the keys after a key; else one
-        // model's icons on any pad, or the keyboard's always)
-        {
-            r.push_back({"Button Icons", [&c]() { return std::string(kButtonIconNames[std::clamp(c.padPrompts, 0, 14)]); },
-                         [&c, save]() { c.padPrompts = (c.padPrompts + 1) % 15; save(); },
-                         "The buttons the menus and hints show. Auto: your controller's own (the keys after you type)"});
-            indexed(r, std::vector<std::string>(kButtonIconNames, kButtonIconNames + 15), [&c]() { return std::clamp(c.padPrompts, 0, 14); },
-                    [&c, save](int k) { c.padPrompts = k; save(); });
-            r.back().clickBack = [&c, save]() { c.padPrompts = (c.padPrompts + 14) % 15; save(); };
-            // the prompts' look: Xelu's icons (grey buttons, coloured letters), Kenney's (white), Simple (drawn caps)
-            static const char* const kS[3] = {"Xelu", "Kenney", "Simple"};
-            // padfix (user 2026-10-30: "There are no Xelu Switch 2 icons; if they don't exist the player should know"):
-            // the styles without icons for the pad shown now (Button Icons' model, else the pad used last) are grey in
-            // the list, and the help line says which one is drawn instead (Xelu -> Kenney -> Simple)
-            int fam = promptChoiceStyle(c.padPrompts);
-            if (fam == 0 && h.promptStyleNow) fam = h.promptStyleNow();
-            std::string styleHelp = "The button pictures: Xelu's or Kenney's prompts (free CC0 packs), or Simple drawn keys";
-            if (const int bs = std::clamp(c.buttonStyle, 0, 2); fam > 0 && !packHasIcons(bs, fam)) {
-                const int used = packFor(bs, fam);
-                styleHelp = std::string("No ") + kS[bs] + " icons for " + padStyleName(fam) + ": " +
-                            (used == kPackKenney ? "Kenney's are shown" : "simple drawn buttons are shown");
-            }
-            // relmenu (user 2026-10-30: with Switch 2 / GameCube icons the row still said Xelu, and the menu could get
-            // stuck until Reset to Defaults): the row shows the style really drawn (Xelu -> Kenney -> Simple), the steps
-            // and the list go only through the styles this pad has, from the one shown
-            // (the pad family read each time: Button Icons changed on this page counts at once)
-            auto famNow = [&c, h]() {
-                const int f = promptChoiceStyle(c.padPrompts);
-                return f == 0 && h.promptStyleNow ? h.promptStyleNow() : f;
-            };
-            auto shown = [&c, famNow]() {
-                const int bs = std::clamp(c.buttonStyle, 0, 2), f = famNow();
-                return f > 0 ? packFor(bs, f) : bs;
-            };
-            auto stepStyle = [&c, save, famNow, shown](int dir) {
-                const int f = famNow();
-                int k = shown();
-                for (int g = 0; g < 3; ++g) {
-                    k = (k + dir + 3) % 3;
-                    if (f <= 0 || packHasIcons(k, f))
-                        break;
-                }
-                c.buttonStyle = k;
-                save();
-            };
-            r.push_back({"Button Style", [shown]() { return std::string(kS[shown()]); }, [stepStyle]() { stepStyle(1); }, styleHelp});
-            indexed(r, {"Xelu", "Kenney", "Simple"}, shown, [&c, save, famNow](int k) {
-                const int f = famNow();
-                if (f > 0 && !packHasIcons(k, f)) return;   // (a grey style: not picked)
-                c.buttonStyle = k;
-                save();
-            });
-            r.back().clickBack = [stepStyle]() { stepStyle(-1); };
-            r.back().choiceOff = [famNow](int k) { const int f = famNow(); return f > 0 && !packHasIcons(k, f); };
-            // menus3 (user 2026-10-28: "I personally liked the normal version better"): the light rim round Xelu's icons
-            r.push_back({"Icon Outline", [&c]() { return std::string(c.iconOutline ? "On" : "Off"); },
-                         [&c, save]() { c.iconOutline = !c.iconOutline; save(); },
-                         "Xelu's button icons with a thin light rim, brighter on the dark red menus. Off: as Xelu drew them"});
-            listed(r, {"Off", "On"});
-            r.back().off = [shown]() { return shown() == 0 ? std::string() : std::string("Only for the Xelu button style"); };
-            // the menus' bone hand from player 1's pad (menu_cursor.h): the touchpad, the gyro, their speed
-            r.push_back({"Touchpad Cursor", [&c]() { return std::string(c.touchCursor ? "On" : "Off"); },
-                         [&c, save]() { c.touchCursor = !c.touchCursor; save(); },
-                         "In the menus, a DualSense / DualShock 4 touchpad moves the hand like a laptop's; its click clicks"});
-            listed(r, {"Off", "On"});
-            static const char* const kG[3] = {"Off", "While Holding ZL / L2 / LT", "Always"};
-            r.push_back({"Gyro Cursor", [&c]() { return std::string(kG[std::clamp(c.gyroCursor, 0, 2)]); },
-                         [&c, save]() { c.gyroCursor = (c.gyroCursor + 1) % 3; save(); },
-                         "In the menus, tilt a pad with a gyro (Switch, Joy-Con, DualSense, DualShock 4, Steam Deck) to move the hand"});
-            indexed(r, {"Off", "While Holding ZL / L2 / LT", "Always"}, [&c]() { return std::clamp(c.gyroCursor, 0, 2); },
-                    [&c, save](int k) { c.gyroCursor = k; save(); });
-            r.back().clickBack = [&c, save]() { c.gyroCursor = (c.gyroCursor + 2) % 3; save(); };
-            r.push_back({"Cursor Speed", [&c]() { return std::to_string(std::clamp(c.cursorSpeed, 1, 10)); },
-                         [&c, save]() { c.cursorSpeed = c.cursorSpeed % 10 + 1; save(); },
-                         "How fast the touchpad and the gyro move the hand"});
-            indexed(r, {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, [&c]() { return std::clamp(c.cursorSpeed, 1, 10) - 1; },
-                    [&c, save](int k) { c.cursorSpeed = k + 1; save(); });
-            r.back().clickBack = [&c, save]() { c.cursorSpeed = (c.cursorSpeed + 8) % 10 + 1; save(); };
-        }
-        // padfix (user 2026-10-30: "players should have a sensitivity option for this"): each player's pad's aim speed
-        // (the sticks, the gyro, the trackpad: PadProfile::aimSens), a bar of 50 .. 200 %
-        for (int p = 0; p < 4; ++p) {
-            int& v = c.pad[p].aimSens;
-            r.push_back({"Aim Sensitivity: Player " + std::to_string(p + 1) + (p >= 2 ? " (4P)" : ""),
-                         [&v]() { return std::to_string(std::clamp(v, 5, 20) * 10) + "%"; },
-                         [&v, save, h]() { v = v >= 20 ? 5 : std::max(5, v + 1); save(); if (h.padsChanged) h.padsChanged(); },
-                         "How fast player " + std::to_string(p + 1) + "'s gamepad aims (its sticks, gyro and trackpad). 100%: as tuned"});
-            indexed(r, namesOf(16, [](int i) { return std::to_string((i + 5) * 10) + "%"; }), [&v]() { return std::clamp(v, 5, 20) - 5; },
-                    [&v, save, h](int k) { v = k + 5; save(); if (h.padsChanged) h.padsChanged(); });
-            r.back().clickBack = [&v, save, h]() { v = v <= 5 ? 20 : std::min(20, v - 1); save(); if (h.padsChanged) h.padsChanged(); };
-            r.back().barGet = [&v]() { return std::clamp(v, 5, 20) * 10; };
-            r.back().barSet = [&v, save, h](int n) { v = std::clamp((n + 5) / 10, 5, 20); save(); if (h.padsChanged) h.padsChanged(); };
-            r.back().barMax = 200;
-            if (p >= 2) experimental(r);
-        }
-        for (int p = 0; p < 4; ++p) {
-            r.push_back({"Controller: Player " + std::to_string(p + 1) + (p >= 2 ? " (4P)" : ""), []() { return page("Settings"); },
-                         [h, p]() { if (h.padPage) h.padPage(p); },
-                         "Player " + std::to_string(p + 1) + "'s gamepad: style, aiming, triggers, vibration" +
-                             (p >= 2 ? std::string(" (4 players mode)") : std::string())});
-            if (p >= 2) experimental(r);
-        }
+                     "Change any player's keyboard keys (fire, reload, start, pause, aim)"});
+        // (Light Gun Edition: no gamepad rows: button icons, touchpad / gyro cursor, aim sensitivity, controller pages)
         // padpass: every seat's light gun (players 3 / 4 were missing), the gun's kind and its screen aids, and the
         // calibration from the menu (before: F9 in the game only)
         // ipolish (Light Guns: Assign): which gun / mouse is whose seat (before: the order first used only)
         // Light Gun Edition: the set-up that also runs at a start with a blank LightgunHID.ini
         r.push_back({"Light Gun Setup", []() { return std::string("Start"); }, [h]() { if (h.gunSetup) h.gunSetup(); },
                      "Each player pulls their light gun's trigger in turn; saved in LightgunHID.ini and used at every start"});
-        r.push_back({"Light Guns", []() { return page("Assign"); }, [h]() { if (h.gunPage) h.gunPage(); },
-                     "Give each player their own light gun or mouse: pull its trigger when the player's row waits"});
-        experimental(r);
+        // (Light Gun Edition: no "Light Guns" Assign page: LightgunHID.ini / Light Gun Setup decide whose gun is whose)
         for (int p = 0; p < 4; ++p)
             lightGunRow(r, "Light Gun: Player " + std::to_string(p + 1) + (p >= 2 ? " (4P)" : ""), c.gunCal[p], save);
         r.push_back({"Light Gun Type", [&c]() {

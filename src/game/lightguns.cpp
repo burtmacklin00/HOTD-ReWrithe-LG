@@ -156,7 +156,7 @@ void LightGuns::buttons(uint64_t id, unsigned flags)
             }
             if (flags & 0x1) menu_.trigger = menu_.held = true;
             if (flags & 0x2) menu_.held = false;
-            if (flags & 0x4) menu_.alt = true;
+            if (flags & 0x14) menu_.alt = true;   // (the right or the middle button: both are reload)
         } else if (seatPick_ && !d.key.empty()) {   // PC Mode's select: players 2-4's own guns on their own panels
             for (int p = 1; p < (seatPick_ == 4 ? 4 : 2); ++p)
                 if (pin[p] == d.key) {

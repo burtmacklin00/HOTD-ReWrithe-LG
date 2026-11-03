@@ -331,6 +331,9 @@ public:
     // Light Gun Edition: aim help for light guns in the menus: a shot / hover that lands on nothing takes the nearest
     // button / row within kSnapRange menu units (about one and a half rows), so the menus are easier to shoot
     bool snapAim = false;
+    // Light Gun Edition: the controls prompts / hint lines name the gun (Shoot = choose, Reload = back), no keys or pad
+    // buttons, no Left / Right tab prompts (the tabs are shot)
+    bool gunPrompts = false;
     static constexpr int kSnapRange = 40;
     // galfix (user 2026-10-26: "the bony-hand cursor vanishes in the middle of the screen"): over the Gallery's model the
     // hand is drawn at this opacity instead of hidden (1: as everywhere else)

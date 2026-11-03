@@ -88,10 +88,10 @@ template <class P> void Game<P>::hud_ammo_draw(uint32_t task)
         }
         const int rx = p * 0x1F + 4;
         const uint32_t hint = mem.u32(0xCA700 + text_region() * 4);
-        // Light Gun Edition (ours): the 4P mode: RELOAD right above the player's own bullets and torches (row 0x20), no
+        // Light Gun Edition (ours): every mode (1-4 players alike): RELOAD right above the player's own bullets and torches (row 0x20), no
         // "shoot outside the screen" line, so the four players' prompts never stack in the middle (players 3 / 4's
         // sit under their bands at the top: Hud::drawSeatHud); 1-2 players: the arcade's rows 0x14 / 0x1B
-        const bool lg4 = coop4_on();
+        const bool lg4 = true;   // (Light Gun Edition: every mode the same, 1-2 players too: user 2026-11-03)
         const int ry = lg4 ? 0x20 : 0x14;
         const int32_t lives = int32_t(mem.u32(pl + 0xC));
         int32_t timer = int32_t(mem.u32(pl + 0x40));
@@ -322,16 +322,16 @@ template <class P> void Game<P>::hud_start_prompt(int p, int which, int on)
 }
 
 // --- continue / game over (the flow's player states call these): the player's place from table 0xCA714 (x, y) ---
-// Light Gun Edition (ours): in the 4P mode players 1 / 2's CONTINUE? / GAME OVER sit right above their own bands at the
+// Light Gun Edition (ours): in every mode players 1 / 2's CONTINUE? / GAME OVER sit right above their own bands at the
 // bottom corners (as players 3 / 4's at the top: Hud::drawSeatHud), not in the middle where all four stacked
 namespace hud_lg {
 template <class G> int contX(const G& g, int p)
 {
-    return g.coop4_on() && p < 2 ? (p == 0 ? 2 : 0x24) : int(g.mem.template at<int8_t>(0xCA714 + uint32_t(p) * 2));
+    return p < 2 ? (p == 0 ? 2 : 0x24) : int(g.mem.template at<int8_t>(0xCA714 + uint32_t(p) * 2));   // (every mode)
 }
 template <class G> int contY(const G& g, int p)
 {
-    return g.coop4_on() && p < 2 ? 0x1F : int(g.mem.template at<int8_t>(0xCA715 + uint32_t(p) * 2));
+    return p < 2 ? 0x1F : int(g.mem.template at<int8_t>(0xCA715 + uint32_t(p) * 2));
 }
 }
 

@@ -858,7 +858,7 @@ void Frontend::remakePrompts(Widget* root, bool tabsKeys, std::function<void()> 
 {
     struct P { const char* label; const char* key; const char* pad; std::function<void()> act; int tag; };
     std::vector<P> ps;
-    if (tabsKeys) {
+    if (tabsKeys && !gunPrompts) {
         auto step = [this](int d) {
             return [this, d]() {
                 if (remakeTabs_ > 0)
@@ -870,8 +870,13 @@ void Frontend::remakePrompts(Widget* root, bool tabsKeys, std::function<void()> 
     }
     const bool top = screen_ == 1 && !debugItems_ && mainGroup_ == 0;
     // (the main menu: Escape is its last item's, Quit / Back; the pages: this prompt is Escape's widget)
-    ps.push_back({top ? "Quit" : "Back", "Esc", "B", back, screen_ == 1 || screen_ == 21 ? 0 : 1});
-    ps.push_back({"Accept", "Enter", "A", nullptr, 0});
+    if (gunPrompts) {   // Light Gun Edition: the gun's buttons (reload = Back / Quit, the trigger = Accept)
+        ps.push_back({top ? "Quit" : "Back", "Reload", "Reload", back, screen_ == 1 || screen_ == 21 ? 0 : 1});
+        ps.push_back({"Accept", "Shoot", "Shoot", nullptr, 0});
+    } else {
+        ps.push_back({top ? "Quit" : "Back", "Esc", "B", back, screen_ == 1 || screen_ == 21 ? 0 : 1});
+        ps.push_back({"Accept", "Enter", "A", nullptr, 0});
+    }
     const int n = int(ps.size());
     // a tidy column at the bottom right (the margin kPromptMargin, kPromptStep a row; the labels right-aligned a gap
     // left of the key caps); a column that would run into a settings panel (narrow screens): one row along the bottom
@@ -2552,18 +2557,19 @@ void Frontend::drawRPrompt(Widget& w)
     absRect(w, x, y, ww, hh);
     const bool lit = (w.flags & 0x40000) != 0;
     const size_t bar = w.value.find('|');
-    const std::string key = padPrompts_ ? padKey(w.value.substr(bar + 1)) : w.value.substr(0, bar);
+    const bool gun = gunPrompts && (w.value == "Reload|Reload" || w.value == "Shoot|Shoot");   // (Light Gun Edition)
+    const std::string key = gun ? w.value.substr(0, bar) : padPrompts_ ? padKey(w.value.substr(bar + 1)) : w.value.substr(0, bar);
     // a column at the widget's right: the key caps all one size (keys a rounded box, a pad's buttons a ring) centred
     // on one line, the arcade's claw marks (0x2A) small behind each, the label right-aligned a fixed gap to their left
     const float kh = kPromptCapH, colW = kPromptCapW;
     // (leftovers, rtl: mirrored: the caps at the widget's left, the label left-aligned a gap to their right)
-    const float kw = padPrompts_ ? kh : colW, ccx = w.rtlRow ? float(x) + colW / 2 : float(x + ww) - colW / 2;
+    const float kw = padPrompts_ && !gun ? kh : colW, ccx = w.rtlRow ? float(x) + colW / 2 : float(x + ww) - colW / 2;
     const float kx = ccx - kw / 2, ky = float(y) + (float(hh) - kh) / 2;
     rBlood(2, ccx + 4.0f, ky + kh / 2 - 2.0f, 40.0f, 0.38f, 0.72f);   // (out past the cap's top right / bottom left)
     const float th = 7.0f;
-    if (!rPadGlyph(key, ccx, ky + kh / 2, kh / 2)) {   // (padglyphs: the pad's / keys' icons, else the cap)
-        rKeyCap(kx, ky, kw, kh, padPrompts_);
-        if (!rPadSymbol(key, ccx, ky + kh / 2, kh / 2))   // (padpass: a PlayStation pad's shapes)
+    if (gun || !rPadGlyph(key, ccx, ky + kh / 2, kh / 2)) {   // (padglyphs: the pad's / keys' icons, else the cap)
+        rKeyCap(kx, ky, kw, kh, padPrompts_ && !gun);
+        if (gun || !rPadSymbol(key, ccx, ky + kh / 2, kh / 2))   // (padpass: a PlayStation pad's shapes)
             rText(key, ccx, ky + (kh - th) / 2, th, 0xF4ECE4, 1, 0.0f, 0);
     }
     const float lh = 12.0f;
