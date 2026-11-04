@@ -76,7 +76,10 @@ template <class P> void Game<P>::hud_ammo_draw(uint32_t task)
         const uint8_t scene = mem.template at<uint8_t>(G::scene_state);
         // PC Mode (ReWrithe on the arcade logic; THOTD.EXE hud_ammo_draw 0x50B7E4): no bullets while the reload timer
         // runs, up to 12 of them
-        if (scene != 3 && scene != 5 && !(pm_on() && pm_reload_at[p & 3] != 0)) {
+        if (lg_hide_bullets[p & 3]) {   // Light Gun Edition: Arsenal Mode's weapons: the HUD draws their rounds
+            for (int i = 0; i < 12; ++i)
+                sprite_draw(kTileRam, p == 0 ? 2 + 2 * i : 0x3B - 2 * i, 0x26, 0x10);
+        } else if (scene != 3 && scene != 5 && !(pm_on() && pm_reload_at[p & 3] != 0)) {
             for (int i = 0; i < (pm_on() ? 12 : 6); ++i) {
                 const int x = p == 0 ? 2 + 2 * i : 0x3B - 2 * i;
                 if (int8_t(mem.template at<uint8_t>(pl + 0x3D)) <= i) {

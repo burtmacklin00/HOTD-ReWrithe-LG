@@ -146,6 +146,12 @@ private:
     // the 4P mode (docs/coop4.md): players 3 / 4's rounds and lives (fire lamps) at the top-left / top-right corners,
     // player 1's / 2's own HUD art (arcade cells or the PC's sprites) recoloured green / yellow (player_colours.h)
     void drawSeatHud(const Runtime& rt, int ww, int wh);
+    // Light Gun Edition: Arsenal Mode: a weapon's rounds (up to 3 bullets in its colour: shotgun red, machine gun
+    // silver, rocket green) and their count in the players' label digits, where the bullets are
+    void drawArsenalAmmo(const Runtime& rt, int ww, int wh);
+    int seatDy_[2] = {-0x25, -0x25};   // players 3 / 4's band offset as drawSeatHud placed it last
+    SeatImg arsenalBullet_[4][2];      // [weapon][arcade, PC]
+    SeatImg arsenalDigit_[4][10][2];   // [seat][digit][arcade, PC]
     std::vector<uint8_t> seatTiles_, seatRgba_;
     SeatImg seatLabel_[2][2];   // "3P" / "4P" [seat - 2][arcade, PC], built once from the art
     uint64_t seatEmptySince_[2] = {};   // players 3 / 4's RELOAD! prompt: the game frame (+ 1) their gun went empty, 0 none

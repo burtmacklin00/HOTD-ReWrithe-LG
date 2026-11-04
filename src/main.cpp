@@ -13630,9 +13630,8 @@ int main(int argc, char* argv[])
             for (int p = 0; p < rt.seat_count() && wlOk; ++p) {
                 const port::a::Player& wpl = rt.mem.at<port::a::Player>(rt.player_rec(p));
                 if (wpl.state != 5) continue;
-                // the name and the rounds left (the HUD's bullets show 6 at most: the machine gun's 30 count here)
-                wl[p].setText({std::string(game::Runtime::lgWeaponName(rt.lgWeapon[p])) + "  " + std::to_string(int(wpl.rounds)) + " / " +
-                               std::to_string(game::Runtime::lgMagazine(rt.lgWeapon[p]))}, wh >= 1000 ? 2 : 1);
+                // the name (the rounds: the HUD's own bullets and count, Hud::drawArsenalAmmo)
+                wl[p].setText({game::Runtime::lgWeaponName(rt.lgWeapon[p])}, wh >= 1000 ? 2 : 1);
                 const bool left = (p & 1) == 0, top = p >= 2;
                 wl[p].drawAnchored(ww, wh, left ? x0 : x1, top ? wh * 0.19f : wh * 0.80f, left ? 0.0f : 1.0f, 0.5f);
             }

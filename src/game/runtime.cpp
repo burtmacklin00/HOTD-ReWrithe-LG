@@ -853,6 +853,7 @@ void Runtime::lg_modes_frame()
         if (w >= 0) {   // Arsenal Mode: the weapon's blast, splash and magazine (a reload refills to it)
             lg_seat_scale[p & 3] = w == 1 ? 2.5f : w == 3 ? 5.0f : 1.0f;
             lg_splash[p & 3] = w == 3;
+            lg_hide_bullets[p & 3] = w > 0;
             const int mag = lgMagazine(w);
             if (pl.rounds == pm_full_rounds(p) && lgLastRounds_[p & 3] < pl.rounds && mag > pl.rounds)
                 pl.rounds = uint8_t(mag);   // (a reload: the game's 6, the machine gun's 30)

@@ -1247,6 +1247,7 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
             dy = -0x25;
         if (inClear)   // the results: under the seat's score (its digits at row 4) as players 1 / 2's sit under theirs (0x23)
             dy = 4 - 0x23;
+        seatDy_[seat - 2] = dy;   // (Light Gun Edition: Arsenal Mode's rounds go with the band)
         // kind 0 as it is, 1 flames (blue texels), 2 all. The prompts (RELOAD, HOLD YOUR FIRE!, CONTINUE?, PRESS START
         // BUTTON) are kind 0: the arcade draws them in their own colours for players 1 and 2 alike (red / white), so
         // players 3 / 4's too (user 2026-10-20: "the HOLD YOUR FIRE is supposed to be red")
@@ -1295,7 +1296,7 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
                 pieces.push_back({hx, 0, 0x107, 0});
         } else if (hudOn) {
             label = true;
-            if (mem.u32(G::ammo_enabled) != 0)
+            if (mem.u32(G::ammo_enabled) != 0 && !rt.lg_hide_bullets[seat])   // (Arsenal Mode: drawArsenalAmmo's)
                 for (int i = 0; i < int(pl.rounds) && i < (rt.pm_on() ? 12 : 6); ++i)   // PC Mode: up to 12 (0x50B7E4)
                     pieces.push_back({left ? 2 + 2 * i : 0x3B - 2 * i, 0x26 + dy, 0x10, 0});
             const int n = std::min<int>(pl.lives, mem.at<uint8_t>(G::max_lives));
@@ -1626,6 +1627,8 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     }
     if (!paused && !clean && rt.coop4_on())   // the 4P mode: players 3 / 4's HUD at the top corners
         drawSeatHud(rt, ww, wh);
+    if (!paused && !clean && rt.lgWeapon[0] >= 0)   // Light Gun Edition: Arsenal Mode's rounds
+        drawArsenalAmmo(rt, ww, wh);
     if (!paused && !clean && rt.boss.shown)   // Boss Mode: the fight's clock (0x418CC8)
         drawBossClock(rt, ww, wh);
     // the chapter clear (kind 176): its lines appear as the original's sprites do (420, 360, 300, 240 frames left)
@@ -1697,6 +1700,100 @@ void Hud::drawSights(const Runtime& rt, int ww, int wh, const float aim[4][2])
             if (cpu[p])   // a computer teammate: a small CPU tag under its sight
                 cpuTag_[p].drawAnchored(ww, wh, aim[p][0], aim[p][1] + float(wh) / 30.0f, 0.5f, 0.0f);
         }
+    }
+}
+
+
+// Light Gun Edition: Arsenal Mode: for each playing player holding the shotgun, the machine gun or the rocket launcher,
+// up to 3 of the game's bullets (0x10) in the weapon's colour where the bullets are (the game's own are hidden:
+// lg_hide_bullets) and the rounds left after them in the players' label digits (the countdown's digits at the "1P" /
+// "2P" label's height, in that label's shades; players 3 / 4 in theirs through their colour ramp)
+void Hud::drawArsenalAmmo(const Runtime& rt, int ww, int wh)
+{
+    port::Mem& mem = rt.mem;
+    if (mem.at<int16_t>(G::game_mode) != 4 || mem.at<uint8_t>(G::scene_state) != 2 || rt.clear.active)
+        return;
+    const bool pc = rt.pcModels && pcSprites_.loaded();
+    if (!pc && (rt.pcModels || !mem.mapped(kTileRam) || !mem.mapped(0x2000000)))
+        return;
+    const int unit = pc ? 10 : 8;
+    const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
+    const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
+    const int src = pc ? 1 : 0;
+    // the bullets: the game's own picture, its brightness through the weapon's colour
+    static const uint8_t kTint[4][3] = {{255, 255, 255}, {215, 45, 35}, {205, 210, 220}, {70, 210, 70}};
+    for (int w = 1; w < 4; ++w) {
+        SeatImg& b = arsenalBullet_[w][src];
+        if (!b.px.empty()) continue;
+        b = spriteImg(mem, pc, pcSprites_, 0x10);
+        for (size_t i = 0; i + 3 < b.px.size(); i += 4) {
+            const float l = std::max({b.px[i], b.px[i + 1], b.px[i + 2]}) / 255.0f;
+            for (int c = 0; c < 3; ++c)
+                b.px[i + c] = uint8_t(std::min(255.0f, kTint[w][c] * (0.25f + 0.95f * l)));
+        }
+    }
+    auto digit = [&](int seat, int d) -> const SeatImg& {
+        SeatImg& out = arsenalDigit_[seat][d][src];
+        if (!out.px.empty()) return out;
+        const int labSeat = seat == 0 ? 0 : 1;   // (players 2-4: player 2's label; 3 / 4 then through their ramp)
+        const SeatImg lab = spriteImg(mem, pc, pcSprites_, mem.u32(0xCA6D0 + uint32_t(labSeat) * 12 + 8));
+        const SeatImg dg = spriteImg(mem, pc, pcSprites_, uint32_t(mem.at<int16_t>(0xCA720 + uint32_t(d) * 2)));
+        if (lab.px.empty() || dg.px.empty()) return out;
+        const int dh = lab.h, dw = std::max(1, dg.w * dh / std::max(1, dg.h));
+        out.w = dw, out.h = dh;
+        out.px.assign(size_t(dw) * dh * 4, 0);
+        for (int y = 0; y < dh; ++y)
+            for (int x = 0; x < dw; ++x)
+                std::copy_n(&dg.px[(size_t(y * dg.h / dh) * dg.w + size_t(x * dg.w / dw)) * 4], 4, &out.px[(size_t(y) * dw + x) * 4]);
+        // the label's own digit (its left half) gives the shades, darkest to brightest by rank
+        auto level = [](const uint8_t* c) { return c[0] * 299 + c[1] * 587 + c[2] * 114; };
+        std::vector<const uint8_t*> ref;
+        for (int y = 0; y < lab.h; ++y)
+            for (int x = 0; x < lab.w / 2; ++x)
+                if (const uint8_t* c = &lab.px[(size_t(y) * lab.w + x) * 4]; c[3] > 0x80) ref.push_back(c);
+        std::vector<uint8_t*> mine;
+        for (size_t i = 0; i + 3 < out.px.size(); i += 4)
+            if (out.px[i + 3]) mine.push_back(&out.px[i]);
+        if (!ref.empty() && !mine.empty()) {
+            std::stable_sort(ref.begin(), ref.end(), [&](const uint8_t* a, const uint8_t* b) { return level(a) < level(b); });
+            std::stable_sort(mine.begin(), mine.end(), [&](const uint8_t* a, const uint8_t* b) { return level(a) < level(b); });
+            for (size_t i = 0; i < mine.size(); ++i)
+                std::copy_n(ref[i * ref.size() / mine.size()], 3, mine[i]);
+        }
+        if (seat >= 2) {
+            Recolour r = playerRecolour(seat);
+            r.select = Recolour::All;
+            recolourRgba(out.px.data(), out.px.size() / 4, r);
+        }
+        return out;
+    };
+    const float x0 = anchorEdges ? leftEdge(W, H, ww, wh) : 0.0f;
+    for (int side = 0; side < 2; ++side) {   // the left seats (1, 3) and the right ones (2, 4): each side to its edge
+        std::vector<uint8_t> canvas;
+        for (int seat = side; seat < rt.seat_count(); seat += 2) {
+            const int w = rt.lgWeapon[seat];
+            const port::a::Player& pl = mem.at<port::a::Player>(rt.player_rec(seat));
+            if (w <= 0 || pl.state != 5 || mem.u32(G::ammo_enabled) == 0) continue;
+            if (canvas.empty()) canvas.assign(size_t(W) * H * 4, 0);
+            const bool left = side == 0;
+            const int dy = seat >= 2 ? seatDy_[seat - 2] : 0, row = 0x26 + dy;
+            const SeatImg& b = arsenalBullet_[w][src];
+            const int n = std::min<int>(pl.rounds, 3);
+            for (int i = 0; i < n; ++i)
+                paste(canvas, W, H, b, (left ? 2 + 2 * i : 0x3B - 2 * i) * unit, row * unit);
+            // the count after the three bullets' places
+            const std::string t = std::to_string(int(pl.rounds));
+            int tw = 0;
+            for (char ch : t) tw += digit(seat, ch - '0').w + 1;
+            int x = left ? (2 + 2 * 3) * unit + unit / 2 : (0x3B - 2 * 3 + 1) * unit - unit / 2 - tw;
+            for (char ch : t) {
+                const SeatImg& g = digit(seat, ch - '0');
+                paste(canvas, W, H, g, x, row * unit - (g.h - 2 * unit) / 2);
+                x += g.w + 1;
+            }
+        }
+        if (!canvas.empty())
+            upload(canvas, W, H, ww, wh, side == 0 ? -x0 : x0);
     }
 }
 
