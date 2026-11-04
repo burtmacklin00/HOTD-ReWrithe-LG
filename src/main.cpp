@@ -3815,11 +3815,16 @@ int main(int argc, char* argv[])
         r.settings.lives = cfg.lives;
         // Light Gun Edition: the fun modes (Options > Gameplay): local games only (online: as normal, on every PC)
         if (!gNet) {
-            r.lgModes.freeFire = cfg.freeFire || cfg.machineGun;   // (Machine Gun: unlimited ammo too)
+            // Arsenal Mode: each player's own weapon (the middle button), every player starts with the pistol; the
+            // whole-game Shotgun / Machine Gun modes are its weapons then
+            const bool arsenal = cfg.weaponSwitch;
+            r.lgModes.freeFire = cfg.freeFire || (cfg.machineGun && !arsenal);   // (Machine Gun: unlimited ammo too)
             r.lgModes.hardcore = cfg.hardcore && !bossModeOpt;
             r.lgModes.bigHeads = cfg.bigHeads;
-            r.lgModes.shotgunShells = cfg.shotgun ? 3 : 0;
-            r.lg_hit_scale = cfg.shotgun ? 2.5f : 1.0f;
+            r.lgModes.shotgunShells = cfg.shotgun && !arsenal ? 3 : 0;
+            r.lg_hit_scale = cfg.shotgun && !arsenal ? 2.5f : 1.0f;
+            for (int k = 0; k < 4; ++k)
+                r.lgWeapon[k] = arsenal ? 0 : -1;
             if (r.lgModes.hardcore) {
                 r.settings.lives = 0;          // (the lives table's first row: 1 life)
                 r.bossNoContinue = true;       // (everyone out: game over at once, no team countdown)
@@ -12436,7 +12441,7 @@ int main(int argc, char* argv[])
                 else if (e.button.button == SDL_BUTTON_RIGHT) g.reload = true;
                 else if (e.button.button == SDL_BUTTON_MIDDLE && e.button.which == SDL_PEN_MOUSEID)
                     g.reload = true;   // edgereload: the pen's barrel button (SDL: button 2) = reload, as its eraser (3)
-                else if (e.button.button == SDL_BUTTON_MIDDLE) g.reload = true;   // Light Gun Edition: reload (the trigger is Start)
+                else if (e.button.button == SDL_BUTTON_MIDDLE) (lightGuns.weaponSwitch ? g.weaponNext : g.reload) = true;   // Light Gun Edition: reload, or Arsenal Mode's next weapon
             } else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) {
                 // the players' aim keys, held (from the events: SDL_GetKeyboardState misses injected events);
                 // keybind: each player's own keys (cfg.keys, game/keybinds.h)
@@ -13049,12 +13054,21 @@ int main(int argc, char* argv[])
             const float halfW = gameHalfW(cfg.aspect, lw, lh);
             // Light Gun Edition: Machine Gun mode: a held trigger fires again every 110 ms (about 9 shots a second; each
             // its recoil pulse) while the player is in play; player 1's mouse counts as held from its left button
-            if (cfg.machineGun) {
+            // Arsenal Mode: the middle button: the player's next weapon (Pistol > Shotgun > Machine Gun > Rocket Launcher)
+            lightGuns.weaponSwitch = rt.lgWeapon[0] >= 0;
+            for (int p = 0; p < rt.seat_count(); ++p)
+                if (guns[p].weaponNext) {
+                    guns[p].weaponNext = false;
+                    if (rt.lgWeapon[p] >= 0) rt.lg_weapon_next(p);
+                }
+            if (cfg.machineGun || rt.lgWeapon[0] >= 0) {
                 static Uint64 nextShot[game::kInputPlayers] = {};
                 const Uint64 now = SDL_GetTicks();
                 if (cfg.p1Input == 0 && !lightGuns.active())
                     guns[0].held = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0 && !paused;
                 for (int p = 0; p < rt.seat_count(); ++p) {
+                    // (Arsenal Mode: only a player holding the machine gun; else the Machine Gun mode: every player)
+                    if (rt.lgWeapon[p] >= 0 ? rt.lgWeapon[p] != 2 : !cfg.machineGun) continue;
                     if (guns[p].trigger) { nextShot[p] = now + 110; continue; }   // (a pull: its own shot, the next one later)
                     if (guns[p].held && rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5 && now >= nextShot[p]) {
                         guns[p].trigger = true;
@@ -13593,6 +13607,33 @@ int main(int argc, char* argv[])
         hud.deferSights = crtCrisp;
         hud.draw(rt, ww, wh, aimSrc, (debugLines && !trailerNow) || (gScene.active() && !sceneClean), gScene.active() && !sceneClean ? gScene.lines(rt) : hudLines(rt, paused));
         hud.deferSights = false;
+        if (rt.lgWeapon[0] >= 0 && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active &&
+            rt.mem.at<uint8_t>(game::A::G::scene_state) == 2) {
+            // Light Gun Edition: Arsenal Mode: each playing player's weapon by their corner of the game's picture (players
+            // 1 / 2 above their HUD at the bottom, 3 / 4 under theirs at the top), in their colour
+            static Overlay wl[4];
+            static bool wlOk = false, wlTried = false;
+            static const uint8_t kCol[4][3] = {{255, 90, 80}, {110, 170, 255}, {90, 235, 90}, {255, 225, 60}};
+            if (!wlTried) {
+                wlTried = true;
+                wlOk = true;
+                for (int k = 0; k < 4; ++k) {
+                    std::string e;
+                    wlOk = wlOk && wl[k].init(e);
+                    wl[k].setStyle(150, kCol[k][0], kCol[k][1], kCol[k][2]);
+                    wl[k].translate = false;
+                }
+            }
+            const float gw = cfg.aspect == 1 ? std::min(float(ww), float(wh) * 496.0f / 384.0f)
+                           : cfg.aspect == 2 ? std::min(float(ww), float(wh) * 1.6f) : float(ww);
+            const float x0 = (float(ww) - gw) * 0.5f + wh * 0.02f, x1 = (float(ww) + gw) * 0.5f - wh * 0.02f;
+            for (int p = 0; p < rt.seat_count() && wlOk; ++p) {
+                if (rt.mem.at<port::a::Player>(rt.player_rec(p)).state != 5) continue;
+                wl[p].setText({game::Runtime::lgWeaponName(rt.lgWeapon[p])}, wh >= 1000 ? 2 : 1);
+                const bool left = (p & 1) == 0, top = p >= 2;
+                wl[p].drawAnchored(ww, wh, left ? x0 : x1, top ? wh * 0.19f : wh * 0.80f, left ? 0.0f : 1.0f, 0.5f);
+            }
+        }
         if (cfg.partyBoard && !gNet && rt.clear.active && !gScene.active()) {
             // Light Gun Edition: the Party Scoreboard: on a chapter's results, with two or more players in the game so
             // far: each player's score, shots, hits and accuracy (this game), and the MVP (the best score)

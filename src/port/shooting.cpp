@@ -14,7 +14,7 @@ namespace hotd::port {
 template <class P> int Game<P>::ray_sign_test(int player, float x, float y, float z, float radius)
 {
     ShotRay& r = mem.at<ShotRay>(shot_ray_rec(player));
-    radius = radius * lg_hit_scale;   // Light Gun Edition: Shotgun Mode (1 otherwise)
+    radius = radius * lg_hit_scale * lg_seat_scale[player & 3];   // Light Gun Edition: Shotgun Mode / the weapons (1 otherwise)
     const float c0 = r.cam_trig[0], c1 = r.cam_trig[1], s0 = r.cam_trig[2], s1 = r.cam_trig[3];
     if constexpr (P::pc) {
         if (mem.at<int32_t>(G::frontend_state) == 5)
@@ -72,6 +72,30 @@ template <class P> void Game<P>::shot_resolve()
         pl.flags &= ~2u;
         if (mem.u32(G::shot_candidate_count) != 0) {
             if (mem.u32(G::input_source) == 0) ++lg_hits[p & 3];   // Light Gun Edition: the Party Scoreboard's hits
+            if (lg_splash[p & 3] && mem.u32(G::input_source) == 0) {
+                // Light Gun Edition: the rocket: every object / body part in the blast is hit (as the nearest one is)
+                const uint32_t bit = 1u << ((p & 1) + 1);
+                const uint32_t n = mem.u32(G::shot_candidate_count);
+                for (uint32_t i = 0; i < n; ++i) {
+                    const ShotCandidate c = mem.at<ShotCandidate>(G::shot_candidates, i);
+                    if ((c.flags >> 4) & 1)
+                        continue;   // (a scene item: its own code, the nearest one's)
+                    if (coop4_on()) {
+                        coop4_hit_add(c.target.a, p);
+                        if ((c.flags >> 9) & 1)
+                            coop4_hit_add(mem.at<BodyPart>(c.target.a).owner.a, p);
+                    }
+                    if (((c.flags >> 9) & 1) == 0) {
+                        Obj& o = mem.at<Obj>(c.target.a);
+                        o.flags = bit | o.flags | 0x100;
+                    } else {
+                        BodyPart& part = mem.at<BodyPart>(c.target.a);
+                        part.flags = bit | part.flags | 0x100;
+                        Obj& o = mem.at<Obj>(part.owner.a);
+                        o.flags = bit | o.flags | 0x100;
+                    }
+                }
+            }
             shot_hit_nearest(p);
             mem.set32(G::shot_last_count, mem.u32(G::shot_candidate_count));
         }

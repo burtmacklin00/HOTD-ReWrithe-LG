@@ -305,6 +305,7 @@ struct LaunchConfig {
     bool hardcore = false;     // one life, no continues, its own high scores
     bool freeFire = false;     // unlimited ammo, no reloading
     bool machineGun = false;   // hold the trigger: automatic fire (about 9 shots a second), unlimited ammo
+    bool weaponSwitch = false; // Arsenal Mode (launcher.ini arsenal=): the middle button: Pistol > Shotgun > Machine Gun > Rocket Launcher, each player their own
     // setup2: the version that last ran with these settings (launcher.ini lastversion=; another one: What's New once)
     std::string lastVersion;
     bool attractGore = true;     // Gameplay "Attract Gore": the attract demo blows parts off as the 1998 PC (port::gAttractGore)

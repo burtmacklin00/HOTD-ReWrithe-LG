@@ -368,6 +368,15 @@ public:
     // for the game: no continue, no joining back), Big Heads (draws only)
     struct LgModes { bool freeFire = false, hardcore = false, bigHeads = false; int shotgunShells = 0; } lgModes;
     bool lgOut_[4] = {false, false, false, false};
+    // Arsenal Mode (each seat: 0 Pistol, 1 Shotgun, 2 Machine Gun, 3 Rocket Launcher); off: -1 for every seat
+    int lgWeapon[4] = {-1, -1, -1, -1};
+    uint8_t lgLastRounds_[4] = {6, 6, 6, 6};
+    void lg_weapon_next(int p);   // the middle button: the next weapon, its magazine full
+    static int lgMagazine(int weapon) { return weapon == 1 ? 3 : weapon == 2 ? 30 : weapon == 3 ? 1 : 6; }
+    static const char* lgWeaponName(int weapon)
+    {
+        return weapon == 1 ? "SHOTGUN" : weapon == 2 ? "MACHINE GUN" : weapon == 3 ? "ROCKET LAUNCHER" : "PISTOL";
+    }
     void lg_modes_frame();
     void lg_big_heads();
     std::deque<int> nameKeys;

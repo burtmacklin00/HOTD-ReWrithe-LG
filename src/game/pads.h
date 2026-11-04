@@ -71,6 +71,7 @@ struct GunState {
     float x = 0, y = 0;
     bool trigger = false, reload = false;
     bool held = false;   // Light Gun Edition: the trigger is held down (Machine Gun mode's automatic fire)
+    bool weaponNext = false;   // Light Gun Edition: Arsenal Mode: the middle button pressed (the next weapon)
     // edgereload: last placed by a touch / pen (an absolute pointer, put on the picture directly): the window's
     // outermost pixel is a shot there, not the confined mouse's "pushed against the edge" reload
     bool pointer = false;
@@ -339,6 +340,7 @@ public:
     struct SeatPress { bool trigger = false, reload = false; };   // reload: the reload button or a pull off the screen
     void setSeatPick(int mode) { if (mode != seatPick_) { seatPick_ = mode; for (SeatPress& s : seatPress) s = {}; } }
     SeatPress seatPress[4];
+    bool weaponSwitch = false;   // Light Gun Edition: Arsenal Mode: the middle button switches weapons (else it reloads)
     // Light Gun Edition (the gun set-up screen's crosshairs): where each light gun points (window fractions; guns
     // that have reported a position, on or off the screen)
     struct Point { std::string key; float u = 0, v = 0; };
@@ -360,6 +362,7 @@ private:
         float dx = 0, dy = 0;          // relative: the motion since the last apply
         bool eTrigger = false, eReload = false, eStart = false;
         bool held = false;   // (Light Gun Edition: the trigger held down)
+        bool eWeapon = false;   // (Light Gun Edition: the middle button with Arsenal Mode on)
     };
     std::vector<Dev> devs_;
     int calPlayer_ = -1, calStep_ = 0;

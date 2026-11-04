@@ -194,7 +194,7 @@ void menuReset(LaunchConfig& c, int page)
         for (int p = 0; p < 4; ++p) c.gunDev[p].clear(), c.gunName[p].clear();   // (ipolish: Light Guns: Assign)
         break;
     case kCatGameplay:
-        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
+        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
         break;
     case kResetAdvanced:
@@ -525,6 +525,8 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "Fun mode: unlimited ammo, no reloading (for young players and parties)"});
         r.push_back({"Machine Gun", [&c]() { return onOff(c.machineGun); }, [&c, save]() { c.machineGun = !c.machineGun; save(); },
                      "Fun mode: hold the trigger for automatic fire (recoil on every shot), unlimited ammo"});
+        r.push_back({"Arsenal Mode", [&c]() { return onOff(c.weaponSwitch); }, [&c, save]() { c.weaponSwitch = !c.weaponSwitch; save(); },
+                     "Fun mode: the gun's middle button switches weapons: Pistol, Shotgun, Machine Gun, Rocket Launcher (each player their own)"});
         r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { c.hardcore = !c.hardcore; save(); },
                      "Fun mode: one life each, no continues, no joining back in; its own high scores"});
         r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },

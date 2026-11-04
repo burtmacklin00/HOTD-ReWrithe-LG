@@ -32,7 +32,7 @@ What this edition adds:
   **Show Crosshairs** (launcher.ini `crosshairs=`).
 - **Fun modes** (Options > Gameplay; local games, online games always play as normal): **Flashlight Mode** (the
   mansion dark, each player's gun lights where it aims), **Big Heads**, **Shotgun Mode** (a much wider blast, 3 shells a
-  load), **Free Fire** (unlimited ammo), **Machine Gun** (hold the trigger: automatic fire with recoil on every shot, unlimited ammo), **Hardcore** (one life, no continues, its own top 10) and the **Party
+  load), **Free Fire** (unlimited ammo), **Machine Gun** (hold the trigger: automatic fire with recoil on every shot, unlimited ammo), **Arsenal Mode** (the gun's middle button switches weapons, each player their own: Pistol, Shotgun, Machine Gun, Rocket Launcher with a blast that hits everything in it), **Hardcore** (one life, no continues, its own top 10) and the **Party
   Scoreboard** (co-op: each player's score, shots, hits and accuracy at a chapter's end, and the MVP; on by default).
 - **Link Play in one click** (online and same-network co-op): `Launch HOTD ReWrithe - Link Play Host.ahk` starts the
   game straight into Online Co-op > Start Hosting with the Host page's last settings, its join code copied to the

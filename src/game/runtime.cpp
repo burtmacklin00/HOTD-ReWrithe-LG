@@ -849,12 +849,26 @@ void Runtime::lg_modes_frame()
         return;
     for (int p = 0; p < seat_count(); ++p) {
         port::a::Player& pl = mem.at<port::a::Player>(player_rec(p));
-        if (lgModes.freeFire && pl.state == 5) {   // Free Fire: the gun never runs dry
-            pl.rounds = pm_full_rounds(p);
-            pl.empty = 0;
+        const int w = lgWeapon[p & 3];
+        if (w >= 0) {   // Arsenal Mode: the weapon's blast, splash and magazine (a reload refills to it)
+            lg_seat_scale[p & 3] = w == 1 ? 2.5f : w == 3 ? 5.0f : 1.0f;
+            lg_splash[p & 3] = w == 3;
+            const int mag = lgMagazine(w);
+            if (pl.rounds == pm_full_rounds(p) && lgLastRounds_[p & 3] < pl.rounds && mag > pl.rounds)
+                pl.rounds = uint8_t(mag);   // (a reload: the game's 6, the machine gun's 30)
+            if (lgModes.freeFire && pl.state == 5)
+                pl.rounds = uint8_t(mag), pl.empty = 0;
+            if (pl.rounds > mag)
+                pl.rounds = uint8_t(mag);
+            lgLastRounds_[p & 3] = pl.rounds;
+        } else {
+            if (lgModes.freeFire && pl.state == 5) {   // Free Fire: the gun never runs dry
+                pl.rounds = pm_full_rounds(p);
+                pl.empty = 0;
+            }
+            if (lgModes.shotgunShells > 0 && pl.rounds > lgModes.shotgunShells)   // Shotgun Mode: a load is 3 shells
+                pl.rounds = uint8_t(lgModes.shotgunShells);
         }
-        if (lgModes.shotgunShells > 0 && pl.rounds > lgModes.shotgunShells)   // Shotgun Mode: a load is 3 shells
-            pl.rounds = uint8_t(lgModes.shotgunShells);
         if (lgModes.hardcore && pl.state == 4) {   // Hardcore: out of lives = out of the game (no countdown to wait)
             lgOut_[p & 3] = true;
             pl.continue_timer = 0;
@@ -880,6 +894,26 @@ void Runtime::lg_big_heads()
         for (int k = 0; k < 9; ++k)
             d.m[k] *= kScale;
     }
+}
+
+} // namespace hotd::game
+
+namespace hotd::game {
+
+// Light Gun Edition: Arsenal Mode: the seat's next weapon, its magazine full (a switch is a reload)
+void Runtime::lg_weapon_next(int p)
+{
+    if (p < 0 || p >= 4 || lgWeapon[p] < 0 || p >= seat_count())
+        return;
+    lgWeapon[p] = (lgWeapon[p] + 1) % 4;
+    port::a::Player& pl = mem.at<port::a::Player>(player_rec(p));
+    if (pl.state == 5) {
+        pl.rounds = uint8_t(lgMagazine(lgWeapon[p]));
+        pl.empty = 0;
+    }
+    lgLastRounds_[p] = pl.rounds;
+    if (log)
+        log(std::string("player ") + std::to_string(p + 1) + ": " + lgWeaponName(lgWeapon[p]));
 }
 
 } // namespace hotd::game

@@ -196,7 +196,8 @@ void LightGuns::buttons(uint64_t id, unsigned flags)
             d.eTrigger = true;
     }
     if (flags & 0x4) d.eReload = true;
-    if (flags & 0x10) d.eReload = true;   // Light Gun Edition: the middle button reloads (the trigger is Start)
+    if (flags & 0x10) (weaponSwitch ? d.eWeapon : d.eReload) = true;   // Light Gun Edition: the middle button reloads,
+                                                                        // or with Arsenal Mode the next weapon
 }
 
 #ifdef _WIN32
@@ -367,9 +368,10 @@ void LightGuns::apply(Runtime& rt, GunState guns[], bool paused, int lw, int lh)
                 }
             }
             if (d.eReload) g.reload = true;
+            if (d.eWeapon) g.weaponNext = true;
             if (d.eStart) { if (onJoin) onJoin(p); else rt.player_join(p); }
         }
-        d.eTrigger = d.eReload = d.eStart = false;
+        d.eTrigger = d.eReload = d.eStart = d.eWeapon = false;
     }
 }
 

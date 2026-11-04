@@ -41,6 +41,10 @@ public:
     // test radius factor, and each seat's shots that hit something (the Party Scoreboard's, real input only)
     float lg_hit_scale = 1.0f;
     uint32_t lg_hits[4] = {0, 0, 0, 0};
+    // Light Gun Edition's weapons (Arsenal Mode): each seat's own shot-test radius factor (on top of lg_hit_scale)
+    // and the rocket's splash (every candidate of the shot is hit, not only the nearest)
+    float lg_seat_scale[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    bool lg_splash[4] = {false, false, false, false};
     // Options "Game Text: Japanese" (ours): the region's text-only effects (the subtitles / voice-message sprites,
     // chapter cards, RELOAD hint, the attract tutorial's text) as the JAPAN region 0 draws them, while the logic keeps
     // reading the real region 0x51F791 (attract order, credits, the opening title's timing). Off in the proofs.
