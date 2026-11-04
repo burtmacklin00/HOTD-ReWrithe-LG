@@ -1069,7 +1069,7 @@ bool Runtime::lg_volatile(uint32_t body) const
 
 // the shot (shot_resolve): a glowing zombie hit, not on its head: it blows up; every creature within the blast is hit
 // by the shooter (zombies with one hit point left: they die; hostages / scientists: shot, the penalty as usual), and
-// glowing ones in it go off too (a chain). The bosses' fights: hits only
+// glowing ones in it go off too (a chain); the shooter loses a life. The bosses' fights: hits only
 void Runtime::lg_explode(int player, uint32_t part)
 {
     if (!mem.mapped(part))
@@ -1085,6 +1085,9 @@ void Runtime::lg_explode(int player, uint32_t part)
     static const float kReach = [] { const char* e = std::getenv("HOTD_BLAST_R"); return e ? float(std::atof(e)) : 45.0f; }();
     const bool bossUp = mem.at<uint8_t>(0x543530) != 0;
     const uint32_t bit = 1u << ((player & 1) + 1);
+    // (user 2026-11-04: "you should be punished if you don't shoot them in the head"): the shooter is caught in it: a
+    // life lost, as an enemy's hit (the shake, 90 frames safe; chains cost no more)
+    player_hit_lose_life(player, 1, 0, 1, 0x5A);
     std::vector<uint32_t> todo = {body};
     while (!todo.empty()) {
         const uint32_t b0 = todo.back();

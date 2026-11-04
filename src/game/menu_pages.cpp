@@ -538,7 +538,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         r.push_back({"Weak-Point Roulette", [&c]() { return onOff(c.roulette); }, [&c, save]() { c.roulette = !c.roulette; save(); },
                      "Fun mode: each zombie can only be hurt where a red ring glows; the ring moves to another body part every 2 seconds"});
         r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { c.exploding = !c.exploding; save(); },
-                     "Fun mode: some zombies glow orange; hit one anywhere but the head and it blows up everything near it, hostages too"});
+                     "Fun mode: some zombies glow orange: shoot them in the head! Hit one anywhere else and it blows up: everything near it and you get hurt"});
         r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { c.survival = !c.survival; save(); },
                      "Fun mode: a 60 s clock: kills +2 s, rescues +15 s, a hit -10 s, a miss -1.5 s; time up = game over. Its own high scores"});
         r.push_back({"Turbo Speed Run", [&c]() { return std::string(c.turbo == 1 ? "x1.5" : c.turbo == 2 ? "x2" : "Off"); },
