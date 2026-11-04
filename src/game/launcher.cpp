@@ -179,7 +179,30 @@ bool LaunchConfig::load(const std::string& file)
             continue;
         const std::string k = line.substr(0, eq), v = line.substr(eq + 1);
         const int n = std::atoi(v.c_str());
+        // Light Gun Edition: the fun modes' keys (their own chain: MSVC's limit on one else-if chain, C1061)
+        auto funKey = [&]() {
+            if (k == "flashlight") flashlight = n != 0;
+            else if (k == "bigheads") bigHeads = n != 0;
+            else if (k == "shotgun") shotgun = n != 0;
+            else if (k == "partyboard") partyBoard = n != 0;
+            else if (k == "hardcore") hardcore = n != 0;
+            else if (k == "freefire") freeFire = n != 0;
+            else if (k == "machinegun") machineGun = n != 0;
+            else if (k == "suddendeath") suddenDeath = n != 0;
+            else if (k == "vampire") vampire = n != 0;
+            else if (k == "hostagecrisis") hostageCrisis = n != 0;
+            else if (k == "roulette") roulette = n != 0;
+            else if (k == "survival") survival = n != 0;
+            else if (k == "exploding") exploding = n != 0;
+            else if (k == "funlook") funLook = std::clamp(n, 0, 3);
+            else if (k == "turbo") turbo = std::clamp(n, 0, 2);
+            else if (k == "bossrush") bossRush = n != 0;
+            else if (k == "arsenal") weaponSwitch = n != 0;
+            else return false;
+            return true;
+        };
         if (bindsIniLine(k, v, keys, padBinds)) {}   // keybind: key1.fire= / padbind1.fire= ...
+        else if (funKey()) {}
         else if (k == "arcade") arcade = fromBase(v, base);
         else if (k == "pc") pc = fromBase(v, base);
         else if (k == "models") models = std::clamp(n, 0, 1);
@@ -253,23 +276,6 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "resolution_window") { const util::Size s = util::parseSize(v); resWinW = s.w, resWinH = s.h; }
         else if (k == "autoreload") autoReload = n != 0;
         else if (k == "edgereload") edgeReload = n != 0;
-        else if (k == "flashlight") flashlight = n != 0;   // (Light Gun Edition: the fun modes)
-        else if (k == "bigheads") bigHeads = n != 0;
-        else if (k == "shotgun") shotgun = n != 0;
-        else if (k == "partyboard") partyBoard = n != 0;
-        else if (k == "hardcore") hardcore = n != 0;
-        else if (k == "freefire") freeFire = n != 0;
-        else if (k == "machinegun") machineGun = n != 0;
-        else if (k == "suddendeath") suddenDeath = n != 0;
-        else if (k == "vampire") vampire = n != 0;
-        else if (k == "hostagecrisis") hostageCrisis = n != 0;
-        else if (k == "roulette") roulette = n != 0;
-        else if (k == "survival") survival = n != 0;
-        else if (k == "exploding") exploding = n != 0;
-        else if (k == "funlook") funLook = std::clamp(n, 0, 3);
-        else if (k == "turbo") turbo = std::clamp(n, 0, 2);
-        else if (k == "bossrush") bossRush = n != 0;
-        else if (k == "arsenal") weaponSwitch = n != 0;
         else if (k == "scoredisplay") scoreDisplay = n != 0;
         else if (k == "attractgore") attractGore = n != 0;
         else if (k == "lgupdatecheck") updateCheck = n != 0;
