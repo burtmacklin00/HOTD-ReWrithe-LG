@@ -3815,7 +3815,7 @@ int main(int argc, char* argv[])
         r.settings.lives = cfg.lives;
         // Light Gun Edition: the fun modes (Options > Gameplay): local games only (online: as normal, on every PC)
         if (!gNet) {
-            r.lgModes.freeFire = cfg.freeFire;
+            r.lgModes.freeFire = cfg.freeFire || cfg.machineGun;   // (Machine Gun: unlimited ammo too)
             r.lgModes.hardcore = cfg.hardcore && !bossModeOpt;
             r.lgModes.bigHeads = cfg.bigHeads;
             r.lgModes.shotgunShells = cfg.shotgun ? 3 : 0;
@@ -13047,6 +13047,21 @@ int main(int argc, char* argv[])
             // left / right edge is off it too), original 4:3 = the 496 x 384 screen (the bars are off it); outside the
             // window (a mouse pushed past it) is off it in both
             const float halfW = gameHalfW(cfg.aspect, lw, lh);
+            // Light Gun Edition: Machine Gun mode: a held trigger fires again every 110 ms (about 9 shots a second; each
+            // its recoil pulse) while the player is in play; player 1's mouse counts as held from its left button
+            if (cfg.machineGun) {
+                static Uint64 nextShot[game::kInputPlayers] = {};
+                const Uint64 now = SDL_GetTicks();
+                if (cfg.p1Input == 0 && !lightGuns.active())
+                    guns[0].held = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0 && !paused;
+                for (int p = 0; p < rt.seat_count(); ++p) {
+                    if (guns[p].trigger) { nextShot[p] = now + 110; continue; }   // (a pull: its own shot, the next one later)
+                    if (guns[p].held && rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5 && now >= nextShot[p]) {
+                        guns[p].trigger = true;
+                        nextShot[p] = now + 110;
+                    }
+                }
+            }
             // Light Gun Edition: the 4P name entry's second round runs players 3 / 4 in players 1 / 2's places: their
             // own guns there (they had to use players 1 / 2's)
             const bool nameSwap = rt.coop4_on() && rt.rank4Round() == 2 && rt.name_entry_active();

@@ -187,6 +187,8 @@ void LightGuns::buttons(uint64_t id, unsigned flags)
         return;
     }
     place(d);
+    if (flags & 0x1) d.held = true;    // (Light Gun Edition: Machine Gun mode)
+    if (flags & 0x2) d.held = false;
     if (flags & 0x1) {
         if (calibrating())
             calibrationShot(d);   // (no shot)
@@ -353,6 +355,7 @@ void LightGuns::apply(Runtime& rt, GunState guns[], bool paused, int lw, int lh)
             g.y = std::clamp(g.y + d.dy, -m, float(lh) + m);
         }
         d.dx = d.dy = 0;
+        g.held = d.held && !paused && !calibrating();
         if (!paused && !calibrating()) {
             if (d.eTrigger) {
                 g.trigger = true;

@@ -70,6 +70,7 @@ constexpr int kInputPlayers = 4;   // players 3 / 4: the experimental 4P mode on
 struct GunState {
     float x = 0, y = 0;
     bool trigger = false, reload = false;
+    bool held = false;   // Light Gun Edition: the trigger is held down (Machine Gun mode's automatic fire)
     // edgereload: last placed by a touch / pen (an absolute pointer, put on the picture directly): the window's
     // outermost pixel is a shot there, not the confined mouse's "pushed against the edge" reload
     bool pointer = false;
@@ -358,6 +359,7 @@ private:
         float u = 0.5f, v = 0.5f;      // absolute: the last raw position (window fractions)
         float dx = 0, dy = 0;          // relative: the motion since the last apply
         bool eTrigger = false, eReload = false, eStart = false;
+        bool held = false;   // (Light Gun Edition: the trigger held down)
     };
     std::vector<Dev> devs_;
     int calPlayer_ = -1, calStep_ = 0;
