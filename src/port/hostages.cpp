@@ -64,6 +64,8 @@ template <class P> void Game<P>::pm_shot_bit_drop(uint32_t obj)
 // random) loses a life (player_hit_lose_life, forced), the effect's +0x2EB = the shooter
 template <class P> void Game<P>::hostage_shot_penalty(uint32_t obj, bool held)
 {
+    if (lg_hostage_crisis)
+        lg_crisis_fail = true;   // Light Gun Edition: Hostage Crisis: game over for everyone
     const uint32_t t = task_create(F::hostage_shot_effect, 0x3C8);
     of<uint32_t>(t, 0x20) = of<uint32_t>(obj, 0x2D4);
     of<uint32_t>(t, 0x24) = of<uint32_t>(obj, 0x2D8);

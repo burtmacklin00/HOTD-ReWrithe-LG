@@ -810,6 +810,8 @@ void Runtime::frame_one()
     for (uint32_t k = 0; k < 12; ++k)
         camera[k] = mem.f32(slot + 4 * k);
     ragdoll_frame();   // the Ragdoll mod (game/ragdoll.h): the dead bodies' drawn poses (draws only; after the camera: it needs it)
+    if (lg_roulette)
+        lg_roulette_frame();   // Light Gun Edition: Weak-Point Roulette (the glowing parts for the next shots)
     if (lgModes.bigHeads)
         lg_big_heads();   // Light Gun Edition: Big Heads (draws only)
     // actorswap: the cut-scene viewer's Actors (draws only; off outside the viewer)
@@ -847,6 +849,15 @@ void Runtime::lg_modes_frame()
 {
     if (mem.at<int16_t>(G::game_mode) != 4)
         return;
+    if (lg_crisis_fail) {   // Hostage Crisis: a hostage was shot: every player out, no continues
+        lgModes.hardcore = true;
+        bossNoContinue = true;
+        for (int p = 0; p < seat_count(); ++p) {
+            port::a::Player& pl = mem.at<port::a::Player>(player_rec(p));
+            lgOut_[p & 3] = true;
+            if (pl.state == 5) pl.lives = 0;
+        }
+    }
     for (int p = 0; p < seat_count(); ++p) {
         port::a::Player& pl = mem.at<port::a::Player>(player_rec(p));
         const int w = lgWeapon[p & 3];
@@ -937,6 +948,57 @@ void Runtime::lg_weapon_next(int p)
     lgLastRounds_[p] = pl.rounds;
     if (log)
         log(std::string("player ") + std::to_string(p + 1) + ": " + lgWeaponName(lgWeapon[p]));
+}
+
+} // namespace hotd::game
+
+namespace hotd::game {
+
+// Light Gun Edition: Weak-Point Roulette: the zombies (the humanoid creature types that lose parts: zom, debu,
+// zonbiman, mummy, haris, gilmoa, mummy2, dkiller, mon) get one glowing body part each, another one every 2 s (by the
+// body and the moment, so it never flickers within the 2 s); other creatures and the bosses as normal
+void Runtime::lg_roulette_frame()
+{
+    static const int kTypes[] = {0, 8, 11, 12, 16, 24, 31, 32, 40, 57, 70, 79, 80, 81};
+    lgWeak_.clear();
+    lgRings.clear();
+    if (mem.at<int16_t>(G::game_mode) != 4)
+        return;
+    std::map<uint32_t, std::vector<uint32_t>> parts;   // body -> its drawn parts
+    for (const DrawModel& d : drawList) {
+        if (d.part == 0 || d.body == 0 || d.shadow || !mem.mapped(d.body) || !mem.mapped(d.part))
+            continue;
+        if (mem.at<port::a::BodyPart>(d.part).hit_radius <= 0.0f)
+            continue;   // (a part no shot can hit)
+        const int type = mem.at<int16_t>(d.body + 0xCC);
+        if (std::find(std::begin(kTypes), std::end(kTypes), type) == std::end(kTypes))
+            continue;
+        std::vector<uint32_t>& v = parts[d.body];
+        if (std::find(v.begin(), v.end(), d.part) == v.end())
+            v.push_back(d.part);
+    }
+    const uint32_t epoch = uint32_t(frameCount / 115);
+    for (auto& [body, v] : parts) {
+        if (v.size() < 2)
+            continue;
+        std::sort(v.begin(), v.end());
+        uint32_t h = body * 2654435761u ^ (epoch + 1) * 40503u;
+        h ^= h >> 13, h *= 0x5bd1e995u, h ^= h >> 15;
+        const uint32_t part = v[h % v.size()];
+        lgWeak_[body] = part;
+        const port::a::BodyPart& bp = mem.at<port::a::BodyPart>(part);
+        if (bp.view_pos[2] > 1.0f)
+            lgRings.push_back({bp.view_pos[0], bp.view_pos[1], bp.view_pos[2], bp.hit_radius});
+    }
+}
+
+bool Runtime::lg_part_ok(uint32_t part)
+{
+    if (!mem.mapped(part))
+        return true;
+    const uint32_t body = mem.at<port::a::BodyPart>(part).owner.a;
+    const auto it = lgWeak_.find(body);
+    return it == lgWeak_.end() || it->second == part;
 }
 
 } // namespace hotd::game

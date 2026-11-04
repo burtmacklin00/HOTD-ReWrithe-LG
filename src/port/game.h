@@ -47,7 +47,11 @@ public:
     bool lg_splash[4] = {false, false, false, false};
     bool lg_hide_bullets[4] = {false, false, false, false};
     bool lg_one_hit = false;                  // Sudden Death: any hit kills an enemy (the bosses keep their own fights)
-    uint32_t lg_kills[4] = {0, 0, 0, 0};      // each seat's enemy kills (the Party Scoreboard, Vampire Mode)   // (the HUD draws the weapon's own rounds: Hud::drawArsenalAmmo)
+    uint32_t lg_kills[4] = {0, 0, 0, 0};      // each seat's enemy kills (the Party Scoreboard, Vampire Mode)
+    bool lg_hostage_crisis = false;           // Hostage Crisis: a shot hostage / researcher ends the game for everyone
+    bool lg_crisis_fail = false;              // (a hostage was shot: the runtime ends the game)
+    bool lg_roulette = false;                 // Weak-Point Roulette: a zombie takes hits only on its glowing part
+    virtual bool lg_part_ok(uint32_t part) { (void)part; return true; }   // (the runtime's: the glowing part)   // (the HUD draws the weapon's own rounds: Hud::drawArsenalAmmo)
     // Options "Game Text: Japanese" (ours): the region's text-only effects (the subtitles / voice-message sprites,
     // chapter cards, RELOAD hint, the attract tutorial's text) as the JAPAN region 0 draws them, while the logic keeps
     // reading the real region 0x51F791 (attract order, credits, the opening title's timing). Off in the proofs.

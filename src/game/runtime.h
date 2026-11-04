@@ -374,7 +374,14 @@ public:
     // Arsenal Mode (each seat: 0 Pistol, 1 Shotgun, 2 Machine Gun, 3 Rocket Launcher); off: -1 for every seat
     int lgWeapon[4] = {-1, -1, -1, -1};
     uint8_t lgLastRounds_[4] = {6, 6, 6, 6};
-    void lg_weapon_next(int p);   // the middle button: the next weapon, its magazine full
+    void lg_weapon_next(int p);
+    // Weak-Point Roulette: each zombie's glowing part this moment (by its body), and the parts' rings to draw (camera
+    // space centres); rebuilt each frame from the frame's draws (every 2 s another part)
+    std::map<uint32_t, uint32_t> lgWeak_;
+    struct LgRing { float x, y, z, r; };
+    std::vector<LgRing> lgRings;
+    bool lg_part_ok(uint32_t part) override;
+    void lg_roulette_frame();   // the middle button: the next weapon, its magazine full
     static int lgMagazine(int weapon) { return weapon == 1 ? 3 : weapon == 2 ? 30 : weapon == 3 ? 1 : 6; }
     static const char* lgWeaponName(int weapon)
     {

@@ -80,6 +80,8 @@ template <class P> void Game<P>::shot_resolve()
                     const ShotCandidate c = mem.at<ShotCandidate>(G::shot_candidates, i);
                     if ((c.flags >> 4) & 1)
                         continue;   // (a scene item: its own code, the nearest one's)
+                    if (lg_roulette && ((c.flags >> 9) & 1) && !lg_part_ok(c.target.a))
+                        continue;   // (Weak-Point Roulette: not the glowing part)
                     if (coop4_on()) {
                         coop4_hit_add(c.target.a, p);
                         if ((c.flags >> 9) & 1)
@@ -97,6 +99,17 @@ template <class P> void Game<P>::shot_resolve()
                 }
             }
             shot_hit_nearest(p);
+            if (lg_roulette && mem.u32(G::input_source) == 0) {
+                // Light Gun Edition: Weak-Point Roulette: a zombie's part that is not its glowing one takes no hit
+                const ShotCandidate c = mem.at<ShotCandidate>(G::shot_candidates, mem.u32(G::shot_nearest));
+                if (((c.flags >> 4) & 1) == 0 && ((c.flags >> 9) & 1) && !lg_part_ok(c.target.a)) {
+                    const uint32_t bit = 1u << ((p & 1) + 1);
+                    BodyPart& part = mem.at<BodyPart>(c.target.a);
+                    part.flags &= ~(bit | 0x100u);
+                    Obj& o = mem.at<Obj>(part.owner.a);
+                    o.flags &= ~(bit | 0x100u);
+                }
+            }
             mem.set32(G::shot_last_count, mem.u32(G::shot_candidate_count));
         }
     }

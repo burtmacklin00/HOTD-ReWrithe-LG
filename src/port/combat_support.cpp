@@ -182,6 +182,8 @@ template <class P> void Game<P>::researcher_scream_penalty(uint32_t obj, uint32_
 // woman)
 template <class P> void Game<P>::researcher_hit_by_player(uint32_t obj)
 {
+    if (lg_hostage_crisis)
+        lg_crisis_fail = true;   // Light Gun Edition: Hostage Crisis: game over for everyone
     if constexpr (P::pc) {
         (void)obj;   // the PC form: not ported (vtable only; ProofPc replays it)
     } else {

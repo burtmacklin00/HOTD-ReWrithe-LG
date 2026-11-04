@@ -194,7 +194,7 @@ void menuReset(LaunchConfig& c, int page)
         for (int p = 0; p < 4; ++p) c.gunDev[p].clear(), c.gunName[p].clear();   // (ipolish: Light Guns: Assign)
         break;
     case kCatGameplay:
-        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.vampire = d.vampire, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
+        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
         break;
     case kResetAdvanced:
@@ -533,6 +533,10 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "Fun mode: one hit kills a zombie, and one hit kills you: one life, no continues (bosses fight as normal); its own high scores"});
         r.push_back({"Vampire Mode", [&c]() { return onOff(c.vampire); }, [&c, save]() { c.vampire = !c.vampire; save(); },
                      "Fun mode: your blood meter drains all the time; hits and kills fill it, and an empty meter costs a life"});
+        r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { c.hostageCrisis = !c.hostageCrisis; save(); },
+                     "Fun mode: shoot a hostage or scientist and it's game over for everyone: no continues. Aim carefully!"});
+        r.push_back({"Weak-Point Roulette", [&c]() { return onOff(c.roulette); }, [&c, save]() { c.roulette = !c.roulette; save(); },
+                     "Fun mode: each zombie can only be hurt where a red ring glows; the ring moves to another body part every 2 seconds"});
         r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
                      "Co-op: each player's score, shots, hits and accuracy at the end of a chapter, and the MVP"});
         // skipfix (user 2026-10-27): the hold-to-skip of the cut-scenes the arcade cannot skip (main.cpp)

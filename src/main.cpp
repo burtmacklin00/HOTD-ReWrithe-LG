@@ -3822,6 +3822,8 @@ int main(int argc, char* argv[])
             r.lgModes.freeFire = cfg.freeFire || (cfg.machineGun && !arsenal);   // (Machine Gun: unlimited ammo too)
             r.lgModes.hardcore = (cfg.hardcore || cfg.suddenDeath) && !bossModeOpt;   // (Sudden Death: Hardcore's one life too)
             r.lg_one_hit = cfg.suddenDeath && !bossModeOpt;
+            r.lg_hostage_crisis = cfg.hostageCrisis, r.lg_crisis_fail = false;
+            r.lg_roulette = cfg.roulette && !bossModeOpt;
             r.lgModes.vampire = cfg.vampire;
             r.lgModes.flashlight = cfg.flashlight;
             r.lgModes.bigHeads = cfg.bigHeads;
@@ -3832,7 +3834,8 @@ int main(int argc, char* argv[])
             if (r.lgModes.hardcore) {
                 r.settings.lives = 0;          // (the lives table's first row: 1 life)
                 r.bossNoContinue = true;       // (everyone out: game over at once, no team countdown)
-            }
+            } else
+                r.bossNoContinue = false;      // (after a Hardcore / Hostage Crisis game: continues as normal)
         }
         // custom: the game logic runs with red (the colour is the view's). Yellow: the PC's blood byte is 4 (table 0x5CE884's
         // fifth file), i.e. not red, so its "not red" model choices (0x5E7 / 0x5E9 / 0x5E5, the props' +1) apply; the
@@ -3952,6 +3955,7 @@ int main(int argc, char* argv[])
         if (title) {   // Light Gun Edition: the attract demo as the original plays it (no fun modes)
             r.lgModes = {};
             r.lg_one_hit = false, r.lg_hit_scale = 1.0f;
+            r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
             for (int k = 0; k < 4; ++k) r.lgWeapon[k] = -1, r.lg_seat_scale[k] = 1.0f, r.lg_splash[k] = r.lg_hide_bullets[k] = false;
             r.settings.lives = cfg.lives;
             r.bossNoContinue = false;
@@ -13670,6 +13674,36 @@ int main(int argc, char* argv[])
                 const float x = (p & 1) == 0 ? xl : xr, y = p >= 2 ? wh * 0.225f : wh * 0.755f;
                 bar[0].drawIn(ww, wh, x, y, bw, bh);
                 bar[1].drawIn(ww, wh, (p & 1) == 0 ? x : x + bw * (1.0f - v), y, bw * v, bh);
+            }
+        }
+        if (rt.lg_crisis_fail && !gScene.active() && (rt.mem.at<int16_t>(game::A::G::game_mode) == 4 || rt.mem.at<int16_t>(game::A::G::game_mode) == 5)) {
+            // Light Gun Edition: Hostage Crisis: why the game ended (until the next game)
+            static Overlay hc;
+            static bool hcOk = false, hcTried = false;
+            if (!hcTried) {
+                hcTried = true;
+                std::string e;
+                if ((hcOk = hc.init(e))) hc.setStyle(200, 255, 60, 40), hc.translate = false;
+            }
+            if (hcOk && (SDL_GetTicks() / 400) % 4 != 3) {
+                hc.setText({"A HOSTAGE WAS SHOT!", "GAME OVER"}, wh >= 1000 ? 4 : 2);
+                hc.drawAnchored(ww, wh, ww * 0.5f, wh * 0.30f, 0.5f, 0.5f);
+            }
+        }
+        if (rt.lg_roulette && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active) {
+            // Light Gun Edition: Weak-Point Roulette: a pulsing ring on each zombie's glowing part (the shot test's own
+            // projection: the gun's (x, y, 496) ray)
+            static SkipRing wr;
+            static bool wrOk = false, wrTried = false;
+            if (!wrTried) { wrTried = true; std::string e; wrOk = wr.init(e); }
+            const float pulse = 1.0f + 0.15f * std::sin(float(SDL_GetTicks()) * 0.012f);
+            for (const auto& g : rt.lgRings) {
+                if (!wrOk) break;
+                float px, py, qx, qy;
+                view->fromArcade(496.0f * g.x / g.z, 496.0f * g.y / g.z, ww, wh, px, py);
+                view->fromArcade(496.0f * (g.x + g.r) / g.z, 496.0f * g.y / g.z, ww, wh, qx, qy);
+                const float size = std::clamp(std::fabs(qx - px) * 2.2f, wh * 0.025f, wh * 0.16f) * pulse;
+                wr.draw(ww, wh, px, py, size, 1.0f);
             }
         }
         if (cfg.partyBoard && !gNet && rt.clear.active && !gScene.active()) {

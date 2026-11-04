@@ -307,6 +307,8 @@ struct LaunchConfig {
     bool machineGun = false;   // hold the trigger: automatic fire (about 9 shots a second), unlimited ammo
     bool suddenDeath = false;  // one life, no continues, any hit kills an enemy (bosses as normal); its own high scores
     bool vampire = false;      // a blood meter drains: hits and kills refill it, empty costs a life
+    bool hostageCrisis = false; // Hostage Crisis (launcher.ini hostagecrisis=): shooting a hostage / researcher: game over for everyone
+    bool roulette = false;      // Weak-Point Roulette (launcher.ini roulette=): a zombie takes hits only on its glowing part (moves every 2 s)
     bool weaponSwitch = false; // Arsenal Mode (launcher.ini arsenal=): the middle button: Pistol > Shotgun > Machine Gun > Rocket Launcher, each player their own
     // setup2: the version that last ran with these settings (launcher.ini lastversion=; another one: What's New once)
     std::string lastVersion;
