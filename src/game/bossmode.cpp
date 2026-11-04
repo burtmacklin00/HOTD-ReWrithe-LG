@@ -95,7 +95,20 @@ bool BossMode::tick(Runtime& rt, double stepMs)
         log(std::string("next: ") + kBossNames[index]);
         rt.clear.active = false;
         rt.chapterDone = false;
+        int32_t lives[4] = {}, score[4] = {}, state[4] = {};
+        for (int p = 0; p < 4 && rush; ++p) {   // Boss Rush: the lives / scores go on to the next boss
+            const uint32_t rec = rt.player_rec(p);
+            state[p] = rt.mem.at<int32_t>(rec);
+            lives[p] = rt.mem.at<int32_t>(rec + 0xC);
+            score[p] = rt.mem.at<int32_t>(rec + 8);
+        }
         startGame(rt, players);
+        for (int p = 0; p < 4 && rush; ++p) {
+            const uint32_t rec = rt.player_rec(p);
+            rt.mem.at<int32_t>(rec + 8) = score[p];
+            if (rt.mem.at<int32_t>(rec) == 5)   // (in the new game: its lives as they were; out: 0, out at once)
+                rt.mem.at<int32_t>(rec + 0xC) = state[p] == 5 ? std::max(lives[p], 1) : 0;
+        }
         rt.chapterChanged = start().chapter;
         nextStarted = true;
         return true;

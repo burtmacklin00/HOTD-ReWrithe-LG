@@ -51,7 +51,9 @@ public:
     bool lg_hostage_crisis = false;           // Hostage Crisis: a shot hostage / researcher ends the game for everyone
     bool lg_crisis_fail = false;              // (a hostage was shot: the runtime ends the game)
     bool lg_roulette = false;                 // Weak-Point Roulette: a zombie takes hits only on its glowing part
-    virtual bool lg_part_ok(uint32_t part) { (void)part; return true; }   // (the runtime's: the glowing part)   // (the HUD draws the weapon's own rounds: Hud::drawArsenalAmmo)
+    virtual bool lg_part_ok(uint32_t part) { (void)part; return true; }   // (the runtime's: the glowing part)
+    bool lg_exploding = false;                // Exploding Zombies: some zombies glow; a hit not on the head blows them up
+    virtual void lg_explode(int player, uint32_t part) { (void)player, (void)part; }   // (the runtime's: the blast)
     // Options "Game Text: Japanese" (ours): the region's text-only effects (the subtitles / voice-message sprites,
     // chapter cards, RELOAD hint, the attract tutorial's text) as the JAPAN region 0 draws them, while the logic keeps
     // reading the real region 0x51F791 (attract order, credits, the opening title's timing). Off in the proofs.

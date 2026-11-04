@@ -56,9 +56,12 @@ public:
     void shutdown();
     // centred on window pixel (x, y), `size` pixels across
     void draw(int windowWidth, int windowHeight, float x, float y, float size, float fill);
+    // Light Gun Edition: another colour (and alpha scale) for the rings that are not the skip's
+    void setColor(float r, float g, float b, float a = 1.0f) { color_[0] = r, color_[1] = g, color_[2] = b, color_[3] = a; }
 private:
     gl::GLuint program_ = 0, vao_ = 0;
-    gl::GLint uRect_ = -1, uFill_ = -1;
+    gl::GLint uRect_ = -1, uFill_ = -1, uColor_ = -1;
+    float color_[4] = {0.86f, 0.06f, 0.06f, 1.0f};
 };
 
 } // namespace hotd

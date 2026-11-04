@@ -3805,8 +3805,8 @@ int main(int argc, char* argv[])
         if (gSonic.preset)
             SDL_Log("Sonic Mode: %s", game::sonicName(gSonic.preset));
         r.rankingFile = !rankingFileOpt.empty() ? rankingFileOpt : frames < 0 ? cacheDir() + rankingName(gSonic.preset) : std::string();
-        if (!r.rankingFile.empty() && rankingFileOpt.empty() && (cfg.hardcore || cfg.suddenDeath) && !gNet && !bossModeOpt)
-            r.rankingFile += cfg.suddenDeath ? "_suddendeath" : "_hardcore";   // Light Gun Edition: their own top 10s
+        if (!r.rankingFile.empty() && rankingFileOpt.empty() && (cfg.hardcore || cfg.suddenDeath || cfg.survival) && !gNet && !bossModeOpt)
+            r.rankingFile += cfg.survival ? "_survival" : cfg.suddenDeath ? "_suddendeath" : "_hardcore";   // Light Gun Edition: their own top 10s
         r.nameKeysTest = nameKeysOpt;
         r.rankingLowTest = rankingLowOpt;
         r.nameEntryOnClear = nameEntryOpt || (launcher && inputTestFile.empty() && !autoStart && checkpoints.empty());
@@ -3815,6 +3815,8 @@ int main(int argc, char* argv[])
         r.settings.lives = cfg.lives;
         // Light Gun Edition: the fun modes (Options > Gameplay): local games only (online: as normal, on every PC; the
         // title / attract demo: as normal too, below)
+        r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0;   // (online: none)
+        r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
         if (!gNet) {
             // Arsenal Mode: each player's own weapon (the middle button), every player starts with the pistol; the
             // whole-game Shotgun / Machine Gun modes are its weapons then
@@ -3824,6 +3826,12 @@ int main(int argc, char* argv[])
             r.lg_one_hit = cfg.suddenDeath && !bossModeOpt;
             r.lg_hostage_crisis = cfg.hostageCrisis, r.lg_crisis_fail = false;
             r.lg_roulette = cfg.roulette && !bossModeOpt;
+            r.lg_exploding = cfg.exploding;
+            r.lgLook = cfg.funLook == 1 ? 1 : cfg.funLook == 2 ? 3 : cfg.funLook == 3 ? 2 : 0;   // (RenderOptions::look)
+            r.lgClock = cfg.survival && !bossModeOpt ? 60.0 : -1.0;
+            r.lgTimeUp = r.lgSvInit_ = false;
+            r.lgVol_.clear(), r.lgBoomed_.clear(), r.lgBlasts.clear();
+            gSonic.turbo = cfg.turbo;
             r.lgModes.vampire = cfg.vampire;
             r.lgModes.flashlight = cfg.flashlight;
             r.lgModes.bigHeads = cfg.bigHeads;
@@ -3956,6 +3964,7 @@ int main(int argc, char* argv[])
             r.lgModes = {};
             r.lg_one_hit = false, r.lg_hit_scale = 1.0f;
             r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
+            r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0;
             for (int k = 0; k < 4; ++k) r.lgWeapon[k] = -1, r.lg_seat_scale[k] = 1.0f, r.lg_splash[k] = r.lg_hide_bullets[k] = false;
             r.settings.lives = cfg.lives;
             r.bossNoContinue = false;
@@ -3970,6 +3979,7 @@ int main(int argc, char* argv[])
         } else if (bossModeOpt) {   // Boss Mode: the boss's start (game_new 0x458588 from boss_starts 0x5CD384; online the host's, protocol 18)
             r.boss.begin(bossModeOpt);
             r.boss.players = cfg.players;
+            r.boss.rush = bossModeOpt == 6 && cfg.bossRush && !gNet;   // Light Gun Edition: Boss Rush
             if (gNet)   // online: the clock counts game ticks (1000 / the game's tick rate each), alike on every PC
                 r.boss.tickMs = 1000.0 / gameTickHz(cfg.gameSpeed);
             r.bossNoContinue = true;
@@ -11894,6 +11904,8 @@ int main(int argc, char* argv[])
                     continue;
                 }
             }
+            if (action == 0 && cfg.bossRush && !feBoss && !gNet)   // Light Gun Edition: Boss Rush: Arcade = All Bosses (lives carried on)
+                feBoss = 6;
             if (feBoss) {   // Boss Mode (0x422EE4 ..: frontend_state 4): the boss's game
                 gPcMode = 0;   // (boss mode is never PC Mode)
                 bossModeOpt = feBoss;
@@ -13573,8 +13585,39 @@ int main(int argc, char* argv[])
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
             hud.drawLines(ww, wh, gScene.lines(rt));
         } else {
+        {   // Light Gun Edition: the fun look (Night Vision / Wireframe / VHS), Turbo Speed Run's sound
+            const int16_t gm = rt.mem.at<int16_t>(game::A::G::game_mode);
+            view->opt.look = gm == 4 || gm == 5 ? rt.lgLook : 0;
+            if (view->opt.look == 2)
+                view->opt.clear[0] = view->opt.clear[1] = view->opt.clear[2] = 0.0f;
+            audio.setSpeed(gSonic.turbo != 0 && (gm == 4 || gm == 5) && !paused ? (gSonic.turbo == 1 ? 1.5f : 2.0f) : 1.0f);
+        }
         view->opt.clearColor = !hud.drawUnder(rt, ww, wh, view->opt.clear);
         view->draw(rt, ww, wh, blendFrom, alpha);   // rate: the 3D picture blended; the HUD / sights below are not
+        if (view->opt.look == 1 && ww > 0 && wh > 0) {
+            // Light Gun Edition: Night Vision: the picture's grain (fresh each frame) and the dark round edge of a scope
+            static Overlay nv;
+            static bool nvOk = false, nvTried = false;
+            if (!nvTried) { nvTried = true; std::string e; nvOk = nv.init(e); }
+            if (nvOk) {
+                constexpr int NW = 240, NH = 135;
+                static std::vector<uint8_t> px(size_t(NW) * NH * 4);
+                static uint32_t seed = 12345u;
+                for (int y = 0; y < NH; ++y)
+                    for (int x = 0; x < NW; ++x) {
+                        seed = seed * 1664525u + 1013904223u;
+                        const float n = float((seed >> 24) & 0xFF) / 255.0f;
+                        const float dx = (x + 0.5f - NW * 0.5f) / (NH * 0.5f), dy = (y + 0.5f - NH * 0.5f) / (NH * 0.5f);
+                        const float edge = std::clamp((std::sqrt(dx * dx * 0.55f + dy * dy) - 0.80f) / 0.45f, 0.0f, 1.0f);
+                        uint8_t* q = &px[size_t(y * NW + x) * 4];
+                        const bool bright = n > 0.55f;
+                        q[0] = uint8_t(bright ? 120 : 0), q[1] = uint8_t(bright ? 255 : 0), q[2] = uint8_t(bright ? 130 : 0);
+                        q[3] = uint8_t(std::clamp(edge * 0.9f + (bright ? (n - 0.55f) * 0.28f : n * 0.12f), 0.0f, 1.0f) * 255);
+                    }
+                nv.setImage(px, NW, NH, false);
+                nv.drawIn(ww, wh, 0, 0, float(ww), float(wh));
+            }
+        }
         if (rt.lgModes.flashlight && !gScene.active()) {
             // Light Gun Edition: Flashlight Mode: the picture dark but for a soft light round each playing player's aim
             // (in their colour's tint); cut-scenes only dimmed, so the story stays visible
@@ -13688,6 +13731,165 @@ int main(int argc, char* argv[])
             if (hcOk && (SDL_GetTicks() / 400) % 4 != 3) {
                 hc.setText({"A HOSTAGE WAS SHOT!", "GAME OVER"}, wh >= 1000 ? 4 : 2);
                 hc.drawAnchored(ww, wh, ww * 0.5f, wh * 0.30f, 0.5f, 0.5f);
+            }
+        }
+        if (!rt.lgBlasts.empty() && !gScene.active()) {
+            // Light Gun Edition: Exploding Zombies: each blast: a fireball and its rings growing and fading (the shot
+            // test's projection), a flash at the start
+            static Overlay fire, flash;
+            static SkipRing ring;
+            static bool bOk = false, bTried = false;
+            if (!bTried) {
+                bTried = true;
+                std::string e;
+                bOk = fire.init(e) && flash.init(e) && ring.init(e);
+                if (bOk) flash.setImage({255, 200, 120, 255}, 1, 1);
+            }
+            for (const auto& b : rt.lgBlasts) {
+                if (!bOk || b.z <= 1.0f) continue;
+                const float t = std::clamp(float(rt.frameCount - b.frame) / 30.0f, 0.0f, 1.0f);
+                if (t >= 1.0f) continue;
+                float px, py, qx, qy;
+                view->fromArcade(496.0f * b.x / b.z, 496.0f * b.y / b.z, ww, wh, px, py);
+                view->fromArcade(496.0f * (b.x + 45.0f) / b.z, 496.0f * b.y / b.z, ww, wh, qx, qy);
+                const float reach = std::clamp(std::fabs(qx - px) * 2.0f, wh * 0.10f, wh * 0.9f);
+                if (t < 0.12f) {   // the flash
+                    static std::vector<uint8_t> one(4);
+                    one = {255, 200, 120, uint8_t(110 * (1.0f - t / 0.12f))};
+                    flash.setImage(one, 1, 1);
+                    flash.drawIn(ww, wh, 0, 0, float(ww), float(wh));
+                }
+                constexpr int FS = 64;
+                static std::vector<uint8_t> img(size_t(FS) * FS * 4);
+                for (int y = 0; y < FS; ++y)
+                    for (int x = 0; x < FS; ++x) {
+                        const float dx = (x + 0.5f) / FS * 2 - 1, dy = (y + 0.5f) / FS * 2 - 1, d = std::sqrt(dx * dx + dy * dy);
+                        uint8_t* q = &img[size_t(y * FS + x) * 4];
+                        const float core = std::clamp(1.0f - d, 0.0f, 1.0f);
+                        q[0] = 255, q[1] = uint8_t(90 + 165 * core * core * (1.0f - t)), q[2] = uint8_t(40 * core * (1.0f - t));
+                        q[3] = uint8_t(std::clamp(core * 1.6f, 0.0f, 1.0f) * (1.0f - t) * 235);
+                    }
+                fire.setImage(img, FS, FS, true);
+                const float fs = reach * (0.35f + 0.75f * t);
+                fire.drawIn(ww, wh, px - fs * 0.5f, py - fs * 0.5f, fs, fs);
+                ring.setColor(1.0f, 0.55f, 0.1f, 1.0f - t);
+                ring.draw(ww, wh, px, py, reach * (0.4f + 1.0f * t), 1.0f);
+                ring.setColor(1.0f, 0.9f, 0.4f, (1.0f - t) * 0.8f);
+                ring.draw(ww, wh, px, py, reach * (0.2f + 0.7f * t), 1.0f);
+            }
+        }
+        if (rt.lgClock >= 0 && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active) {
+            // Light Gun Edition: Coin-Op Survival: the clock at the top of the game's picture (red and flashing under 10 s)
+            // and its last change below it for a second
+            static Overlay clk, dlt;
+            static bool cOk = false, cTried = false;
+            if (!cTried) {
+                cTried = true;
+                std::string e;
+                cOk = clk.init(e) && dlt.init(e);
+                if (cOk) clk.translate = dlt.translate = false;
+            }
+            if (cOk) {
+                const bool low = rt.lgClock < 10.0;
+                if (!low || (SDL_GetTicks() / 250) % 2 == 0) {
+                    char b[32];
+                    std::snprintf(b, sizeof b, "TIME %5.1f", rt.lgClock);
+                    if (low) clk.setStyle(150, 255, 50, 40); else clk.setStyle(150, 255, 240, 140);
+                    clk.setText({b}, wh >= 1000 ? 3 : 2);
+                    clk.drawAnchored(ww, wh, ww * 0.5f, wh * 0.035f, 0.5f, 0.0f);
+                }
+                if (rt.lgClockDeltaFrame + 60 > rt.frameCount && rt.lgClockDelta != 0) {
+                    char b[32];
+                    std::snprintf(b, sizeof b, "%+.1f", rt.lgClockDelta);
+                    if (rt.lgClockDelta > 0) dlt.setStyle(0, 80, 255, 90); else dlt.setStyle(0, 255, 70, 50);
+                    dlt.setText({b}, wh >= 1000 ? 2 : 1);
+                    dlt.drawAnchored(ww, wh, ww * 0.5f, wh * 0.035f + clk.drawnHeight() + wh * 0.005f, 0.5f, 0.0f);
+                }
+            }
+        }
+        if (rt.lgTimeUp && !gScene.active() && (rt.mem.at<int16_t>(game::A::G::game_mode) == 4 || rt.mem.at<int16_t>(game::A::G::game_mode) == 5)) {
+            static Overlay tu;
+            static bool tuOk = false, tuTried = false;
+            if (!tuTried) {
+                tuTried = true;
+                std::string e;
+                if ((tuOk = tu.init(e))) tu.setStyle(200, 255, 200, 40), tu.translate = false;
+            }
+            if (tuOk && (SDL_GetTicks() / 400) % 4 != 3) {
+                tu.setText({"TIME UP!", "GAME OVER"}, wh >= 1000 ? 4 : 2);
+                tu.drawAnchored(ww, wh, ww * 0.5f, wh * 0.30f, 0.5f, 0.5f);
+            }
+        }
+        if (view->opt.look == 3 && ww > 0 && wh > 0) {
+            // Light Gun Edition: VHS Camcorder: scan lines, a rolling tracking band, static (a burst when a player is hit),
+            // the edges darker, REC and the time stamp in the corners of the game's picture
+            static Overlay vhs, rec, stamp;
+            static bool vOk = false, vTried = false;
+            if (!vTried) {
+                vTried = true;
+                std::string e;
+                vOk = vhs.init(e) && rec.init(e) && stamp.init(e);
+                if (vOk) {
+                    rec.setStyle(0, 255, 40, 40), stamp.setStyle(0, 245, 245, 230);
+                    rec.translate = stamp.translate = false;
+                }
+            }
+            static int32_t lastLives[4] = {-1, -1, -1, -1};
+            static uint64_t glitchUntil = 0;
+            for (int p = 0; p < rt.seat_count(); ++p) {
+                const port::a::Player& vp = rt.mem.at<port::a::Player>(rt.player_rec(p));
+                if (vp.state == 5 && lastLives[p] >= 0 && vp.lives < lastLives[p]) glitchUntil = SDL_GetTicks() + 700;
+                lastLives[p] = vp.lives;
+            }
+            if (vOk) {
+                constexpr int VW = 160, VH = 270;
+                static std::vector<uint8_t> px(size_t(VW) * VH * 4);
+                static uint32_t seed = 777u;
+                const uint64_t now = SDL_GetTicks();
+                const bool glitch = now < glitchUntil;
+                const float band = std::fmod(float(now) * 0.00012f, 1.35f) * VH - 0.15f * VH;
+                const float bandH = glitch ? VH * 0.18f : VH * 0.045f;
+                const int tear = glitch ? int((seed >> 8) % VH) : -100;
+                for (int y = 0; y < VH; ++y) {
+                    const bool inBand = std::fabs(float(y) - band) < bandH;
+                    for (int x = 0; x < VW; ++x) {
+                        seed = seed * 1664525u + 1013904223u;
+                        const float n = float((seed >> 24) & 0xFF) / 255.0f;
+                        const float dx = (x + 0.5f) / VW * 2 - 1, dy = (y + 0.5f) / VH * 2 - 1;
+                        const float vig = std::clamp((dx * dx * dx * dx + dy * dy * dy * dy - 0.35f) * 0.9f, 0.0f, 0.7f);
+                        uint8_t* q = &px[size_t(y * VW + x) * 4];
+                        float a = (y & 1) ? 0.16f : 0.0f;
+                        uint8_t c = 0;
+                        if (inBand && n > 0.35f) a = std::max(a, 0.25f + 0.4f * n), c = uint8_t(160 + 95 * n);
+                        else if (n > (glitch ? 0.70f : 0.985f)) a = std::max(a, 0.35f + 0.4f * n), c = uint8_t(200 + 55 * n);
+                        if (std::abs(y - tear) < 3) a = std::max(a, 0.5f), c = uint8_t(120 + 120 * n);
+                        a = a + vig * (1.0f - a);
+                        q[0] = q[1] = q[2] = c, q[3] = uint8_t(std::clamp(a, 0.0f, 1.0f) * 255);
+                    }
+                }
+                vhs.setImage(px, VW, VH, true);
+                vhs.drawIn(ww, wh, 0, 0, float(ww), float(wh));
+                const float gw = cfg.aspect == 1 ? std::min(float(ww), float(wh) * 496.0f / 384.0f)
+                               : cfg.aspect == 2 ? std::min(float(ww), float(wh) * 1.6f) : float(ww);
+                const float x0 = (float(ww) - gw) * 0.5f + wh * 0.04f, x1 = (float(ww) + gw) * 0.5f - wh * 0.04f;
+                const int sc = wh >= 1000 ? 3 : 2;
+                if ((now / 600) % 2 == 0) {
+                    rec.setText({"REC"}, sc);
+                    rec.drawAnchored(ww, wh, x0, wh * 0.10f, 0.0f, 0.0f);
+                }
+                const std::time_t tt = std::time(nullptr);
+                std::tm lt{};
+#ifdef _WIN32
+                localtime_s(&lt, &tt);
+#else
+                localtime_r(&tt, &lt);
+#endif
+                static const char* kMon[12] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
+                char d1[32], d2[32];
+                std::snprintf(d1, sizeof d1, "%s. %2d 1998", kMon[lt.tm_mon % 12], lt.tm_mday);
+                std::snprintf(d2, sizeof d2, "%s %2d:%02d:%02d", lt.tm_hour >= 12 ? "PM" : "AM", (lt.tm_hour + 11) % 12 + 1, lt.tm_min, lt.tm_sec);
+                stamp.setText({d2, d1}, sc);
+                stamp.drawAnchored(ww, wh, x1, wh * 0.90f, 1.0f, 1.0f);
             }
         }
         if (rt.lg_roulette && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active) {

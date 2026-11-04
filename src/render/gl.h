@@ -41,6 +41,7 @@ constexpr GLenum TEXTURE_2D = 0x0DE1, TEXTURE_2D_ARRAY = 0x8C1A;
 constexpr GLenum TEXTURE_MIN_FILTER = 0x2801, TEXTURE_MAG_FILTER = 0x2800, TEXTURE_WRAP_S = 0x2802, TEXTURE_WRAP_T = 0x2803;
 constexpr GLenum NEAREST = 0x2600, LINEAR = 0x2601, LINEAR_MIPMAP_LINEAR = 0x2703, REPEAT = 0x2901, CLAMP_TO_EDGE = 0x812F;
 constexpr GLenum TEXTURE0 = 0x84C0;
+constexpr GLenum FRONT_AND_BACK = 0x0408, LINE = 0x1B01, FILL = 0x1B02;   // (Light Gun Edition: Wireframe Mode)
 constexpr GLenum UNPACK_ALIGNMENT = 0x0CF5, PACK_ALIGNMENT = 0x0D05;
 constexpr GLenum ARRAY_BUFFER = 0x8892, STATIC_DRAW = 0x88E4, DYNAMIC_DRAW = 0x88E8;
 constexpr GLenum FRAGMENT_SHADER = 0x8B30, VERTEX_SHADER = 0x8B31, COMPILE_STATUS = 0x8B81, LINK_STATUS = 0x8B82;
@@ -132,6 +133,8 @@ HOTD_GL_FUNCTIONS(HOTD_GL_DECLARE)
 
 // Loads every function above through SDL_GL_GetProcAddress (needs a current context). Returns the first missing name, or null.
 const char* load();
+// Light Gun Edition (Wireframe Mode): glPolygonMode where the context has it (desktop OpenGL; ANGLE's ES: nothing)
+void polygonMode(GLenum face, GLenum mode);
 
 // compat (2026-10-29: the game on many PCs; checked on Mesa's strict software driver). HOTD_GL_DEBUG=1: a debug context
 // (contextAttributes, before SDL_GL_CreateContext), KHR_debug's messages (every error / warning) and the shaders'

@@ -16,6 +16,7 @@
 #include "game/launcher.h"   // the presets' names (sonicKey / sonicName / sonicParse)
 #include "game/runtime.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 
@@ -83,8 +84,13 @@ struct SonicClock {
     {
         const int ph = preset == 0 ? 0 : sonicPhase(rt);
         if (phaseOut) *phaseOut = ph;
-        return kUnits * 20 / uint64_t(sonicFactor20(preset, ph));
+        int f = sonicFactor20(preset, ph);
+        // Light Gun Edition: Turbo Speed Run: the whole game at x1.5 / x2 (cut-scenes, voices, music too), not the menus
+        if (turbo != 0 && (rt.mem.at<int16_t>(A::G::game_mode) == 4 || rt.mem.at<int16_t>(A::G::game_mode) == 5))
+            f = std::max(f, turbo == 1 ? 30 : 40);
+        return kUnits * 20 / uint64_t(f);
     }
+    int turbo = 0;   // Turbo Speed Run: 0 off, 1 x1.5, 2 x2 (local games: a window run's pace only)
     // counts the tick; returns its cost
     uint64_t account(Runtime& rt)
     {

@@ -42,6 +42,8 @@ public:
     // rate: the game frames a second the WAV's renderFrame stands for (the game speed: 57.524 arcade, 60). The live
     // device is pulled by its own clock: there the music / board run at their true speed whatever the tick rate
     void setTickRate(double hz) { tickHz_ = hz > 1.0 ? hz : 60.0; }
+    // Light Gun Edition: Turbo Speed Run: the live output played faster (pitch with it), 1 = normal
+    void setSpeed(float ratio);
     void closeWav();
     bool wavOpen() const { return wav_ != nullptr; }
 

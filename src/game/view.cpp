@@ -302,6 +302,14 @@ bool GameView::finish(std::unique_ptr<Prepared> p, std::string& err)
         for (int k = 0; k < 5; ++k)
             for (int c = 0; c < 3; ++c)
                 renderer.rampStops[s][k][c] = float(kPlayerRamp[s][k][c]) / 255.0f;
+    {   // Light Gun Edition: 2 Night Vision's heat (purple > red > orange > yellow > white), 3 the Exploding Zombies' glow
+        static const uint8_t kFun[2][5][3] = {{{50, 0, 70}, {190, 0, 40}, {255, 100, 0}, {255, 210, 40}, {255, 255, 235}},
+                                              {{120, 30, 0}, {230, 90, 0}, {255, 160, 20}, {255, 230, 90}, {255, 255, 210}}};
+        for (int s = 0; s < 2; ++s)
+            for (int k = 0; k < 5; ++k)
+                for (int c = 0; c < 3; ++c)
+                    renderer.rampStops[2 + s][k][c] = float(kFun[s][k][c]) / 255.0f;
+    }
     const uint64_t r0 = SDL_GetTicksNS();
     const bool rendererOk = renderer.init(err);
     const uint64_t rendererNs = SDL_GetTicksNS() - r0;

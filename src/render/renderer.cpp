@@ -316,6 +316,7 @@ uniform float uFade;             // DrawItem::fade
 uniform int uSideOnly;           // DrawItem::sideOnly: no pixels inside the centred 4:3 picture
 uniform vec2 uSideClip;          // its centre x and half width in pixels
 uniform int uRamp;              // DrawItem::ramp (-1 off)
+uniform int uLook;              // RenderOptions::look (Light Gun Edition)
 uniform vec3 uRampStops[5];
 uniform int uGrey;               // RenderOptions::grey (the game's palette_grey_build look)
 uniform vec3 uSepia[64];         // RenderOptions::sepia, 0..1
@@ -615,7 +616,16 @@ void main() {
         if (uGrey == 1 || (fromPack && uGreyRepl == 1)) c.rgb = greyLook(c.rgb);   // UNVERIFIED (teaser): the PC's own grey look not traced
         oColor = vec4(c.rgb, ((vFL.x & HALFALPHA) != 0u ? 127.0 / 255.0 : 1.0) * uFade);
     }
-    if (uRamp >= 0) {   // 4P: the colours' level (half luminance, half the strongest channel) through the seat's ramp
+    if (uLook == 1) {   // Night Vision: the light level as phosphor green, brighter (amplified)
+        float l = clamp(dot(oColor.rgb, vec3(0.299, 0.587, 0.114)) * 1.7 + 0.04, 0.0, 1.0);
+        oColor.rgb = vec3(l * 0.22, l, l * 0.30);
+    } else if (uLook == 2) {   // Wireframe: neon green lines (the polygons drawn as lines)
+        oColor = vec4(0.20, 1.0, 0.40, 1.0);
+    } else if (uLook == 3) {   // VHS: washed-out, warm colours with lifted blacks
+        float l = dot(oColor.rgb, vec3(0.299, 0.587, 0.114));
+        oColor.rgb = clamp(mix(oColor.rgb, vec3(l), 0.35) * vec3(1.06, 1.0, 0.90) * 0.92 + 0.05, 0.0, 1.0);
+    }
+    if (uRamp >= 0 && !(uLook == 2 && uRamp < 2)) {   // 4P: the colours' level (half luminance, half the strongest channel) through the seat's ramp
         float t = clamp(0.5 * dot(oColor.rgb, vec3(0.299, 0.587, 0.114)) + 0.5 * max(oColor.r, max(oColor.g, oColor.b)), 0.0, 1.0) * 4.0;
         int k = min(3, int(t));
         oColor.rgb = mix(uRampStops[k], uRampStops[k + 1], t - float(k));
@@ -1550,6 +1560,10 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         uStops = gl::GetUniformLocation(program_, "uRampStops");
     }
     int rampStopsSent = -1;
+    static gl::GLint uLook = -2;   // Light Gun Edition: the fun modes' looks
+    if (uLook == -2) uLook = gl::GetUniformLocation(program_, "uLook");
+    gl::Uniform1i(uLook, opt.look);
+    if (opt.look == 2) gl::polygonMode(gl::FRONT_AND_BACK, gl::LINE);
     // Renderer::debugTie / debugIds (debugging): the same for every item; the item's index only when either reads it
     gl::Uniform1f(uTie_, float(debugTie));
     static const bool idTri = std::getenv("HOTD_IDSHOT_TRI") != nullptr;   // debugging: triangles, not items
@@ -1638,8 +1652,8 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         set1f(kPush, uPush_, it.push);
         set1f(kFade, uFade_, it.fade);
         set1i(kSideOnly, uSideOnly_, it.sideOnly ? 1 : 0);
-        set1i(kRamp, uRamp, it.ramp >= 0 && it.ramp < 2 ? it.ramp : -1);
-        if (it.ramp >= 0 && it.ramp < 2 && rampStopsSent != it.ramp) {
+        set1i(kRamp, uRamp, it.ramp >= 0 && it.ramp < 4 ? it.ramp : -1);
+        if (it.ramp >= 0 && it.ramp < 4 && rampStopsSent != it.ramp) {
             gl::Uniform3fv(uStops, 5, &rampStops[it.ramp][0][0]);
             rampStopsSent = it.ramp;
             ++stateCalls;
@@ -1746,6 +1760,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     gl::DepthMask(gl::TRUE_);
     gl::Disable(gl::BLEND);
     gl::BindVertexArray(0);
+    if (opt.look == 2) gl::polygonMode(gl::FRONT_AND_BACK, gl::FILL);
 }
 
 std::vector<uint8_t> Renderer::readBack(int width, int height)

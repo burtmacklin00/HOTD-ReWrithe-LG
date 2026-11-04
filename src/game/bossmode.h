@@ -58,6 +58,7 @@ public:
     bool justFinished = false;   // the game ended this frame (result 1 with the last boss, or 7)
     int players = 1;             // the players a next boss's game starts with (ours: the game's setting)
     bool nextStarted = false;    // the next boss's game (All Bosses) was set up this frame
+    bool rush = false;           // Light Gun Edition: Boss Rush: All Bosses with each player's lives / score carried on (nothing refills)
     // the clock's step a game tick (ms): a local game sets it before each frame (the tick's real time, Sonic Mode's
     // share); online it is fixed at the start (1000 / the game's tick rate: game ticks, alike on every PC)
     double tickMs = 1000.0 / 60.0;

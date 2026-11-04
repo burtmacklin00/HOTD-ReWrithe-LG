@@ -810,6 +810,8 @@ void Runtime::frame_one()
     for (uint32_t k = 0; k < 12; ++k)
         camera[k] = mem.f32(slot + 4 * k);
     ragdoll_frame();   // the Ragdoll mod (game/ragdoll.h): the dead bodies' drawn poses (draws only; after the camera: it needs it)
+    if (lg_exploding || lgLook == 1)
+        lg_bodies_frame();   // Light Gun Edition: Exploding Zombies / Night Vision (the bodies, their colours)
     if (lg_roulette)
         lg_roulette_frame();   // Light Gun Edition: Weak-Point Roulette (the glowing parts for the next shots)
     if (lgModes.bigHeads)
@@ -849,7 +851,8 @@ void Runtime::lg_modes_frame()
 {
     if (mem.at<int16_t>(G::game_mode) != 4)
         return;
-    if (lg_crisis_fail) {   // Hostage Crisis: a hostage was shot: every player out, no continues
+    lg_survival_frame();   // Coin-Op Survival's clock (off: nothing)
+    if (lg_crisis_fail || lgTimeUp) {   // Hostage Crisis: a hostage was shot / Coin-Op Survival: the time is up: every player out, no continues
         lgModes.hardcore = true;
         bossNoContinue = true;
         for (int p = 0; p < seat_count(); ++p) {
@@ -957,9 +960,14 @@ namespace hotd::game {
 // Light Gun Edition: Weak-Point Roulette: the zombies (the humanoid creature types that lose parts: zom, debu,
 // zonbiman, mummy, haris, gilmoa, mummy2, dkiller, mon) get one glowing body part each, another one every 2 s (by the
 // body and the moment, so it never flickers within the 2 s); other creatures and the bosses as normal
-void Runtime::lg_roulette_frame()
+static bool lgZombieType(int type)
 {
     static const int kTypes[] = {0, 8, 11, 12, 16, 24, 31, 32, 40, 57, 70, 79, 80, 81};
+    return std::find(std::begin(kTypes), std::end(kTypes), type) != std::end(kTypes);
+}
+
+void Runtime::lg_roulette_frame()
+{
     lgWeak_.clear();
     lgRings.clear();
     if (mem.at<int16_t>(G::game_mode) != 4)
@@ -971,7 +979,7 @@ void Runtime::lg_roulette_frame()
         if (mem.at<port::a::BodyPart>(d.part).hit_radius <= 0.0f)
             continue;   // (a part no shot can hit)
         const int type = mem.at<int16_t>(d.body + 0xCC);
-        if (std::find(std::begin(kTypes), std::end(kTypes), type) == std::end(kTypes))
+        if (!lgZombieType(type))
             continue;
         std::vector<uint32_t>& v = parts[d.body];
         if (std::find(v.begin(), v.end(), d.part) == v.end())
@@ -999,6 +1007,165 @@ bool Runtime::lg_part_ok(uint32_t part)
     const uint32_t body = mem.at<port::a::BodyPart>(part).owner.a;
     const auto it = lgWeak_.find(body);
     return it == lgWeak_.end() || it->second == part;
+}
+
+} // namespace hotd::game
+
+namespace hotd::game {
+
+// Light Gun Edition: the bodies drawn this frame: their biggest hit part (the blast's reach), Night Vision's heat
+// colours (every creature), the Exploding Zombies' glow (about one zombie in four, decided when it first shows)
+void Runtime::lg_bodies_frame()
+{
+    lgBodies_.clear();
+    std::map<uint32_t, size_t> at;
+    for (DrawModel& d : drawList) {
+        if (d.part == 0 || d.body == 0 || d.shadow || !mem.mapped(d.body) || !mem.mapped(d.part))
+            continue;
+        if (lgLook == 1 && d.ramp < 0)
+            d.ramp = 2;   // Night Vision: heat
+        const port::a::BodyPart& bp = mem.at<port::a::BodyPart>(d.part);
+        if (bp.hit_radius <= 0.0f || bp.view_pos[2] <= 1.0f)
+            continue;
+        const auto it = at.find(d.body);
+        if (it == at.end()) {
+            at[d.body] = lgBodies_.size();
+            lgBodies_.push_back({d.body, d.part, bp.view_pos[0], bp.view_pos[1], bp.view_pos[2], bp.hit_radius,
+                                 int(mem.at<int16_t>(d.body + 0xCC))});
+        } else if (bp.hit_radius > lgBodies_[it->second].r) {
+            LgBody& b = lgBodies_[it->second];
+            b.part = d.part, b.x = bp.view_pos[0], b.y = bp.view_pos[1], b.z = bp.view_pos[2], b.r = bp.hit_radius;
+        }
+    }
+    if (!lg_exploding)
+        return;
+    std::map<uint32_t, bool> vol;
+    for (const LgBody& b : lgBodies_) {
+        if (!lgZombieType(b.type))
+            continue;
+        const auto it = lgVol_.find(b.body);
+        if (it != lgVol_.end()) {
+            vol[b.body] = it->second;
+        } else {
+            lgVolSeed_ = lgVolSeed_ * 1664525u + 1013904223u;
+            vol[b.body] = (lgVolSeed_ >> 16) % 100 < 25;
+        }
+    }
+    lgVol_.swap(vol);
+    for (auto it = lgBoomed_.begin(); it != lgBoomed_.end();)   // (gone from the screen: its slot can be a new zombie)
+        it = at.count(*it) ? std::next(it) : lgBoomed_.erase(it);
+    for (DrawModel& d : drawList)
+        if (d.body != 0 && !d.shadow && lg_volatile(d.body))
+            d.ramp = 3;   // the glow
+    lgBlasts.erase(std::remove_if(lgBlasts.begin(), lgBlasts.end(), [&](const LgBlast& b) { return b.frame + 45 < frameCount; }),
+                   lgBlasts.end());
+}
+
+bool Runtime::lg_volatile(uint32_t body) const
+{
+    const auto it = lgVol_.find(body);
+    return lg_exploding && it != lgVol_.end() && it->second && !lgBoomed_.count(body);
+}
+
+// the shot (shot_resolve): a glowing zombie hit, not on its head: it blows up; every creature within the blast is hit
+// by the shooter (zombies with one hit point left: they die; hostages / scientists: shot, the penalty as usual), and
+// glowing ones in it go off too (a chain). The bosses' fights: hits only
+void Runtime::lg_explode(int player, uint32_t part)
+{
+    if (!mem.mapped(part))
+        return;
+    const port::a::BodyPart& hp = mem.at<port::a::BodyPart>(part);
+    const uint32_t body = hp.owner.a;
+    if (!lg_volatile(body) || !mem.mapped(body))
+        return;
+    const int type = mem.at<int16_t>(body + 0xCC);
+    if (type >= 0 && type <= 0x7F && hp.role >= 0 && hp.role < 31 &&
+        mem.at<int8_t>(0x1184E0u + uint32_t(type) * 0xF8 + uint32_t(hp.role) * 8 + 3) == 1)
+        return;   // a head shot: a clean kill
+    static const float kReach = [] { const char* e = std::getenv("HOTD_BLAST_R"); return e ? float(std::atof(e)) : 45.0f; }();
+    const bool bossUp = mem.at<uint8_t>(0x543530) != 0;
+    const uint32_t bit = 1u << ((player & 1) + 1);
+    std::vector<uint32_t> todo = {body};
+    while (!todo.empty()) {
+        const uint32_t b0 = todo.back();
+        todo.pop_back();
+        if (lgBoomed_.count(b0))
+            continue;
+        lgBoomed_.insert(b0);
+        float cx = 0, cy = 0, cz = 0;
+        bool found = false;
+        for (const LgBody& b : lgBodies_)
+            if (b.body == b0) cx = b.x, cy = b.y, cz = b.z, found = true;
+        if (!found) {
+            if (b0 != body) continue;
+            cx = hp.view_pos[0], cy = hp.view_pos[1], cz = hp.view_pos[2];
+        }
+        lgBlasts.push_back({cx, cy, cz, frameCount});
+        for (const LgBody& b : lgBodies_) {
+            const float dx = b.x - cx, dy = b.y - cy, dz = b.z - cz;
+            if (dx * dx + dy * dy + dz * dz > (kReach + b.r) * (kReach + b.r))
+                continue;
+            port::a::BodyPart& bp = mem.at<port::a::BodyPart>(b.part);
+            bp.flags |= bit | 0x100u;
+            mem.at<port::a::Obj>(b.body).flags |= bit | 0x100u;
+            if (coop4_on()) {
+                coop4_hit_add(b.part, player);
+                coop4_hit_add(b.body, player);
+            }
+            if (lgZombieType(b.type) && !bossUp && mem.at<int16_t>(b.body + 0x70) > 1)
+                mem.at<int16_t>(b.body + 0x70) = 1;   // (the hit kills)
+            if (lg_volatile(b.body))
+                todo.push_back(b.body);
+        }
+    }
+}
+
+// Coin-Op Survival: the clock runs down in play (not in cut-scenes, the results, the continue countdowns); a kill +2 s,
+// a rescue +15 s, a lost life -10 s, a miss -1.5 s; at 0 the game is over for everyone
+void Runtime::lg_survival_frame()
+{
+    if (lgClock < 0 || lgTimeUp)
+        return;
+    if (!lgSvInit_) {
+        lgSvInit_ = true;
+        lgSvKills_ = lg_kills[0] + lg_kills[1] + lg_kills[2] + lg_kills[3];
+        lgSvRescued_ = mem.at<int16_t>(G::hostages_rescued_chapter);
+        for (int p = 0; p < 4; ++p) {
+            lgSvMiss_[p] = lg_shots[p] > lg_hits[p] ? lg_shots[p] - lg_hits[p] : 0;
+            lgSvLives_[p] = mem.at<port::a::Player>(player_rec(p)).lives;
+        }
+        return;
+    }
+    double d = 0;
+    uint32_t kills = 0;
+    for (int p = 0; p < 4; ++p) kills += lg_kills[p];
+    if (kills > lgSvKills_) d += 2.0 * double(kills - lgSvKills_);
+    lgSvKills_ = kills;
+    const int resc = mem.at<int16_t>(G::hostages_rescued_chapter);
+    if (resc > lgSvRescued_) d += 15.0 * double(resc - lgSvRescued_);
+    lgSvRescued_ = resc;
+    bool anyone = false;
+    for (int p = 0; p < seat_count(); ++p) {
+        const port::a::Player& pl = mem.at<port::a::Player>(player_rec(p));
+        const uint32_t miss = lg_shots[p] > lg_hits[p] ? lg_shots[p] - lg_hits[p] : 0;
+        if (miss > lgSvMiss_[p]) d -= 1.5 * double(miss - lgSvMiss_[p]);
+        lgSvMiss_[p] = miss;
+        if (pl.state == 5 && pl.lives < lgSvLives_[p]) d -= 10.0 * double(lgSvLives_[p] - pl.lives);
+        lgSvLives_[p] = pl.lives;
+        anyone = anyone || pl.state == 5;
+    }
+    if (d != 0) {
+        lgClock += d;
+        lgClockDelta = float(d);
+        lgClockDeltaFrame = frameCount;
+    }
+    if (anyone && mem.at<uint8_t>(G::scene_state) == 2 && !clear.active && letterbox == 0 && mem.u32(G::shot_enable) != 0)
+        lgClock -= 1.0 / 57.524;
+    lgClock = std::min(lgClock, 599.0);
+    if (lgClock <= 0) {
+        lgClock = 0;
+        lgTimeUp = true;
+    }
 }
 
 } // namespace hotd::game

@@ -42,6 +42,8 @@ struct RenderOptions {
     // pages, the final colour's grey level L = (r + g + b) / 3 becomes sepia[L / 4] (0..255)
     bool grey = false;
     uint8_t sepia[64][3] = {};
+    // Light Gun Edition: the fun modes' looks: 1 Night Vision (green), 2 Wireframe (neon lines on black), 3 VHS (washed out)
+    int look = 0;
 };
 
 // Decal layers inside one model: a triangle lying in the plane of an earlier triangle of the same mesh (same facing) and
@@ -80,7 +82,7 @@ bool depthPrepass();
 class Renderer {
 public:
     // 4P (docs/coop4.md): the colour ramps a DrawItem::ramp maps its colours through (players 3 / 4: shadow .. white-hot)
-    float rampStops[2][5][3] = {};
+    float rampStops[4][5][3] = {};   // 0 / 1: 4P players 3 / 4; 2 Night Vision's heat, 3 the Exploding Zombies' glow
     bool init(std::string& err);
     void shutdown();
     // Uploads a stage's meshes and texture sets. The StageData must stay alive while it's uploaded.

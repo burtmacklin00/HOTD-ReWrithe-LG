@@ -1120,6 +1120,15 @@ void Audio::pause(bool hold)
     boardHeld_ = hold;
 }
 
+void Audio::setSpeed(float ratio)
+{
+    static float now = 1.0f;
+    if (!stream_ || ratio == now)
+        return;
+    now = ratio;
+    SDL_SetAudioStreamFrequencyRatio(stream_, ratio);
+}
+
 void Audio::callback(void* self, SDL_AudioStream* stream, int additional, int)
 {
     Audio& a = *static_cast<Audio*>(self);

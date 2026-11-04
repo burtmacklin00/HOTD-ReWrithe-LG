@@ -28,6 +28,13 @@ const char* load()
     return nullptr;
 }
 
+void polygonMode(GLenum face, GLenum mode)
+{
+    using Fn = void(HOTD_APIENTRY*)(GLenum, GLenum);
+    static Fn fn = isES() ? nullptr : reinterpret_cast<Fn>(SDL_GL_GetProcAddress("glPolygonMode"));
+    if (fn) fn(face, mode);
+}
+
 // compat (2026-10-29): HOTD_GL_DEBUG=1's checks (gl.h)
 namespace {
 int gDebugOn = -1;   // -1: not read yet (HOTD_GL_DEBUG)

@@ -374,14 +374,37 @@ public:
     // Arsenal Mode (each seat: 0 Pistol, 1 Shotgun, 2 Machine Gun, 3 Rocket Launcher); off: -1 for every seat
     int lgWeapon[4] = {-1, -1, -1, -1};
     uint8_t lgLastRounds_[4] = {6, 6, 6, 6};
-    void lg_weapon_next(int p);
+    void lg_weapon_next(int p);   // the middle button: the next weapon, its magazine full
     // Weak-Point Roulette: each zombie's glowing part this moment (by its body), and the parts' rings to draw (camera
     // space centres); rebuilt each frame from the frame's draws (every 2 s another part)
     std::map<uint32_t, uint32_t> lgWeak_;
     struct LgRing { float x, y, z, r; };
     std::vector<LgRing> lgRings;
     bool lg_part_ok(uint32_t part) override;
-    void lg_roulette_frame();   // the middle button: the next weapon, its magazine full
+    // Exploding Zombies: the bodies drawn last frame (their biggest hit part and its camera-space centre), the blasts to
+    // draw (camera space, the frame they went off) and the bodies blown up already
+    struct LgBody { uint32_t body, part; float x, y, z, r; int type; };
+    std::vector<LgBody> lgBodies_;
+    struct LgBlast { float x, y, z; uint64_t frame; };
+    std::vector<LgBlast> lgBlasts;
+    std::set<uint32_t> lgBoomed_;
+    std::map<uint32_t, bool> lgVol_;   // each zombie on screen: volatile or not (decided when it first shows)
+    uint32_t lgVolSeed_ = 0x9E3779B9u;   // (our own sequence: the game's rand() is not touched)
+    bool lg_volatile(uint32_t body) const;
+    void lg_explode(int player, uint32_t part) override;
+    void lg_bodies_frame();   // (the bodies' list, the glow / heat colours)
+    // the looks (Night Vision 1, Wireframe 2, VHS 3: RenderOptions::look); Night Vision: the creatures in heat colours
+    int lgLook = 0;
+    // Coin-Op Survival: the clock (seconds left; < 0 off), what was counted so far, the last change (shown by the clock)
+    double lgClock = -1;
+    bool lgTimeUp = false;
+    bool lgSvInit_ = false;   // (the counts taken at the first frame: nothing credited for what came before)
+    uint32_t lgSvKills_ = 0, lgSvMiss_[4] = {};
+    int lgSvRescued_ = 0, lgSvLives_[4] = {};
+    float lgClockDelta = 0;
+    uint64_t lgClockDeltaFrame = 0;
+    void lg_survival_frame();
+    void lg_roulette_frame();
     static int lgMagazine(int weapon) { return weapon == 1 ? 3 : weapon == 2 ? 30 : weapon == 3 ? 1 : 6; }
     static const char* lgWeaponName(int weapon)
     {

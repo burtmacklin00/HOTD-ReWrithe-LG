@@ -110,6 +110,12 @@ template <class P> void Game<P>::shot_resolve()
                     o.flags &= ~(bit | 0x100u);
                 }
             }
+            if (lg_exploding && mem.u32(G::input_source) == 0) {
+                // Light Gun Edition: Exploding Zombies: a glowing zombie hit anywhere but the head blows up
+                const ShotCandidate c = mem.at<ShotCandidate>(G::shot_candidates, mem.u32(G::shot_nearest));
+                if (((c.flags >> 4) & 1) == 0 && ((c.flags >> 9) & 1) && (!lg_roulette || lg_part_ok(c.target.a)))
+                    lg_explode(p, c.target.a);
+            }
             mem.set32(G::shot_last_count, mem.u32(G::shot_candidate_count));
         }
     }

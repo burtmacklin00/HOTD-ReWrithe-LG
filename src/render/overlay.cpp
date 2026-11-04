@@ -260,13 +260,14 @@ const char* kRingFs = R"(#version 330 core
 in vec2 vUV;
 out vec4 oColor;
 uniform float uFill;
+uniform vec4 uColor;
 void main() {
     vec2 p = vUV * 2.0 - 1.0;   // y down
     float r = length(p), aa = fwidth(r);
     float ring = smoothstep(0.70 - aa, 0.70 + aa, r) * (1.0 - smoothstep(0.94 - aa, 0.94 + aa, r));
     float a = atan(p.x, -p.y);
     float f = (a < 0.0 ? a + 6.2831853 : a) / 6.2831853;
-    oColor = vec4(0.86, 0.06, 0.06, ring * (f <= uFill ? 0.95 : 0.22));
+    oColor = vec4(uColor.rgb, ring * (f <= uFill ? 0.95 : 0.22) * uColor.a);
 }
 )";
 } // namespace
@@ -287,6 +288,7 @@ bool SkipRing::init(std::string& err)
     if (!ok) { err = "skip ring shader link failed"; return false; }
     uRect_ = gl::GetUniformLocation(program_, "uRect");
     uFill_ = gl::GetUniformLocation(program_, "uFill");
+    uColor_ = gl::GetUniformLocation(program_, "uColor");
     gl::GenVertexArrays(1, &vao_);
     return true;
 }
@@ -308,6 +310,7 @@ void SkipRing::draw(int w, int h, float x, float y, float size, float fill)
     gl::Uniform4f(uRect_, 2.0f * (x - size * 0.5f) / float(w) - 1.0f, 1.0f - 2.0f * (y + size * 0.5f) / float(h),
                   2.0f * size / float(w), 2.0f * size / float(h));
     gl::Uniform1f(uFill_, fill);
+    gl::Uniform4f(uColor_, color_[0], color_[1], color_[2], color_[3]);
     gl::BindVertexArray(vao_);
     gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
     gl::BindVertexArray(0);

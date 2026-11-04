@@ -308,6 +308,11 @@ struct LaunchConfig {
     bool suddenDeath = false;  // one life, no continues, any hit kills an enemy (bosses as normal); its own high scores
     bool vampire = false;      // a blood meter drains: hits and kills refill it, empty costs a life
     bool hostageCrisis = false; // Hostage Crisis (launcher.ini hostagecrisis=): shooting a hostage / researcher: game over for everyone
+    bool survival = false;      // Coin-Op Survival (launcher.ini survival=): a 60 s clock; kills / rescues add time, hits / misses take it
+    bool exploding = false;     // Exploding Zombies (launcher.ini exploding=): some zombies glow and blow up when hit (not on the head)
+    int funLook = 0;            // the fun look (launcher.ini funlook=): 0 off, 1 Night Vision, 2 VHS Camcorder, 3 Wireframe
+    int turbo = 0;              // Turbo Speed Run (launcher.ini turbo=): 0 off, 1 x1.5, 2 x2: the whole game, cut-scenes and music too
+    bool bossRush = false;      // Boss Rush (launcher.ini bossrush=): Arcade = the four bosses back to back, lives carried on
     bool roulette = false;      // Weak-Point Roulette (launcher.ini roulette=): a zombie takes hits only on its glowing part (moves every 2 s)
     bool weaponSwitch = false; // Arsenal Mode (launcher.ini arsenal=): the middle button: Pistol > Shotgun > Machine Gun > Rocket Launcher, each player their own
     // setup2: the version that last ran with these settings (launcher.ini lastversion=; another one: What's New once)

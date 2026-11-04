@@ -194,7 +194,7 @@ void menuReset(LaunchConfig& c, int page)
         for (int p = 0; p < 4; ++p) c.gunDev[p].clear(), c.gunName[p].clear();   // (ipolish: Light Guns: Assign)
         break;
     case kCatGameplay:
-        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
+        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
         break;
     case kResetAdvanced:
@@ -537,6 +537,18 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "Fun mode: shoot a hostage or scientist and it's game over for everyone: no continues. Aim carefully!"});
         r.push_back({"Weak-Point Roulette", [&c]() { return onOff(c.roulette); }, [&c, save]() { c.roulette = !c.roulette; save(); },
                      "Fun mode: each zombie can only be hurt where a red ring glows; the ring moves to another body part every 2 seconds"});
+        r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { c.exploding = !c.exploding; save(); },
+                     "Fun mode: some zombies glow orange; hit one anywhere but the head and it blows up everything near it, hostages too"});
+        r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { c.survival = !c.survival; save(); },
+                     "Fun mode: a 60 s clock: kills +2 s, rescues +15 s, a hit -10 s, a miss -1.5 s; time up = game over. Its own high scores"});
+        r.push_back({"Turbo Speed Run", [&c]() { return std::string(c.turbo == 1 ? "x1.5" : c.turbo == 2 ? "x2" : "Off"); },
+                     [&c, save]() { c.turbo = (c.turbo + 1) % 3; save(); },
+                     "Fun mode: the whole game faster: play, cut-scenes, voices and music (higher pitch). Menus at normal speed"});
+        r.push_back({"Boss Rush", [&c]() { return onOff(c.bossRush); }, [&c, save]() { c.bossRush = !c.bossRush; save(); },
+                     "Fun mode: Arcade becomes the four bosses back to back, no hallways; your lives carry over and never refill, no continues"});
+        r.push_back({"Fun Look", [&c]() { return std::string(c.funLook == 1 ? "Night Vision" : c.funLook == 2 ? "VHS Camcorder" : c.funLook == 3 ? "Wireframe" : "Off"); },
+                     [&c, save]() { c.funLook = (c.funLook + 1) % 4; save(); },
+                     "Night Vision: green with glowing heat; VHS Camcorder: tracking lines, static, a REC time stamp; Wireframe: 80s neon vector lines"});
         r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
                      "Co-op: each player's score, shots, hits and accuracy at the end of a chapter, and the MVP"});
         // skipfix (user 2026-10-27): the hold-to-skip of the cut-scenes the arcade cannot skip (main.cpp)
