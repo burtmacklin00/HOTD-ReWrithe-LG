@@ -3805,21 +3805,25 @@ int main(int argc, char* argv[])
         if (gSonic.preset)
             SDL_Log("Sonic Mode: %s", game::sonicName(gSonic.preset));
         r.rankingFile = !rankingFileOpt.empty() ? rankingFileOpt : frames < 0 ? cacheDir() + rankingName(gSonic.preset) : std::string();
-        if (!r.rankingFile.empty() && rankingFileOpt.empty() && cfg.hardcore && !gNet && !bossModeOpt)
-            r.rankingFile += "_hardcore";   // Light Gun Edition: Hardcore's own top 10
+        if (!r.rankingFile.empty() && rankingFileOpt.empty() && (cfg.hardcore || cfg.suddenDeath) && !gNet && !bossModeOpt)
+            r.rankingFile += cfg.suddenDeath ? "_suddendeath" : "_hardcore";   // Light Gun Edition: their own top 10s
         r.nameKeysTest = nameKeysOpt;
         r.rankingLowTest = rankingLowOpt;
         r.nameEntryOnClear = nameEntryOpt || (launcher && inputTestFile.empty() && !autoStart && checkpoints.empty());
         r.audio = audioOn ? &audio : nullptr;
         r.settings.difficulty = cfg.difficulty;
         r.settings.lives = cfg.lives;
-        // Light Gun Edition: the fun modes (Options > Gameplay): local games only (online: as normal, on every PC)
+        // Light Gun Edition: the fun modes (Options > Gameplay): local games only (online: as normal, on every PC; the
+        // title / attract demo: as normal too, below)
         if (!gNet) {
             // Arsenal Mode: each player's own weapon (the middle button), every player starts with the pistol; the
             // whole-game Shotgun / Machine Gun modes are its weapons then
             const bool arsenal = cfg.weaponSwitch;
             r.lgModes.freeFire = cfg.freeFire || (cfg.machineGun && !arsenal);   // (Machine Gun: unlimited ammo too)
-            r.lgModes.hardcore = cfg.hardcore && !bossModeOpt;
+            r.lgModes.hardcore = (cfg.hardcore || cfg.suddenDeath) && !bossModeOpt;   // (Sudden Death: Hardcore's one life too)
+            r.lg_one_hit = cfg.suddenDeath && !bossModeOpt;
+            r.lgModes.vampire = cfg.vampire;
+            r.lgModes.flashlight = cfg.flashlight;
             r.lgModes.bigHeads = cfg.bigHeads;
             r.lgModes.shotgunShells = cfg.shotgun && !arsenal ? 3 : 0;
             r.lg_hit_scale = cfg.shotgun && !arsenal ? 2.5f : 1.0f;
@@ -3945,6 +3949,13 @@ int main(int argc, char* argv[])
         // (only when Chapter 1 is chosen: another chapter starts straight away)
         const bool title = titleNow >= 0 ? titleNow == 1
                            : chapter == 0 && (titleOpt >= 0 ? titleOpt == 1 : launcher && cfg.title && inputTestFile.empty() && !autoStart);
+        if (title) {   // Light Gun Edition: the attract demo as the original plays it (no fun modes)
+            r.lgModes = {};
+            r.lg_one_hit = false, r.lg_hit_scale = 1.0f;
+            for (int k = 0; k < 4; ++k) r.lgWeapon[k] = -1, r.lg_seat_scale[k] = 1.0f, r.lg_splash[k] = r.lg_hide_bullets[k] = false;
+            r.settings.lives = cfg.lives;
+            r.bossNoContinue = false;
+        }
         // menus3 (user 2026-10-28: "make clock start accurately like on pc"): Boss Mode is the PC's mode: its game runs
         // at the PC's 60 Hz (pc_main_loop 0x419168: timeGetTime x 60 / 1000) with Game Speed Auto, as PC Mode, so the
         // fight and its clock (1000 / 60 ms a tick) go as on the PC; it ran at the arcade's 57.52 Hz (the times 4 % long)
@@ -13560,7 +13571,7 @@ int main(int argc, char* argv[])
         } else {
         view->opt.clearColor = !hud.drawUnder(rt, ww, wh, view->opt.clear);
         view->draw(rt, ww, wh, blendFrom, alpha);   // rate: the 3D picture blended; the HUD / sights below are not
-        if (cfg.flashlight && !gNet && !gScene.active()) {
+        if (rt.lgModes.flashlight && !gScene.active()) {
             // Light Gun Edition: Flashlight Mode: the picture dark but for a soft light round each playing player's aim
             // (in their colour's tint); cut-scenes only dimmed, so the story stays visible
             static Overlay dark;
@@ -13636,6 +13647,31 @@ int main(int argc, char* argv[])
                 wl[p].drawAnchored(ww, wh, left ? x0 : x1, top ? wh * 0.19f : wh * 0.80f, left ? 0.0f : 1.0f, 0.5f);
             }
         }
+        if (rt.lgModes.vampire && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active &&
+            rt.mem.at<uint8_t>(game::A::G::scene_state) == 2) {
+            // Light Gun Edition: Vampire Mode: each playing player's blood meter by their corner (red; it flashes when low)
+            static Overlay bar[2];
+            static bool barOk = false, barTried = false;
+            if (!barTried) {
+                barTried = true;
+                std::string e;
+                barOk = bar[0].init(e) && bar[1].init(e);
+                const std::vector<uint8_t> back = {20, 0, 0, 200}, fill = {200, 10, 10, 255};
+                if (barOk) bar[0].setImage(back, 1, 1), bar[1].setImage(fill, 1, 1);
+            }
+            const float gw = cfg.aspect == 1 ? std::min(float(ww), float(wh) * 496.0f / 384.0f)
+                           : cfg.aspect == 2 ? std::min(float(ww), float(wh) * 1.6f) : float(ww);
+            const float bw = gw * 0.16f, bh = wh * 0.018f;
+            const float xl = (float(ww) - gw) * 0.5f + wh * 0.02f, xr = (float(ww) + gw) * 0.5f - wh * 0.02f - bw;
+            for (int p = 0; p < rt.seat_count() && barOk; ++p) {
+                if (rt.mem.at<port::a::Player>(rt.player_rec(p)).state != 5) continue;
+                const float v = std::clamp(rt.lgBlood[p], 0.0f, 1.0f);
+                if (v < 0.25f && (SDL_GetTicks() / 200) % 2) continue;   // (low: flashing)
+                const float x = (p & 1) == 0 ? xl : xr, y = p >= 2 ? wh * 0.225f : wh * 0.755f;
+                bar[0].drawIn(ww, wh, x, y, bw, bh);
+                bar[1].drawIn(ww, wh, (p & 1) == 0 ? x : x + bw * (1.0f - v), y, bw * v, bh);
+            }
+        }
         if (cfg.partyBoard && !gNet && rt.clear.active && !gScene.active()) {
             // Light Gun Edition: the Party Scoreboard: on a chapter's results, with two or more players in the game so
             // far: each player's score, shots, hits and accuracy (this game), and the MVP (the best score)
@@ -13646,23 +13682,23 @@ int main(int argc, char* argv[])
                 std::string e;
                 if ((boardOk = board.init(e))) board.setStyle(215, 255, 235, 200), board.translate = false;
             }
-            struct Row { int p; uint32_t score, shots, hits; };
+            struct Row { int p; uint32_t score, shots, hits, kills; };
             std::vector<Row> rows;
             for (int p = 0; p < rt.seat_count(); ++p) {
                 const uint32_t shots = rt.lg_shots[p], hits = std::min(rt.lg_hits[p], shots);
                 if (shots == 0 || cfg.seatBot[p] != 0) continue;
-                rows.push_back({p, rt.mem.u32(rt.player_rec(p) + 8), shots, hits});
+                rows.push_back({p, rt.mem.u32(rt.player_rec(p) + 8), shots, hits, rt.lg_kills[p]});
             }
             if (boardOk && rows.size() >= 2) {
                 int mvp = 0;
                 for (size_t i = 1; i < rows.size(); ++i)
                     if (rows[i].score > rows[size_t(mvp)].score) mvp = int(i);
-                std::vector<std::string> lines = {"PARTY SCOREBOARD", "", "PLAYER     SCORE   SHOTS    HITS  ACCURACY"};
+                std::vector<std::string> lines = {"PARTY SCOREBOARD", "", "PLAYER     SCORE   KILLS   SHOTS    HITS  ACCURACY"};
                 for (size_t i = 0; i < rows.size(); ++i) {
                     const Row& r = rows[i];
                     char b[96];
-                    std::snprintf(b, sizeof b, "%dP%s %9u %7u %7u %8u%%", r.p + 1, int(i) == mvp ? " MVP" : "    ", r.score, r.shots,
-                                  r.hits, r.shots ? r.hits * 100u / r.shots : 0u);
+                    std::snprintf(b, sizeof b, "%dP%s %9u %7u %7u %7u %8u%%", r.p + 1, int(i) == mvp ? " MVP" : "    ", r.score, r.kills,
+                                  r.shots, r.hits, r.shots ? r.hits * 100u / r.shots : 0u);
                     lines.push_back(b);
                 }
                 board.setText(lines, wh >= 1000 ? 3 : 2);

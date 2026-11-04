@@ -45,7 +45,9 @@ public:
     // and the rocket's splash (every candidate of the shot is hit, not only the nearest)
     float lg_seat_scale[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     bool lg_splash[4] = {false, false, false, false};
-    bool lg_hide_bullets[4] = {false, false, false, false};   // (the HUD draws the weapon's own rounds: Hud::drawArsenalAmmo)
+    bool lg_hide_bullets[4] = {false, false, false, false};
+    bool lg_one_hit = false;                  // Sudden Death: any hit kills an enemy (the bosses keep their own fights)
+    uint32_t lg_kills[4] = {0, 0, 0, 0};      // each seat's enemy kills (the Party Scoreboard, Vampire Mode)   // (the HUD draws the weapon's own rounds: Hud::drawArsenalAmmo)
     // Options "Game Text: Japanese" (ours): the region's text-only effects (the subtitles / voice-message sprites,
     // chapter cards, RELOAD hint, the attract tutorial's text) as the JAPAN region 0 draws them, while the logic keeps
     // reading the real region 0x51F791 (attract order, credits, the opening title's timing). Off in the proofs.

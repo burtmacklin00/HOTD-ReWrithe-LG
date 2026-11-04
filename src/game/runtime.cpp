@@ -870,6 +870,28 @@ void Runtime::lg_modes_frame()
             if (lgModes.shotgunShells > 0 && pl.rounds > lgModes.shotgunShells)   // Shotgun Mode: a load is 3 shells
                 pl.rounds = uint8_t(lgModes.shotgunShells);
         }
+        if (lgModes.vampire) {
+            // Vampire Mode: the meter drains in about 15 s in play; a hit gives 8 %, a kill 30 %; empty: a life lost (as an
+            // enemy's hit: invulnerable a moment), then full again
+            const uint32_t h = lg_hits[p & 3], k = lg_kills[p & 3];
+            float& b = lgBlood[p & 3];
+            if (pl.state == 5 && mem.at<uint8_t>(G::scene_state) == 2) {
+                if (h > lgBloodHits_[p & 3]) b += 0.08f * float(h - lgBloodHits_[p & 3]);
+                if (k > lgBloodKills_[p & 3]) b += 0.30f * float(k - lgBloodKills_[p & 3]);
+                b = std::min(1.0f, b) - 1.0f / (15.0f * 57.5f);
+                if (b <= 0.0f) {
+                    if (player_hit_check(p) == 0 && mem.at<int32_t>(invuln_at(p)) == 0) {
+                        player_hit_take(p, 1, 0);
+                        mem.at<int32_t>(invuln_at(p)) = 0x5A;
+                        player_hit_keep_life(p);
+                    }
+                    b = 1.0f;
+                }
+            } else if (pl.state != 5) {
+                b = 1.0f;   // (a new life / a join: full)
+            }
+            lgBloodHits_[p & 3] = h, lgBloodKills_[p & 3] = k;
+        }
         if (lgModes.hardcore && pl.state == 4) {   // Hardcore: out of lives = out of the game (no countdown to wait)
             lgOut_[p & 3] = true;
             pl.continue_timer = 0;

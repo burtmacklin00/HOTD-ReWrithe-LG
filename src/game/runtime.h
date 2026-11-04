@@ -366,7 +366,10 @@ public:
     // Light Gun Edition's fun modes (set by the host for a local game; never online): Free Fire (rounds kept full),
     // Shotgun Mode's shells a load (0 off; the radius is Game::lg_hit_scale), Hardcore (an out-of-lives player is out
     // for the game: no continue, no joining back), Big Heads (draws only)
-    struct LgModes { bool freeFire = false, hardcore = false, bigHeads = false; int shotgunShells = 0; } lgModes;
+    struct LgModes { bool freeFire = false, hardcore = false, bigHeads = false, vampire = false, flashlight = false; int shotgunShells = 0; } lgModes;
+    // Vampire Mode: each seat's blood meter (1 full .. 0 empty), and the hits / kills seen so far (their refills)
+    float lgBlood[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    uint32_t lgBloodHits_[4] = {}, lgBloodKills_[4] = {};
     bool lgOut_[4] = {false, false, false, false};
     // Arsenal Mode (each seat: 0 Pistol, 1 Shotgun, 2 Machine Gun, 3 Rocket Launcher); off: -1 for every seat
     int lgWeapon[4] = {-1, -1, -1, -1};

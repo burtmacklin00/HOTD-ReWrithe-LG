@@ -184,7 +184,8 @@ template <class P> uint32_t Game<P>::return_false() { return 0; }
 template <class P> void Game<P>::enemy_check_death(uint32_t obj)
 {
     Enemy& e = mem.at<Enemy>(obj);
-    const uint32_t nl = uint32_t(uint16_t(e.life)) - uint32_t(mem.at<uint16_t>(G::hit_damage));
+    // (Light Gun Edition: Sudden Death: one hit is enough)
+    const uint32_t nl = lg_one_hit ? 0u : uint32_t(uint16_t(e.life)) - uint32_t(mem.at<uint16_t>(G::hit_damage));
     e.life = int16_t(nl);
     if (!(0 >= int32_t(nl << 16))) {
         if (!((uint16_t(e.flags) >> 8) & 1) || e.one_hit_kill == 0) {
@@ -194,6 +195,8 @@ template <class P> void Game<P>::enemy_check_death(uint32_t obj)
     }
     if (uint8_t(e.killer) != 0xFF)
         add_score(e.killer, 0x50);
+    if (e.killer >= 0 && e.killer < (coop4_on() ? 4 : 2))   // Light Gun Edition: the kill's count (not "either": 2 in 1-2P)
+        ++lg_kills[e.killer & 3];
     e.flags &= ~1u;
     if (uint8_t(e.target) != 0xFF) {
         uint32_t t = G::player_targeted + uint32_t(int32_t(e.target));

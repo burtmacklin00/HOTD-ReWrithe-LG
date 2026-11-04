@@ -305,6 +305,8 @@ struct LaunchConfig {
     bool hardcore = false;     // one life, no continues, its own high scores
     bool freeFire = false;     // unlimited ammo, no reloading
     bool machineGun = false;   // hold the trigger: automatic fire (about 9 shots a second), unlimited ammo
+    bool suddenDeath = false;  // one life, no continues, any hit kills an enemy (bosses as normal); its own high scores
+    bool vampire = false;      // a blood meter drains: hits and kills refill it, empty costs a life
     bool weaponSwitch = false; // Arsenal Mode (launcher.ini arsenal=): the middle button: Pistol > Shotgun > Machine Gun > Rocket Launcher, each player their own
     // setup2: the version that last ran with these settings (launcher.ini lastversion=; another one: What's New once)
     std::string lastVersion;
