@@ -962,7 +962,7 @@ void Runtime::lg_modes_frame()
             // Shotgun Mode as Arsenal's shotgun: everything in the spread is hit; the red shells and their count drawn by
             // the HUD (the game's own six bullets erased: a reload drew six and three were left on the screen)
             lg_splash[p & 3] = lgModes.shotgunShells > 0;
-            lg_hide_bullets[p & 3] = lgModes.shotgunShells > 0;
+            lg_hide_bullets[p & 3] = lgModes.shotgunShells > 0 || lgMachineGun;   // (Machine Gun mode: silver rounds)
             lg_seat_scale[p & 3] = 1.0f;
         }
         if (lgModes.vampire) {

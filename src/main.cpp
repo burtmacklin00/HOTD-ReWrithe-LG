@@ -4703,13 +4703,14 @@ int main(int argc, char* argv[])
         r.settings.lives = cfg.lives;
         // Light Gun Edition: the fun modes (Options > Gameplay): local games only (online: as normal, on every PC; the
         // title / attract demo: as normal too, below)
-        r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0;   // (online: none)
+        r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0, r.lgMachineGun = false;   // (online: none)
         r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
         if (!gNet) {
             // Arsenal Mode: each player's own weapon (the middle button), every player starts with the pistol; the
             // whole-game Shotgun / Machine Gun modes are its weapons then
             const bool arsenal = cfg.weaponSwitch;
             r.lgModes.freeFire = cfg.freeFire || (cfg.machineGun && !arsenal);   // (Machine Gun: unlimited ammo too)
+            r.lgMachineGun = cfg.machineGun && !arsenal;
             r.lgModes.hardcore = (cfg.hardcore || cfg.suddenDeath) && !bossModeOpt;   // (Sudden Death: Hardcore's one life too)
             r.lg_one_hit = cfg.suddenDeath && !bossModeOpt;
             r.lg_hostage_crisis = cfg.hostageCrisis, r.lg_crisis_fail = false;
@@ -4854,7 +4855,7 @@ int main(int argc, char* argv[])
             r.lgModes = {};
             r.lg_one_hit = false, r.lg_hit_scale = 1.0f;
             r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
-            r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0;
+            r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0, r.lgMachineGun = false;
             for (int k = 0; k < 4; ++k) r.lgWeapon[k] = -1, r.lg_seat_scale[k] = 1.0f, r.lg_splash[k] = r.lg_hide_bullets[k] = false;
             r.settings.lives = cfg.lives;
             r.bossNoContinue = false;

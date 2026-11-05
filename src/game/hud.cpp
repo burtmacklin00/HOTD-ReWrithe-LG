@@ -1999,7 +1999,7 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     }
     if (!paused && !clean && rt.coop4_on())   // the 4P mode: players 3 / 4's HUD at the top corners
         drawSeatHud(rt, ww, wh);
-    if (!paused && !clean && (rt.lgWeapon[0] >= 0 || rt.lgModes.shotgunShells > 0))   // Light Gun Edition: Arsenal / Shotgun Mode's rounds
+    if (!paused && !clean && (rt.lgWeapon[0] >= 0 || rt.lgModes.shotgunShells > 0 || rt.lgMachineGun))   // Light Gun Edition: Arsenal / Shotgun Mode's rounds
         drawArsenalAmmo(rt, ww, wh);
     if (!paused && !clean && rt.mem.at<uint8_t>(G::max_lives) > 5)   // GitHub #25: "x N" beside the torch
         drawLivesCount(rt, ww, wh);
@@ -2153,7 +2153,8 @@ void Hud::drawArsenalAmmo(const Runtime& rt, int ww, int wh)
     for (int side = 0; side < 2; ++side) {   // the left seats (1, 3) and the right ones (2, 4): each side to its edge
         std::vector<uint8_t> canvas;
         for (int seat = side; seat < rt.seat_count(); seat += 2) {
-            const int w = rt.lgWeapon[seat] >= 0 ? rt.lgWeapon[seat] : rt.lgModes.shotgunShells > 0 ? 1 : -1;   // (Shotgun Mode: the shotgun's)
+            // (Shotgun Mode / Machine Gun mode: drawn as Arsenal's shotgun / machine gun)
+            const int w = rt.lgWeapon[seat] >= 0 ? rt.lgWeapon[seat] : rt.lgModes.shotgunShells > 0 ? 1 : rt.lgMachineGun ? 2 : -1;
             const port::a::Player& pl = mem.at<port::a::Player>(rt.player_rec(seat));
             if (w <= 0 || pl.state != 5 || mem.u32(G::ammo_enabled) == 0) continue;
             if (canvas.empty()) canvas.assign(size_t(W) * H * 4, 0);
@@ -2163,7 +2164,8 @@ void Hud::drawArsenalAmmo(const Runtime& rt, int ww, int wh)
             const int n = std::min<int>(pl.rounds, 3);
             for (int i = 0; i < n; ++i)
                 paste(canvas, W, H, b, (left ? 2 + 2 * i : 0x3B - 2 * i) * unit, row * unit);
-            // the count after the three bullets' places
+            // the count after the three bullets' places (unlimited ammo, Free Fire / Machine Gun mode: none)
+            if (rt.lgModes.freeFire) continue;
             const std::string t = std::to_string(int(pl.rounds));
             int tw = 0;
             for (char ch : t) tw += digit(seat, ch - '0').w + 1;

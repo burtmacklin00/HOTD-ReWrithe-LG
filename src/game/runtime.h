@@ -419,7 +419,8 @@ public:
     void lg_bodies_frame();   // (the bodies' list, the glow / heat colours)
     // the looks (Night Vision 1, Wireframe 2, VHS 3: RenderOptions::look); Night Vision: the creatures in heat colours
     int lgLook = 0;
-    bool lgSolo = false;   // a one-player mode (The Typing of the Dead 0): seats 2-4 never join
+    bool lgSolo = false;
+    bool lgMachineGun = false;   // Machine Gun mode (not Arsenal's): its rounds drawn as the machine gun's (silver)   // a one-player mode (The Typing of the Dead 0): seats 2-4 never join
     // Coin-Op Survival: the clock (seconds left; < 0 off), what was counted so far, the last change (shown by the clock)
     double lgClock = -1;
     bool lgTimeUp = false;
