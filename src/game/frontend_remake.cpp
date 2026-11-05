@@ -711,9 +711,38 @@ void Frontend::remakeSettings(const std::string& title, std::vector<Extra>* rows
                     }
                 }, &Frontend::hitRect);
         }
+    // Light Gun Edition (user 2026-11-05: "add some Up and Down arrow boxes on the screen to shoot"): two big paper
+    // buttons, UP and DOWN, in the margin left of the panel (a page a shot); grey when there is nothing more that way
+    if (n > maxRows && !dd && px >= 60) {
+        const int bw = std::min(110, px - 14), bh = 74, bx = px - bw - 8;
+        const int midY = rowTop + maxRows * rowH / 2;
+        for (int d = 0; d < 2; ++d) {
+            const bool can = d == 0 ? remakeScroll_ > 0 : remakeScroll_ + shown < n;
+            Widget* t = widgetNew();
+            addChild(root_, t);
+            setRect(t, bx, d == 0 ? midY - bh - 10 : midY + 10, bw, bh);
+            t->text = d == 0 ? "UP" : "DOWN";
+            t->user = 0;
+            t->seed = 900 + d * 17;
+            t->draw = &Frontend::drawRTab;
+            t->flags |= 0x100;
+            t->help = d == 0 ? "Shoot: the settings above (a page)" : "Shoot: the settings below (a page)";
+            if (can)
+                setHandlers(t, [this, d, maxRows](Widget&) {
+                    walking_ = false;
+                    if (rScroll_) {
+                        const auto f = rScroll_;
+                        f(d ? maxRows - 1 : 1 - maxRows);
+                    }
+                }, &Frontend::hitRect);
+            else
+                t->user = 2;   // (nothing that way: drawn dimmed)
+        }
+    }
     // menufb (user 2026-10-26: "no indication that the list is scrollable"): a scroll bar at the rows' right
+    // (Light Gun Edition: twice as wide, easier to grab with a gun)
     if (n > maxRows && !dd)
-        scrollBar(root_, px + pw - 19, rowTop, 7, maxRows * rowH - 2, remakeScroll_, maxRows, n, [this](int first) {
+        scrollBar(root_, px + pw - 24, rowTop, 14, maxRows * rowH - 2, remakeScroll_, maxRows, n, [this](int first) {
             remakeScroll_ = first;
             ddRow_ = -1;
             if (rebuild_) {
@@ -2540,6 +2569,11 @@ void Frontend::drawRTab(Widget& w)
     int x, y, ww, hh;
     absRect(w, x, y, ww, hh);
     const bool cur = w.user == 1, lit = (w.flags & 0x40000) != 0;
+    if (w.user == 2) {   // (Light Gun Edition: an UP / DOWN button with nothing that way: its text only, faint)
+        const float th = 14.0f;
+        rText(w.text, float(x + ww / 2), float(y) + (float(hh) - th) / 2, th, kTabText, 1, 0.08f, w.seed, 0);
+        return;
+    }
     rPaper(float(x + 2), float(y), float(ww - 4), float(hh), w.seed, 0.0f, cur ? 0 : 1);
     float th = cur ? 17.0f : 14.0f;
     // (a narrow screen's many tabs: fitted inside the paper's torn edges; finalqa: 3:2's "Controls" touched them at -14)
