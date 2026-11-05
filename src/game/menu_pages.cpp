@@ -764,8 +764,8 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { c.hostageCrisis = !c.hostageCrisis; save(); },
                      "shoot a hostage or scientist and it's game over for everyone: no continues. Aim carefully!"});
         killerBy(r);
-        r.push_back({"Weak-Point Roulette", [&c]() { return onOff(c.roulette); }, [&c, save]() { c.roulette = !c.roulette; save(); },
-                     "each zombie can only be hurt where a red ring glows; the ring moves to another body part every 2 seconds"});
+        r.push_back({"Weak Point Mode", [&c]() { return onOff(c.roulette); }, [&c, save]() { c.roulette = !c.roulette; save(); },
+                     "each zombie has one weak point, marked by a pulsing target: only shots there hurt it (bosses fight as normal)"});
         killerBy(r);
         r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { c.exploding = !c.exploding; save(); },
                      "some zombies glow orange: shoot them in the head! Hit one anywhere else and it blows up: everything near it and you get hurt"});

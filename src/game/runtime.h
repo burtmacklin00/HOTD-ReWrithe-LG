@@ -402,6 +402,10 @@ public:
     // Weak-Point Roulette: each zombie's glowing part this moment (by its body), and the parts' rings to draw (camera
     // space centres); rebuilt each frame from the frame's draws (every 2 s another part)
     std::map<uint32_t, uint32_t> lgWeak_;
+    // (user 2026-11-05: each zombie's weak point fixed from when it shows: body -> its part, the type, the frame last seen)
+    struct LgWeakFixed { uint32_t part; int type; uint64_t seen; };
+    std::map<uint32_t, LgWeakFixed> lgWeakFixed_;
+    uint32_t lgWeakSeed_ = 0x57454B50u;
     struct LgRing { float x, y, z, r; };
     std::vector<LgRing> lgRings;
     bool lg_part_ok(uint32_t part) override;

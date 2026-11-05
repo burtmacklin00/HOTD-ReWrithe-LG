@@ -1066,14 +1066,28 @@ void Runtime::lg_roulette_frame()
         if (std::find(v.begin(), v.end(), d.part) == v.end())
             v.push_back(d.part);
     }
-    const uint32_t epoch = uint32_t(frameCount / 115);
+    // each zombie keeps the weak point it got when it first showed (user 2026-11-05: "a fixed weak point that doesn't
+    // move"), one of its bigger parts (the larger half by hit radius: not a hand); a new one only when that part is
+    // gone (shot off) or the body slot is a new creature (another type, or away for 2 s)
+    for (auto it = lgWeakFixed_.begin(); it != lgWeakFixed_.end();)
+        it = it->second.seen + 115 < frameCount ? lgWeakFixed_.erase(it) : std::next(it);
     for (auto& [body, v] : parts) {
         if (v.size() < 2)
             continue;
-        std::sort(v.begin(), v.end());
-        uint32_t h = body * 2654435761u ^ (epoch + 1) * 40503u;
-        h ^= h >> 13, h *= 0x5bd1e995u, h ^= h >> 15;
-        const uint32_t part = v[h % v.size()];
+        const int type = mem.at<int16_t>(body + 0xCC);
+        auto f = lgWeakFixed_.find(body);
+        if (f == lgWeakFixed_.end() || f->second.type != type || std::find(v.begin(), v.end(), f->second.part) == v.end()) {
+            std::vector<uint32_t> big = v;
+            std::sort(big.begin(), big.end(), [&](uint32_t a, uint32_t b) {
+                return mem.at<port::a::BodyPart>(a).hit_radius > mem.at<port::a::BodyPart>(b).hit_radius;
+            });
+            big.resize(std::max<size_t>(1, (big.size() + 1) / 2));
+            lgWeakSeed_ = lgWeakSeed_ * 1664525u + 1013904223u;
+            lgWeakFixed_[body] = {big[(lgWeakSeed_ >> 16) % big.size()], type, frameCount};
+            f = lgWeakFixed_.find(body);
+        }
+        f->second.seen = frameCount;
+        const uint32_t part = f->second.part;
         lgWeak_[body] = part;
         const port::a::BodyPart& bp = mem.at<port::a::BodyPart>(part);
         if (bp.view_pos[2] > 1.0f)

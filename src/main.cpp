@@ -4720,6 +4720,7 @@ int main(int argc, char* argv[])
             r.lg_one_hit = cfg.suddenDeath && !bossModeOpt;
             r.lg_hostage_crisis = cfg.hostageCrisis, r.lg_crisis_fail = false;
             r.lg_roulette = cfg.roulette && !bossModeOpt;
+            r.lgWeakFixed_.clear();
             r.lg_exploding = cfg.exploding;
             r.lgLook = cfg.funLook == 1 ? 1 : cfg.funLook == 2 ? 3 : cfg.funLook == 3 ? 2 : 0;   // (RenderOptions::look)
             r.lgClock = cfg.survival && !bossModeOpt ? 60.0 : -1.0;
@@ -15455,19 +15456,54 @@ int main(int argc, char* argv[])
             }
         }
         if (rt.lg_roulette && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active) {
-            // Light Gun Edition: Weak-Point Roulette: a pulsing ring on each zombie's glowing part (the shot test's own
-            // projection: the gun's (x, y, 496) ray)
-            static SkipRing wr;
+            // Light Gun Edition: Weak-Point Roulette: an arcade weak-point target on each zombie's weak part (as the
+            // light-gun games' boss weak points: a red disc, a bright ring and an inner one, four ticks, a centre dot,
+            // pulsing, and an orange lock-on ring closing in on it); the shot test's own projection: the gun's (x, y, 496)
+            static Overlay wt;
+            static SkipRing lock;
             static bool wrOk = false, wrTried = false;
-            if (!wrTried) { wrTried = true; std::string e; wrOk = wr.init(e); }
-            const float pulse = 1.0f + 0.15f * std::sin(float(SDL_GetTicks()) * 0.012f);
+            if (!wrTried) {
+                wrTried = true;
+                std::string e;
+                wrOk = wt.init(e) && lock.init(e);
+                if (wrOk) {
+                    constexpr int T = 128;
+                    std::vector<uint8_t> img(size_t(T) * T * 4, 0);
+                    auto band = [](float r, float a, float b) { return std::clamp(std::min(r - a, b - r) * 40.0f, 0.0f, 1.0f); };
+                    for (int y = 0; y < T; ++y)
+                        for (int x = 0; x < T; ++x) {
+                            const float dx = (x + 0.5f) / T * 2 - 1, dy = (y + 0.5f) / T * 2 - 1, r = std::sqrt(dx * dx + dy * dy);
+                            float cr = 0, cg = 0, cb = 0, ca = 0;
+                            auto over = [&](float R, float G, float B, float A) {
+                                cr = cr * (1 - A) + R * A, cg = cg * (1 - A) + G * A, cb = cb * (1 - A) + B * A, ca = ca + A * (1 - ca);
+                            };
+                            if (r < 0.92f) over(0.85f, 0.05f, 0.03f, 0.28f);                              // the disc
+                            over(1.0f, 0.18f, 0.08f, band(r, 0.80f, 0.94f));                              // the outer ring
+                            over(1.0f, 0.85f, 0.25f, band(r, 0.46f, 0.56f));                              // the inner ring
+                            const bool tick = (std::fabs(dx) < 0.05f && std::fabs(dy) > 0.60f && std::fabs(dy) < 0.98f) ||
+                                              (std::fabs(dy) < 0.05f && std::fabs(dx) > 0.60f && std::fabs(dx) < 0.98f);
+                            if (tick) over(1.0f, 0.95f, 0.6f, 0.95f);                                     // the four ticks
+                            if (r < 0.12f) over(1.0f, 1.0f, 0.85f, band(r, -1.0f, 0.12f));                // the centre dot
+                            uint8_t* q = &img[size_t(y * T + x) * 4];
+                            q[0] = uint8_t(cr / std::max(ca, 1e-4f) * 255), q[1] = uint8_t(cg / std::max(ca, 1e-4f) * 255);
+                            q[2] = uint8_t(cb / std::max(ca, 1e-4f) * 255), q[3] = uint8_t(std::clamp(ca, 0.0f, 1.0f) * 255);
+                        }
+                    wt.setImage(img, T, T, true);
+                }
+            }
+            const float t = float(SDL_GetTicks()) * 0.001f;
+            const float pulse = 1.0f + 0.08f * std::sin(t * 9.0f);
+            const float k = std::fmod(t, 0.9f) / 0.9f;   // the lock-on ring: 1.8x down to 1x, fading in
             for (const auto& g : rt.lgRings) {
                 if (!wrOk) break;
                 float px, py, qx, qy;
                 view->fromArcade(496.0f * g.x / g.z, 496.0f * g.y / g.z, ww, wh, px, py);
                 view->fromArcade(496.0f * (g.x + g.r) / g.z, 496.0f * g.y / g.z, ww, wh, qx, qy);
-                const float size = std::clamp(std::fabs(qx - px) * 2.2f, wh * 0.025f, wh * 0.16f) * pulse;
-                wr.draw(ww, wh, px, py, size, 1.0f);
+                const float size = std::clamp(std::fabs(qx - px) * 2.4f, wh * 0.035f, wh * 0.16f);
+                const float sz = size * pulse;
+                wt.drawIn(ww, wh, px - sz * 0.5f, py - sz * 0.5f, sz, sz);
+                lock.setColor(1.0f, 0.55f, 0.1f, 0.25f + 0.75f * k);
+                lock.draw(ww, wh, px, py, size * (1.8f - 0.8f * k), 1.0f);
             }
         }
         if (cfg.partyBoard && !gNet && rt.clear.active && !gScene.active()) {
