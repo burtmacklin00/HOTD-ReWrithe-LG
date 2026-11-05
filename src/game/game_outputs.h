@@ -65,6 +65,10 @@ public:
     void onFrame(const OutputFrame& f, bool live, uint64_t nowMs);
     // Every loop (also while paused / in the menus): finishes timed pulses, blinks the lamps, takes new connections.
     void tick(uint64_t nowMs);
+    // Light Gun Edition (user 2026-11-05: the lights of the players of the last game stayed on in the menu): every
+    // output back to 0 and the tools told the game started again (mame_stop / mame_start: Hook of the Reaper clears its
+    // lights and its death / damage states), as at a tool's first connection
+    void resetAll();
 
 private:
     struct Output { std::string name; int value = -1; };

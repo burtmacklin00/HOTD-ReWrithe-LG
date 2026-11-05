@@ -292,6 +292,25 @@ void GameOutputs::onFrame(const OutputFrame& f, bool live, uint64_t nowMs)
     }
 }
 
+void GameOutputs::resetAll()
+{
+    if (!running()) return;
+    for (int i = 0; i < kSeats; ++i) {
+        recoilPulse_[i].on = false, recoilPulse_[i].queued = 0, recoilPulse_[i].until = 0;
+        damagedPulse_[i].on = false, damagedPulse_[i].queued = 0, damagedPulse_[i].until = 0;
+        track_[i] = Track{};
+        lampBlink_[i] = true;
+    }
+    std::string msg = line("mame_stop", 1) + "mame_start = " + kRomName + "\r";
+    for (Output& o : outputs_) {
+        o.value = 0;
+        msg += line(o.name, 0);
+    }
+    for (uintptr_t c : clients_)
+        sendTo(c, msg);
+    logLine("outputs reset (the menu / a new game): every output 0, mame_start sent again");
+}
+
 void GameOutputs::tick(uint64_t nowMs)
 {
     if (!running()) return;

@@ -1530,6 +1530,12 @@ void outputsFrame(game::Runtime& rt, const game::LaunchConfig& cfg)
     if (!gOutputs.running()) return;
     game::OutputFrame f;
     f.gameMode = rt.mem.at<int16_t>(game::A::G::game_mode);
+    // (a game's end back to the title / attract, or a new game: the last game's lights cleared)
+    static int lastMode = -1;
+    const bool wasGame = lastMode == 4 || lastMode == 5, isGame = f.gameMode == 4 || f.gameMode == 5;
+    if (lastMode >= 0 && wasGame != isGame)
+        gOutputs.resetAll();
+    lastMode = f.gameMode;
     // (online: this PC's one or two seats as P1 / P2; offline: players 1-4, 3 / 4 in the 4-player mode)
     const int seats[4] = {gNet ? gNet->localPlayer() : 0, gNet ? gNet->secondSeat() : 1, gNet ? -1 : 2, gNet ? -1 : 3};
     for (int out = 0; out < 4; ++out) {
@@ -11354,6 +11360,10 @@ int main(int argc, char* argv[])
             crashCheckAt = SDL_GetTicks() + 1000;
         }
         gOutputs.tick(SDL_GetTicks());   // Light Gun Edition: the outputs' pulses, lamps and connections (every loop)
+        if (static Screen outScreen = screen; outScreen != screen) {   // (into / out of a game: the lights cleared)
+            outScreen = screen;
+            gOutputs.resetAll();
+        }
         if (screen != Screen::Game && SDL_GetWindowMouseGrab(window))
             SDL_SetWindowMouseGrab(window, false);   // the mouse is kept in the window during play only
         if (screen != Screen::Game && screen != Screen::Menu && !SDL_CursorVisible())
