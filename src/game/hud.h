@@ -201,6 +201,9 @@ private:
     // Light Gun Edition: Arsenal Mode: a weapon's rounds (up to 3 bullets in its colour: shotgun red, machine gun
     // silver, rocket green) and their count in the players' label digits, where the bullets are
     void drawArsenalAmmo(const Runtime& rt, int ww, int wh);
+    // Light Gun Edition: Coin-Op Survival's clock: the seconds left in the game's own countdown digits (the CONTINUE?
+    // ones), top centre of the picture; red and blinking under 10 s
+    void drawClock(const Runtime& rt, int ww, int wh);
     int seatDy_[2] = {-0x25, -0x25};   // players 3 / 4's band offset as drawSeatHud placed it last
     SeatImg arsenalBullet_[4][2];      // [weapon][arcade, PC]
     SeatImg arsenalDigit_[4][10][2];   // [seat][digit][arcade, PC]

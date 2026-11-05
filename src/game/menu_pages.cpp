@@ -771,16 +771,9 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "about one zombie in three glows orange. Head shot: it blows up every zombie on the screen! Anywhere else: only it blows up, and it hurts you"});
         killerBy(r);
         r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { c.survival = !c.survival; save(); },
-                     "a 60 s clock: kills +2 s, rescues +15 s, a hit -10 s, a miss -1.5 s; time up = game over. Its own high scores"});
+                     "a 60 s clock counts down in play: each kill +10 s, each rescue +30 s; time up = game over. Its own high scores"});
         killerBy(r);
-        r.push_back({"Boss Rush", [&c]() { return onOff(c.bossRush); }, [&c, save]() { c.bossRush = !c.bossRush; save(); },
-                     "Arcade becomes the four bosses back to back, no hallways; your lives carry over and never refill, no continues"});
-        killerBy(r);
-        // Speed and looks
-        r.push_back({"Turbo Speed Run", [&c]() { return std::string(c.turbo == 1 ? "x1.5" : c.turbo == 2 ? "x2" : "Off"); },
-                     [&c, save]() { c.turbo = (c.turbo + 1) % 3; save(); },
-                     "the whole game faster: play, cut-scenes, voices and music (higher pitch). Menus at normal speed"});
-        killerBy(r);
+        // Looks
         r.push_back({"Flashlight Mode", [&c]() { return onOff(c.flashlight); }, [&c, save]() { c.flashlight = !c.flashlight; save(); },
                      "the mansion goes dark and each player's gun lights the screen where it aims"});
         killerBy(r);

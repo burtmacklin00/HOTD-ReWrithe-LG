@@ -1242,18 +1242,17 @@ void Runtime::lg_survival_frame()
     double d = 0;
     uint32_t kills = 0;
     for (int p = 0; p < 4; ++p) kills += lg_kills[p];
-    if (kills > lgSvKills_) d += 2.0 * double(kills - lgSvKills_);
+    if (kills > lgSvKills_) d += 10.0 * double(kills - lgSvKills_);   // (user 2026-11-05: 10 s a kill)
     lgSvKills_ = kills;
     const int resc = mem.at<int16_t>(G::hostages_rescued_chapter);
-    if (resc > lgSvRescued_) d += 15.0 * double(resc - lgSvRescued_);
+    if (resc > lgSvRescued_) d += 30.0 * double(resc - lgSvRescued_);   // (30 s a rescue)
     lgSvRescued_ = resc;
     bool anyone = false;
     for (int p = 0; p < seat_count(); ++p) {
         const port::a::Player& pl = mem.at<port::a::Player>(player_rec(p));
         const uint32_t miss = lg_shots[p] > lg_hits[p] ? lg_shots[p] - lg_hits[p] : 0;
-        if (miss > lgSvMiss_[p]) d -= 1.5 * double(miss - lgSvMiss_[p]);
         lgSvMiss_[p] = miss;
-        if (pl.state == 5 && pl.lives < lgSvLives_[p]) d -= 10.0 * double(lgSvLives_[p] - pl.lives);
+        // (user 2026-11-05: no time taken off: only the countdown)
         lgSvLives_[p] = pl.lives;
         anyone = anyone || pl.state == 5;
     }

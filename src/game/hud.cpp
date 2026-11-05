@@ -1999,6 +1999,8 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     }
     if (!paused && !clean && rt.coop4_on())   // the 4P mode: players 3 / 4's HUD at the top corners
         drawSeatHud(rt, ww, wh);
+    if (!paused && !clean && rt.lgClock >= 0)   // Light Gun Edition: Coin-Op Survival's clock
+        drawClock(rt, ww, wh);
     if (!paused && !clean && (rt.lgWeapon[0] >= 0 || rt.lgModes.shotgunShells > 0 || rt.lgMachineGun))   // Light Gun Edition: Arsenal / Shotgun Mode's rounds
         drawArsenalAmmo(rt, ww, wh);
     if (!paused && !clean && rt.mem.at<uint8_t>(G::max_lives) > 5)   // GitHub #25: "x N" beside the torch
@@ -2654,6 +2656,50 @@ void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
     gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
     gl::Disable(gl::BLEND);
     gl::Enable(gl::DEPTH_TEST);
+}
+
+void Hud::drawClock(const Runtime& rt, int ww, int wh)
+{
+    port::Mem& mem = rt.mem;
+    if (mem.at<int16_t>(G::game_mode) != 4 || rt.clear.active)
+        return;
+    const bool pc = rt.pcModels && pcSprites_.loaded();
+    if (!pc && (rt.pcModels || !mem.mapped(kTileRam) || !mem.mapped(0x2000000)))
+        return;
+    const int unit = pc ? 10 : 8;
+    const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
+    const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
+    const bool low = rt.lgClock < 10.0;
+    if (low && mem.u32(G::frame_counter) % 30 >= 18)
+        return;   // (blinking)
+    const int secs = int(std::ceil(rt.lgClock));
+    const std::string t = std::to_string(std::clamp(secs, 0, 599));
+    const int dh = 3 * unit;   // the digits 3 cells high
+    std::vector<SeatImg> gl;
+    int tw = 0;
+    for (char ch : t) {
+        const SeatImg dg = spriteImg(mem, pc, pcSprites_, uint32_t(mem.at<int16_t>(0xCA720 + uint32_t(ch - '0') * 2)));
+        if (dg.px.empty()) return;
+        SeatImg o;
+        o.h = dh, o.w = std::max(1, dg.w * dh / std::max(1, dg.h));
+        o.px.assign(size_t(o.w) * o.h * 4, 0);
+        for (int y = 0; y < o.h; ++y)
+            for (int x = 0; x < o.w; ++x) {
+                const uint8_t* q = &dg.px[(size_t(y * dg.h / o.h) * dg.w + size_t(x * dg.w / o.w)) * 4];
+                uint8_t* d = &o.px[(size_t(y) * o.w + x) * 4];
+                std::copy_n(q, 4, d);
+                if (low) d[1] = uint8_t(d[1] / 5), d[2] = uint8_t(d[2] / 5);   // (red)
+            }
+        tw += o.w + unit / 4;
+        gl.push_back(std::move(o));
+    }
+    std::vector<uint8_t> canvas(size_t(W) * H * 4, 0);
+    int x = (W - tw) / 2;
+    for (const SeatImg& g : gl) {
+        paste(canvas, W, H, g, x, unit / 2);
+        x += g.w + unit / 4;
+    }
+    upload(canvas, W, H, ww, wh);
 }
 
 } // namespace hotd::game

@@ -4726,7 +4726,7 @@ int main(int argc, char* argv[])
             r.lgClock = cfg.survival && !bossModeOpt ? 60.0 : -1.0;
             r.lgTimeUp = r.lgSvInit_ = false;
             r.lgVol_.clear(), r.lgBoomed_.clear(), r.lgBlasts.clear();
-            gSonic.turbo = cfg.turbo;
+            gSonic.turbo = 0;   // (Light Gun Edition: Turbo Speed Run removed, user 2026-11-05)
             r.lgModes.vampire = false;   // (user 2026-11-05: Vampire Mode removed; Married Mode in its place)
             r.lgModes.flashlight = cfg.flashlight;
             r.lgModes.bigHeads = false;   // (v1.2.0: the Big Head mod, Options > Mods, instead)
@@ -4895,7 +4895,7 @@ int main(int argc, char* argv[])
         } else if (bossModeOpt) {   // Boss Mode: the boss's start (game_new 0x458588 from boss_starts 0x5CD384; online the host's, protocol 18)
             r.boss.begin(bossModeOpt);
             r.boss.players = cfg.players;
-            r.boss.rush = bossModeOpt == 6 && cfg.bossRush && !gNet;   // Light Gun Edition: Boss Rush
+            r.boss.rush = false;   // (Light Gun Edition: Boss Rush removed, user 2026-11-05)
             if (gNet)   // online: the clock counts game ticks (1000 / the game's tick rate each), alike on every PC
                 r.boss.tickMs = 1000.0 / gameTickHz(cfg.gameSpeed);
             r.bossNoContinue = true;
@@ -13274,8 +13274,7 @@ int main(int argc, char* argv[])
                     continue;
                 }
             }
-            if (action == 0 && cfg.bossRush && !feBoss && !gNet)   // Light Gun Edition: Boss Rush: Arcade = All Bosses (lives carried on)
-                feBoss = 6;
+            // (Light Gun Edition: Boss Rush removed, user 2026-11-05)
             if (feSurvival) {   // Survival Mode (game/survival.h): the arena's game (the players asked first)
                 gPcMode = 0;
                 bossModeOpt = 0;
@@ -15372,35 +15371,7 @@ int main(int argc, char* argv[])
                 ring.draw(ww, wh, px, py, reach * (0.2f + 0.7f * t), 1.0f);
             }
         }
-        if (rt.lgClock >= 0 && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active) {
-            // Light Gun Edition: Coin-Op Survival: the clock at the top of the game's picture (red and flashing under 10 s)
-            // and its last change below it for a second
-            static Overlay clk, dlt;
-            static bool cOk = false, cTried = false;
-            if (!cTried) {
-                cTried = true;
-                std::string e;
-                cOk = clk.init(e) && dlt.init(e);
-                if (cOk) clk.translate = dlt.translate = false;
-            }
-            if (cOk) {
-                const bool low = rt.lgClock < 10.0;
-                if (!low || (SDL_GetTicks() / 250) % 2 == 0) {
-                    char b[32];
-                    std::snprintf(b, sizeof b, "TIME %5.1f", rt.lgClock);
-                    if (low) clk.setStyle(150, 255, 50, 40); else clk.setStyle(150, 255, 240, 140);
-                    clk.setText({b}, wh >= 1000 ? 3 : 2);
-                    clk.drawAnchored(ww, wh, ww * 0.5f, wh * 0.035f, 0.5f, 0.0f);
-                }
-                if (rt.lgClockDeltaFrame + 60 > rt.frameCount && rt.lgClockDelta != 0) {
-                    char b[32];
-                    std::snprintf(b, sizeof b, "%+.1f", rt.lgClockDelta);
-                    if (rt.lgClockDelta > 0) dlt.setStyle(0, 80, 255, 90); else dlt.setStyle(0, 255, 70, 50);
-                    dlt.setText({b}, wh >= 1000 ? 2 : 1);
-                    dlt.drawAnchored(ww, wh, ww * 0.5f, wh * 0.035f + clk.drawnHeight() + wh * 0.005f, 0.5f, 0.0f);
-                }
-            }
-        }
+        // (Coin-Op Survival's clock: the HUD's, Hud::drawClock, in the game's own digits)
         if (rt.lgTimeUp && !gScene.active() && (rt.mem.at<int16_t>(game::A::G::game_mode) == 4 || rt.mem.at<int16_t>(game::A::G::game_mode) == 5)) {
             static Overlay tu;
             static bool tuOk = false, tuTried = false;
