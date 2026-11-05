@@ -4759,7 +4759,7 @@ int main(int argc, char* argv[])
             r.lgModes.shotgunShells = cfg.shotgun && !arsenal ? 3 : 0;
             r.lg_hit_scale = cfg.shotgun && !arsenal ? 3.0f : 1.0f;
             for (int k = 0; k < 4; ++k)
-                r.lgWeapon[k] = arsenal ? 0 : -1;
+                r.lgWeapon[k] = arsenal ? 0 : -1, r.lgRockets[k] = 5, r.lgRocketLoaded[k] = true;
             if (r.lgModes.hardcore) {
                 r.settings.lives = 0;          // (the lives table's first row: 1 life)
                 r.bossNoContinue = true;       // (everyone out: game over at once, no team countdown)
@@ -15464,10 +15464,13 @@ int main(int argc, char* argv[])
                 const float gw = cfg.aspect == 1 ? std::min(float(ww), float(wh) * 496.0f / 384.0f)
                                : cfg.aspect == 2 ? std::min(float(ww), float(wh) * 1.6f) : float(ww);
                 const float x0 = (float(ww) - gw) * 0.5f + wh * 0.04f, x1 = (float(ww) + gw) * 0.5f - wh * 0.04f;
-                const int sc = wh >= 1000 ? 3 : 2;
+                const int sc = wh >= 1000 ? 2 : 1;
+                // (user 2026-11-05: the stamp covered player 2's HUD): REC and the time stamp at the bottom centre,
+                // between the players' HUDs, one line each, smaller
+                (void)x0, (void)x1;
                 if ((now / 600) % 2 == 0) {
                     rec.setText({"REC"}, sc);
-                    rec.drawAnchored(ww, wh, x0, wh * 0.10f, 0.0f, 0.0f);
+                    rec.drawAnchored(ww, wh, ww * 0.5f, wh * 0.885f, 0.5f, 1.0f);
                 }
                 const std::time_t tt = std::time(nullptr);
                 std::tm lt{};
@@ -15480,8 +15483,8 @@ int main(int argc, char* argv[])
                 char d1[32], d2[32];
                 std::snprintf(d1, sizeof d1, "%s. %2d 1998", kMon[lt.tm_mon % 12], lt.tm_mday);
                 std::snprintf(d2, sizeof d2, "%s %2d:%02d:%02d", lt.tm_hour >= 12 ? "PM" : "AM", (lt.tm_hour + 11) % 12 + 1, lt.tm_min, lt.tm_sec);
-                stamp.setText({d2, d1}, sc);
-                stamp.drawAnchored(ww, wh, x1, wh * 0.90f, 1.0f, 1.0f);
+                stamp.setText({std::string(d1) + "  " + d2}, sc);
+                stamp.drawAnchored(ww, wh, ww * 0.5f, wh * 0.94f, 0.5f, 1.0f);
             }
         }
         if (rt.lg_roulette && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active) {

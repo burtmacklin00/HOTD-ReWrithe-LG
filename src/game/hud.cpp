@@ -2170,10 +2170,17 @@ void Hud::drawArsenalAmmo(const Runtime& rt, int ww, int wh)
                 paste(canvas, W, H, b, (left ? 2 + 2 * i : 0x3B - 2 * i) * unit, row * unit);
             // the count after the three bullets' places (unlimited ammo, Free Fire / Machine Gun mode: none)
             if (rt.lgModes.freeFire) continue;
-            const std::string t = std::to_string(int(pl.rounds));
-            int tw = 0;
+            // (the rocket launcher: "x N", the rockets left in reserve: the name entry's X, user 2026-11-05)
+            const bool rockets = w == 3;
+            const std::string t = std::to_string(rockets ? std::max(0, rt.lgRockets[seat]) : int(pl.rounds));
+            const SeatImg xs = rockets ? spriteImg(mem, pc, pcSprites_, 0x1AC) : SeatImg{};
+            int tw = xs.px.empty() ? 0 : xs.w + 2;
             for (char ch : t) tw += digit(seat, ch - '0').w + 1;
             int x = left ? (2 + 2 * 3) * unit + unit / 2 : (0x3B - 2 * 3 + 1) * unit - unit / 2 - tw;
+            if (!xs.px.empty()) {
+                paste(canvas, W, H, xs, x, row * unit - (xs.h - 2 * unit) / 2);
+                x += xs.w + 2;
+            }
             for (char ch : t) {
                 const SeatImg& g = digit(seat, ch - '0');
                 paste(canvas, W, H, g, x, row * unit - (g.h - 2 * unit) / 2);

@@ -945,6 +945,23 @@ void Runtime::lg_modes_frame()
             lg_splash[p & 3] = w == 1 || w == 3;
             lg_hide_bullets[p & 3] = w > 0;
             const int mag = lgMagazine(w);
+            if (w == 3 && !lgModes.freeFire) {
+                // the rocket launcher: a reload takes a rocket from the reserve (none left: it stays empty); a fired
+                // rocket is gone (switching weapons never reloads it)
+                const int q = p & 3;
+                if (pl.rounds == pm_full_rounds(p) && lgLastRounds_[q] < pl.rounds) {
+                    if (!lgRocketLoaded[q] && lgRockets[q] > 0)
+                        --lgRockets[q], lgRocketLoaded[q] = true;
+                    pl.rounds = lgRocketLoaded[q] ? 1 : 0;
+                } else if (pl.rounds > 1) {
+                    pl.rounds = lgRocketLoaded[q] ? 1 : 0;
+                }
+                if (pl.rounds == 0) {
+                    lgRocketLoaded[q] = false;
+                    pl.empty = 1;
+                }
+                lgLastRounds_[q] = pl.rounds;
+            } else {
             if (pl.rounds == pm_full_rounds(p) && lgLastRounds_[p & 3] < pl.rounds && mag > pl.rounds)
                 pl.rounds = uint8_t(mag);   // (a reload: the game's 6, the machine gun's 30)
             if (lgModes.freeFire && pl.state == 5)
@@ -952,6 +969,7 @@ void Runtime::lg_modes_frame()
             if (pl.rounds > mag)
                 pl.rounds = uint8_t(mag);
             lgLastRounds_[p & 3] = pl.rounds;
+            }
         } else {
             if (lgModes.freeFire && pl.state == 5) {   // Free Fire: the gun never runs dry
                 pl.rounds = pm_full_rounds(p);
@@ -1028,6 +1046,10 @@ void Runtime::lg_weapon_next(int p)
     if (pl.state == 5) {
         pl.rounds = uint8_t(lgMagazine(lgWeapon[p]));
         pl.empty = 0;
+        if (lgWeapon[p] == 3 && !lgModes.freeFire) {   // (the rocket: only one already loaded, never a free one)
+            pl.rounds = lgRocketLoaded[p] ? 1 : 0;
+            pl.empty = pl.rounds == 0;
+        }
     }
     lgLastRounds_[p] = pl.rounds;
     if (log)
