@@ -674,7 +674,9 @@ void Frontend::remakeSettings(const std::string& title, std::vector<Extra>* rows
             continue;
         Widget* a = widgetNew();
         addChild(root_, a);
-        setRect(a, px + pw / 2 - 20, d ? rowTop + maxRows * rowH : rowTop - 12, 40, 13);
+        // (Light Gun Edition: the "more below" arrow a wide, tall target for a gun: under the rows, most of their width)
+        if (d) setRect(a, px + 40, rowTop + maxRows * rowH, pw - 100, 26);
+        else setRect(a, px + pw / 2 - 20, rowTop - 12, 40, 13);
         a->user = d;
         a->draw = &Frontend::drawRArrow;
         a->flags |= 0x100;
@@ -687,6 +689,28 @@ void Frontend::remakeSettings(const std::string& title, std::vector<Extra>* rows
             }
         }, &Frontend::hitRect);
     }
+    // Light Gun Edition (user 2026-11-05: "easier to navigate up and down with a gun"): beside the rows at the right, two
+    // tall targets over the scroll bar: the upper half pages up, the lower half pages down (a shot anywhere in them)
+    if (n > maxRows && !dd)
+        for (int d = 0; d < 2; ++d) {
+            const bool can = d == 0 ? remakeScroll_ > 0 : remakeScroll_ + shown < n;
+            Widget* a = widgetNew();
+            addChild(root_, a);
+            const int half = maxRows * rowH / 2;
+            setRect(a, px + pw - 30, rowTop + d * half, 44, half - 2);
+            a->user = d;
+            a->draw = can ? &Frontend::drawRArrow : nullptr;
+            a->flags |= 0x100;
+            a->help = d ? "Shoot here: the next page of settings" : "Shoot here: the page of settings above";
+            if (can)
+                setHandlers(a, [this, d, maxRows](Widget&) {
+                    walking_ = false;
+                    if (rScroll_) {
+                        const auto f = rScroll_;
+                        f(d ? maxRows - 1 : 1 - maxRows);
+                    }
+                }, &Frontend::hitRect);
+        }
     // menufb (user 2026-10-26: "no indication that the list is scrollable"): a scroll bar at the rows' right
     if (n > maxRows && !dd)
         scrollBar(root_, px + pw - 19, rowTop, 7, maxRows * rowH - 2, remakeScroll_, maxRows, n, [this](int first) {
