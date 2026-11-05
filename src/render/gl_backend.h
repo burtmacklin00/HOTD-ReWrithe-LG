@@ -4,7 +4,8 @@
 // render/gl.h; on ANGLE this layer swaps a few of gl.h's function pointers for ES versions (the shaders rewritten as
 // GLSL ES 3.00, texture buffers as 2D textures, RGB reads / uploads as RGBA, depth clamp only where the extension is,
 // no GPU timer queries). The desktop path never goes through it: its function pointers and shaders are unchanged.
-// docs/renderer_backends.md
+// quest (2026-11-03): Android (the Meta Quest) has OpenGL ES only: there the same ES layer runs on the device's own
+// driver (EGL, OpenGL ES 3.x; no ANGLE), whatever the Renderer setting says. docs/renderer_backends.md, docs/quest.md
 #pragma once
 
 #include <string>

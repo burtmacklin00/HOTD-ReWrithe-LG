@@ -256,6 +256,15 @@ whether the game froze or only something looked / sounded wrong**. Tick what wor
       Widescreen -> 16:10 -> 4:3. On your 16:9 monitor 16:10 shows thin black bars left / right; the HUD (bullets,
       torches, PRESS START) sits at the bars' inner edge, not under them; shooting into a bar reloads. On a 16:10
       screen (Steam Deck 1280 x 800, 1920 x 1200 laptops) Widescreen and 16:10 look the same and fill the screen.
+- [ ] (team 2026-11-03) Options > Video > **Transparency** (arcade models): Smooth (as before), Smooth, Clean Edges
+      (the brown / dark outline round floor stains, blood splatters and water gone), Dithered (arcade) (their edges in
+      a fine screen-door stipple, as the Model 2's checker polygons). Look at the floor stains of the first courtyard and
+      the sewer water / blood. AI-checked: Smooth is byte-identical to before (6 frames, arcade and PC models).
+- [ ] (team 2026-11-03; trailer comment: "on MAME you can't shoot in the widescreen sides") Widescreen: shoot a zombie
+      in the extra picture at the left / right (Chapter 1's first rooms have some) with the mouse, a pad's aim and a
+      light gun: it takes hits as in the middle. Only the window's outermost pixel row / column reloads (#15 / #17).
+      Headless (AI-checked): the CPU teammates' shots beyond the 4:3 edge (|x| > 248) hit 42 of 53 times, as in the
+      middle (the shot test has no 4:3 limit: `shot_resolve` tests every depth-list object, the ray at any x).
 
 ## 4. Sound
 - [ ] **The arcade sound board is now the default** (Options -> Audio -> Sound: Auto = Arcade, in every mode, PC Mode
@@ -410,6 +419,18 @@ Options -> **CRT Filter** (Off / Arcade Monitor / Consumer TV / Sharp Scanlines 
 - [ ] Aiming with curvature on: the shot lands where the crosshair is (mouse and pad).
 - [ ] F12 saves the filtered picture.
 
+## 7a2b. Gamma (issue #23, 2026-11-03)
+Options -> Video -> **Game Gamma** and **Menu Gamma** (0.60 - 2.00, default 1.00 each).
+- [ ] Menu Gamma: drag the bar / Left / Right: the menu (and the Remake menu's live background) gets brighter / darker at once.
+- [ ] Game Gamma, in the game (pause -> Options too): Chapter 1's mansion halls and Chapter 4's tunnel at 1.4: the dark corners
+      open up, black stays black, the HUD and crosshairs still look right. Arcade and PC models.
+- [ ] With a CRT filter preset on: gamma still applies (after the filter).
+- [ ] F12 at 1.4 saves the brighter picture; at 1.00 the game looks exactly as before.
+- [ ] Quit and start again: the value is kept (launcher.ini `gamma=`, `menugamma=`); Video's Reset to Defaults puts both back to 1.00.
+- [ ] Game Gamma 1.4, Menu Gamma 1.00: the menus and the Gallery as before, the play brighter (and the other way round).
+- [ ] An old launcher.ini with only `gamma=1.40`: Game Gamma 1.40, Menu Gamma 1.00.
+- [ ] VR (if you have it): the eyes get the same brightness.
+
 ## 7a3. Boss Mode (the PC port's)
 Main menu -> **Boss Mode**: Chariot / Hangedman / Hermit / Magician / All Bosses.
 - [ ] Each boss starts near its fight; the clock (mm:ss:cc, bottom centre since 10-28) runs from the boss's entrance, stops on its
@@ -544,6 +565,15 @@ the window; Model, Background, Reset view, Exit on the left.
       the Hangedman his wings, the Hermit and the Magician their face / veins, Samson's saw spins, Sophie blinks.
       Compare an entry with the same creature in a chapter; tell me any that still differs (name + what).
 - [ ] The whole model fits the window (no heads or feet cut off), also after Motion; the Murrer starts above ground.
+- [ ] **gallery blood (2026-11-03):** G / Shift+G steps Blood Color on Sam: the wounds turn red, green, blue, purple,
+      yellow, custom (arcade and PC models). On the Remake page H shows the Blood panel: Custom Red / Green / Blue change
+      the custom colour at once; N Rainbow Blood (its Colours / Speed / Creature Blood rows); J Blood Particles. Leave
+      the Gallery: Options > Blood Color and Mods > Rainbow Blood are as before (the Gallery's choice is not saved).
+- [ ] **gallery dismemberment:** H again (or Z / X) shows the Damage panel. Sam: Head Damage 1 / Off (the head gone),
+      Right / Left Arm Damage 1, 2 / Off (the arm gone at the shoulder), Body Damage 1-3 (at 3 the head and both arms
+      go, as in play), Legs Damage 1. With Blood Particles on: a blood burst on the part at each step, blood dripping
+      from a cut joint. Baba (Cut Content), the players, the people and the bosses: "No damage models for this one",
+      the rows grey. A new entry starts whole.
 
 ## 7a5a. Jukebox (main menu, under Gallery)
 - [ ] Main menu -> **Jukebox**: the menu music stops; Exit (or Esc / pad East) brings it back.
@@ -1508,6 +1538,7 @@ Use only the DualSense (no mouse / keyboard) unless an item says so. Menu Style 
       PRESS START BUTTON for players 3 / 4 (as players 1 / 2); it blinks again in play.
 
 - [ ] Gameplay > Attract Gore (On by default): the attract demo's shots blow off heads / limbs like the 1998 PC; Off = the arcade (Revision A, none)
+- [ ] Gameplay > Attract Gore On: the prologue's sewer scene (after the lab, the zombies under the lamp) has two dead researchers on the walkway, and the camera's last shot ends on one of them in his pool of blood; Off: the empty floor (Revision A)
 - [ ] Options > System > Check for Updates (On): after a newer GitHub release, the main menu asks to open the download page once
 
 ## Options toggles, Cut-scenes list (galfx, 2026-10-31)

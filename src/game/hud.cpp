@@ -3,6 +3,7 @@
 
 #include "assets/sprites_arcade.h"
 #include "assets/sprites_pc.h"
+#include "game/cosmods.h"
 #include "game/lang.h"
 #include "game/player_colours.h"
 #include "game/sights.h"
@@ -10,6 +11,7 @@
 #include "render/gl.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -37,7 +39,11 @@ const char* kFs = R"(#version 330 core
 in vec2 vUV;
 out vec4 oColor;
 uniform sampler2D uTex;
-void main() { oColor = texture(uTex, vUV); }
+uniform vec4 uTint;   // rainbow2: a > 0.5: the brightest channel times rgb (the sights in the rainbow)
+void main() {
+    oColor = texture(uTex, vUV);
+    if (uTint.a > 0.5) oColor.rgb = max(oColor.r, max(oColor.g, oColor.b)) * uTint.rgb;
+}
 )";
 
 gl::GLuint compile(gl::GLenum type, const char* src, std::string& err)
@@ -106,8 +112,14 @@ bool Hud::init(std::string& err)
         cross_[p].setText({"  |  ", "--+--", "  |  "}, 2);
     }
     if (!centre_.init(err) || !debug_.init(err) || !bar_.init(err) || !boss_.init(err) || !title_.init(err) ||
-        !clear_.init(err) || !label_.init(err) || !pause_.init(err) || !langPc_[0].init(err) || !langPc_[1].init(err))
+        !clear_.init(err) || !label_.init(err) || !pause_.init(err) || !langPc_[0].init(err) || !langPc_[1].init(err) ||
+        !survival_.init(err) || !survivalBanner_.init(err))
         return false;
+    for (Overlay& o : survivalSign_) {
+        if (!o.init(err))
+            return false;
+        o.setStyle(170, 130, 130, 130);
+    }
     pause_.setStyle(150, 255, 255, 255);
     for (Overlay& o : langPc_) o.setStyle(0, 255, 255, 255);
     centre_.setStyle(0, 255, 230, 120);
@@ -115,6 +127,8 @@ bool Hud::init(std::string& err)
     boss_.setStyle(150, 255, 200, 60);
     title_.setStyle(0, 255, 60, 40);
     clear_.setStyle(170, 255, 240, 200);
+    survival_.setStyle(120, 255, 220, 120);
+    survivalBanner_.setStyle(0, 255, 70, 50);
     label_.setStyle(120, 200, 200, 200);
     label_.setText({"PC HUD sprites (SPR.RBH): placeholder"}, 1);
     // the arcade 2D layer's texture
@@ -135,6 +149,7 @@ bool Hud::init(std::string& err)
         return false;
     }
     uRect_ = gl::GetUniformLocation(program_, "uRect");
+    uTint_ = gl::GetUniformLocation(program_, "uTint");
     gl::UseProgram(program_);
     gl::Uniform1i(gl::GetUniformLocation(program_, "uTex"), 0);
     gl::GenVertexArrays(1, &vao_);
@@ -165,6 +180,9 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
     if (!sides) {
         if (!composed && !assets::Arcade2D::compose(tiles, mem.ptr(kCharRam), mem.ptr(kPalShadow), high, rgba_))
             return false;
+        std::vector<uint8_t>* pic[1] = {&rgba_};
+        translucent2D(rt, tiles, high, pic, 1);
+        rainbow2D(rt, tiles, high, pic, 1);
         upload(rgba_, W, H, ww, wh);
         return true;
     }
@@ -172,6 +190,9 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
     bool drawn[3] = {};   // perf: the three sides' pictures in one pass (were three)
     assets::Arcade2D::composeSides(tiles, mem.ptr(kCharRam), mem.ptr(kPalShadow), high, rt.cellSide.data(), arcadeSides_,
                                    drawn);
+    std::vector<uint8_t>* pics[3] = {&arcadeSides_[0], &arcadeSides_[1], &arcadeSides_[2]};
+    translucent2D(rt, tiles, high, pics, 3);
+    rainbow2D(rt, tiles, high, pics, 3);
     bool any = false;
     for (int s = 0; s < 3; ++s)
         if (drawn[s]) {
@@ -179,6 +200,135 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
             any = true;
         }
     return any;
+}
+
+// rainbow2 (Rainbow Blood, user 2026-11-03: the rainbow on all the blood, and the HUD option): the arcade layer's hit
+// marks (Runtime::cellHud 2: sprites 0x28..0x2D, the stippled blood splashes over the play area when a player is hit)
+// by their red share, and with HUD & Crosshair: HUD / Both the player HUD (cellHud 1) by its brightest channel, in the
+// rainbow. Those cells are composed alone (hudMask_); a picture's pixel that equals the mask's is theirs (not covered
+// by another layer's cell). Each Splash: the marks' hue moves across the screen (as the 3D splashes' with their
+// place); the HUD's halves take players 1 / 2's phases (as their sights)
+void Hud::rainbow2D(const Runtime& rt, const uint8_t* tiles, bool high, std::vector<uint8_t>* const* pics, int n)
+{
+    const RainbowBloodSettings& s = rainbowBloodSettings();
+    if (!s.on || !tiles || rt.greyPalette.on)   // (the grey look: grey, as the 3D blood)
+        return;
+    bool marks = false, hud = false;
+    for (uint8_t k : rt.cellHud)
+        marks = marks || k == 2, hud = hud || (k == 1 && s.hud >= 2);
+    const int W = assets::Arcade2D::kWidth, H = assets::Arcade2D::kHeight;
+    port::Mem& mem = rt.mem;
+    // the score lines (Score Display: hud_lives_draw's SCORE:%05d, layer 0 text at row 0x24 of each player's corner,
+    // as drawPc2D reads them) count as the HUD too
+    cellsHud_ = rt.cellHud;
+    if (s.hud >= 2 && mem.mapped(kTileRam) && mem.u32(0x51F42C) == 7)
+        for (int p = 0; p < 2; ++p) {
+            constexpr int kLen = 11, row = 0x24;
+            const int nx = p == 0 ? 2 : 0x3D - kLen;
+            std::string line;
+            for (int i = 0; i < kLen; ++i) {
+                const uint16_t v = mem.at<uint16_t>(kTileRam + uint32_t(row * 0x80 + (nx + i) * 2));
+                line += (v & 0xFF) >= 0x20 && (v & 0xFF) < 0x7F ? char(v & 0xFF) : ' ';
+            }
+            if (line.compare(0, 6, "SCORE:") == 0) {
+                for (int i = 0; i < kLen; ++i) cellsHud_[size_t(row * 64 + nx + i)] = 1;
+                hud = true;
+            }
+        }
+    for (int want = 2; want >= 1; --want) {
+        if (!(want == 2 ? marks : hud))
+            continue;
+        if (!assets::Arcade2D::compose(tiles, mem.ptr(kCharRam), mem.ptr(kPalShadow), high, hudMask_, cellsHud_.data(), want))
+            continue;
+        // the colours: marks per 8 pixels along x + y (Each Splash; one with Together), the HUD per half
+        float col[2][3];
+        std::vector<std::array<float, 3>> wave;
+        if (want == 2) {
+            wave.resize(size_t((W + H) / 8 + 1));
+            for (size_t d = 0; d < wave.size(); ++d)
+                rainbowColour(rt, float(d * 8) / float(W + H) * 0.5f, wave[d].data());
+        } else {
+            rainbowColour(rt, 0.0f, col[0], true);
+            rainbowColour(rt, 0.5f, col[1], true);
+        }
+        for (int k = 0; k < n; ++k) {
+            std::vector<uint8_t>& px = *pics[k];
+            if (px.size() < size_t(W) * H * 4 || hudMask_.size() < size_t(W) * H * 4)
+                continue;
+            for (int y = 0; y < H; ++y)
+                for (int x = 0; x < W; ++x) {
+                    const size_t o = (size_t(y) * W + size_t(x)) * 4;
+                    uint8_t* d = &px[o];
+                    const uint8_t* m = &hudMask_[o];
+                    if (!m[3] || !d[3] || d[0] != m[0] || d[1] != m[1] || d[2] != m[2])
+                        continue;
+                    if (want == 2) {
+                        const float* c = wave[size_t((x + y) / 8)].data();
+                        const int g = std::max(d[1], d[2]), share = d[0] - g;
+                        if (share > 0)
+                            for (int ch = 0; ch < 3; ++ch)
+                                d[ch] = uint8_t(std::clamp(float(ch == 0 ? g : d[ch]) + float(share) * c[ch] + 0.5f, 0.0f, 255.0f));
+                    } else {
+                        const float* c = col[x < W / 2 ? 0 : 1];
+                        const float v = float(std::max({d[0], d[1], d[2]}));
+                        for (int ch = 0; ch < 3; ++ch)
+                            d[ch] = uint8_t(std::clamp(v * c[ch] + 0.5f, 0.0f, 255.0f));
+                    }
+                }
+        }
+    }
+}
+
+// bugs1 (#35, user report: "the PC port's D3D mode had true transparent scar / hit marks; can those replace the dithered
+// look?"): Options > Video "Hit Marks: See-through". The arcade's marks (sprites 0x28..0x2D, Runtime::cellHud 2) are
+// stippled: every other pixel pen 0, the 3D showing through (half the pixels). Here the same picture is made whole and
+// half see-through: each mark pixel at alpha 1/2, each stipple hole (a transparent pixel between two mark pixels, across
+// or up and down) their average at 1/2. The marks' pixels are found as rainbow2D finds them (their cells composed
+// alone; a picture's pixel equal to the mask's). The PC Direct3D's own blend level was not read: 1/2 (the stipple's
+// coverage). UNVERIFIED against the PC's D3D
+void Hud::translucent2D(const Runtime& rt, const uint8_t* tiles, bool high, std::vector<uint8_t>* const* pics, int n)
+{
+    if (!translucentMarks || !tiles || std::none_of(rt.cellHud.begin(), rt.cellHud.end(), [](uint8_t k) { return k == 2; }))
+        return;
+    const int W = assets::Arcade2D::kWidth, H = assets::Arcade2D::kHeight;
+    port::Mem& mem = rt.mem;
+    if (!assets::Arcade2D::compose(tiles, mem.ptr(kCharRam), mem.ptr(kPalShadow), high, markMask_, rt.cellHud.data(), 2) ||
+        markMask_.size() < size_t(W) * H * 4)
+        return;
+    const uint8_t* m = markMask_.data();
+    auto mark = [&](int x, int y) { return x >= 0 && y >= 0 && x < W && y < H && m[(size_t(y) * W + x) * 4 + 3] != 0; };
+    for (int k = 0; k < n; ++k) {
+        std::vector<uint8_t>& px = *pics[k];
+        if (px.size() < size_t(W) * H * 4)
+            continue;
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x) {
+                const size_t o = (size_t(y) * W + size_t(x)) * 4;
+                uint8_t* d = &px[o];
+                if (m[o + 3]) {
+                    if (d[3] && d[0] == m[o] && d[1] == m[o + 1] && d[2] == m[o + 2])
+                        d[3] = 128;
+                    continue;
+                }
+                if (d[3])
+                    continue;   // (another cell's picture there)
+                int a = -1, b = -1;
+                if (mark(x - 1, y) && mark(x + 1, y))
+                    a = int(o) - 4, b = int(o) + 4;
+                else if (mark(x, y - 1) && mark(x, y + 1))
+                    a = int(o) - W * 4, b = int(o) + W * 4;
+                if (a < 0)
+                    continue;
+                // (the neighbours as the picture has them: a mark pixel another layer covers is not averaged in)
+                const uint8_t* pa = &px[size_t(a)];
+                const uint8_t* pb = &px[size_t(b)];
+                if (!pa[3] || !pb[3])
+                    continue;
+                for (int c = 0; c < 3; ++c)
+                    d[c] = uint8_t((int(pa[c]) + int(pb[c]) + 1) / 2);
+                d[3] = 128;
+            }
+    }
 }
 
 // trailer (ours, draw-only): a copy of tile RAM for the arcade's priority pass without the HUD's cells (clean) and / or
@@ -380,6 +530,20 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
     pcSprites_.setBrown(rt.greyPalette.on);   // the PC's grey look: the 2D through BROWN.PAL too (Hud::draw resets it)
     const int W = assets::PcSprites::kWidth, H = assets::PcSprites::kHeight;
     rgba_.assign(size_t(W) * H * 4, 0);
+    // rainbow2 (Rainbow Blood): every sprite's blood texels (the GAME OVER screen's blood) in the rainbow; the hit marks
+    // (Runtime::cellHud 2: the PC's 0x47E..0x483, the same red in every blood set) by their red share, their hue moving
+    // across the screen with Each Splash; with HUD & Crosshair: HUD / Both the player HUD by its brightest channel in
+    // players 1 / 2's phases (the screen's halves), as the arcade layer (rainbow2D)
+    const bool rbOn = rainbowBloodSettings().on && !rt.greyPalette.on, rbHud = rbOn && rainbowBloodSettings().hud >= 2;
+    {
+        float c[3];
+        pcSprites_.setBloodTexelTint(rbOn && rainbowColour(rt, 0.0f, c) ? c : nullptr);
+    }
+    auto rbTint = [&](int kind, int ax, int ay) {   // (ax, ay: the arcade screen pixel)
+        float c[3];
+        if (kind == 2 ? rainbowColour(rt, float(ax + ay) / 880.0f * 0.5f, c) : rainbowColour(rt, ax < 248 ? 0.0f : 0.5f, c, true))
+            pcSprites_.setTint(kind == 2 ? 1 : 2, c);
+    };
     port::Mem& mem = rt.mem;
     bool any = false, sideAny[2] = {};
     struct PcLine { std::string text; int x, y; };   // (lang: the PC font's words as text, see the end)
@@ -440,6 +604,8 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
                 std::vector<uint8_t>& canvas = side ? sideRgba_[side - 1] : rgba_;
                 (side ? sideAny[side - 1] : any) = true;
                 const int px = sx * 10 / 8, py = sy * 10 / 8;
+                if (rbOn && (rt.cellHud[ci] == 2 || (rt.cellHud[ci] == 1 && rbHud)))   // rainbow2
+                    rbTint(rt.cellHud[ci], sx, sy);
                 if (const uint32_t clip = rt.pcClip[ci]) {
                     // a clipped draw: the PC picture's matching part (cells of 10 PC pixels)
                     const int skipL = int(clip & 0xFF), skipT = int(clip >> 8 & 0xFF), cw = int(clip >> 16 & 0xFF),
@@ -448,9 +614,27 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
                     // 28 x 29 cells, where the rest is drawn 1.25 times larger) skips 8 of its pixels a cell
                     const int u = pcSprites_.height(id) == (skipT + ch) * 8 && pcSprites_.width(id) == (skipL + cw) * 8 ? 8 : 10;
                     pcSprites_.draw(canvas, id, px - skipL * u, py - skipT * u, px, py, px + cw * u, py + ch * u);
+                } else if (translucentMarks && rt.cellHud[ci] == 2) {
+                    // bugs1 (#35, Hit Marks: See-through): the PC's hit mark (0x47E..0x483, a whole picture) at half
+                    // alpha over what is drawn, as its Direct3D mode shows them (the blend level not read: 1/2)
+                    const int sw = pcSprites_.width(id), sh = pcSprites_.height(id);
+                    markLayer_.assign(size_t(W) * H * 4, 0);
+                    pcSprites_.draw(markLayer_, id, px, py);
+                    for (int y = std::max(0, py); y < std::min(H, py + sh); ++y)
+                        for (int x = std::max(0, px); x < std::min(W, px + sw); ++x) {
+                            const size_t o = (size_t(y) * W + size_t(x)) * 4;
+                            const float a = float(markLayer_[o + 3]) / 510.0f, da = float(canvas[o + 3]) / 255.0f;
+                            if (a <= 0.0f)
+                                continue;
+                            const float oa = a + da * (1.0f - a);
+                            for (int c = 0; c < 3; ++c)
+                                canvas[o + c] = uint8_t(std::clamp((float(markLayer_[o + c]) * a + float(canvas[o + c]) * da * (1.0f - a)) / oa + 0.5f, 0.0f, 255.0f));
+                            canvas[o + 3] = uint8_t(std::clamp(oa * 255.0f + 0.5f, 0.0f, 255.0f));
+                        }
                 } else {
                     pcSprites_.draw(canvas, id, px, py);
                 }
+                pcSprites_.setTint(0, nullptr);
             }
     }
     // galact (user 2026-10-28: "score display with PC models shows no SCORE line"): the score line (the title code /
@@ -490,7 +674,9 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
                     x += 8;
                     continue;
                 }
+                if (rbHud) rbTint(1, p * 300, 0);   // (rainbow2: the HUD option; the player's half)
                 pcSprites_.draw(canvas, g, x, row * 10);
+                pcSprites_.setTint(0, nullptr);
                 x += pcSprites_.width(g) + 1;
             }
         }
@@ -667,6 +853,7 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
         }
         any = true;
     }
+    pcSprites_.setBloodTexelTint(nullptr);   // (rainbow2)
     if (any)
         upload(rgba_, W, H, ww, wh);
     const float x0 = leftEdge(W, H, ww, wh);
@@ -839,9 +1026,13 @@ void Hud::drawSight(int player, int ww, int wh, float x, float y)
                   2.0f * pw / float(ww), 2.0f * ph / float(wh));
     gl::ActiveTexture(gl::TEXTURE0);
     gl::BindTexture(gl::TEXTURE_2D, tex);
+    if (sightTintOn_[player])   // rainbow2: Rainbow Blood's crosshair (drawSights)
+        gl::Uniform4f(uTint_, sightTint_[player][0], sightTint_[player][1], sightTint_[player][2], 1.0f);
     gl::BindVertexArray(vao_);
     gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
     gl::BindVertexArray(0);
+    if (sightTintOn_[player])
+        gl::Uniform4f(uTint_, 0.0f, 0.0f, 0.0f, 0.0f);
     gl::Disable(gl::BLEND);
     gl::Enable(gl::DEPTH_TEST);
 }
@@ -906,6 +1097,40 @@ void Hud::drawBossClock(const Runtime& rt, int ww, int wh)
         x += widthOf(c);
     }
     upload(rgba_, W, H, ww, wh);
+}
+
+// Survival Mode (ours, game/survival.h): the wave line at the top centre (the wave, the creatures left, the SMG's rounds
+// per player in play) and the moment's banner (WAVE n, SMG UNLOCKED, WAVE CLEARED, GAME OVER) in the middle
+void Hud::drawSurvival(const Runtime& rt, int ww, int wh, int scale)
+{
+    const SurvivalMode& h = rt.survival;
+    std::vector<std::string> top = h.hudLines(rt);
+    // the shop (survival2): the signs between the rounds where the arcade screen's place for them lies (the 496 x 384
+    // screen fitted to the window's height, centred; arcade units y up), a shot at one buys it. Yellow: a player in play
+    // can buy it now; grey: not
+    if (h.shopOpen()) {
+        const float k = float(wh) / 384.0f;
+        for (int i = 0; i < SurvivalMode::kItems; ++i) {
+            const SurvivalMode::Sign& s = SurvivalMode::kSigns[i];
+            bool can = false;
+            for (int p = 0; p < rt.seat_count(); ++p)
+                can = can || h.canBuy(rt, p, i);
+            if (can != signLit_[i]) {
+                signLit_[i] = can;
+                survivalSign_[i].setStyle(170, can ? 255 : 130, can ? 220 : 130, can ? 90 : 130);
+            }
+            survivalSign_[i].setText({s.name, std::to_string(s.price)}, std::max(1, scale - 1));
+            survivalSign_[i].drawAt(ww, wh, float(ww) * 0.5f + s.x * k, float(wh) * 0.5f - s.y * k);
+        }
+    }
+    if (!top.empty()) {
+        survival_.setText(top, std::max(1, scale - 1));
+        survival_.drawAnchored(ww, wh, ww * 0.5f, wh * 0.11f, 0.5f, 0.0f);
+    }
+    if (!h.banner.empty()) {
+        survivalBanner_.setText({h.banner}, h.banner.size() > 20 ? scale : scale + 1);
+        survivalBanner_.drawAt(ww, wh, ww * 0.5f, wh * 0.38f);
+    }
 }
 
 // lang: the subtitle table (G::voice_subtitles, 96 bytes an event: line 1 at +1, line 2 at +0x31) read from the
@@ -1009,14 +1234,90 @@ void Hud::drawPause(int selection, int ww, int wh)
                            {"Exit", 0x110, (selection == 1 ? 0x40000u : 0u) | 0x1000000}};
     if (!pcTried_)
         loadPcSprites();
+    // fxux: every way of drawing it keeps its items' rectangles (pauseItemAt: the pointer, the VR gun)
+    pauseRects_.clear();
+    const bool own = pauseLines.size() >= 2;   // (#5 / fxux: Settings, Retry Chapter, the game over's menu)
+    const std::vector<std::string> L = own ? pauseLines : std::vector<std::string>{"PAUSED", "Continue", "Exit"};
+    const int items = int(L.size()) - 1;
     if (!pcSprites_.loaded() || lang::active()) {   // no PC sprites (or a language: its words): the lines as text
-        pause_.setText({"PAUSED", "", selection == 0 ? "> Continue <" : "Continue", selection == 1 ? "> Exit <" : "Exit"},
-                       wh >= 720 && ww >= 1280 ? 3 : 2);
+        std::vector<std::string> t = {L[0], ""};
+        for (int i = 0; i < items; ++i)
+            t.push_back(i == selection ? "> " + lang::tr(L[size_t(i) + 1]) + " <" : L[size_t(i) + 1]);
+        const int S = wh >= 720 && ww >= 1280 ? 3 : 2;
+        pause_.setText(t, S);
         pause_.drawAt(ww, wh, ww * 0.5f, wh * 0.5f);
+        // (Overlay's 8 x 8 lines: 6 S padding, 11 S a line, centred on the window; in 640 x 480 units of its height)
+        const float s = float(wh) / 480.0f, top = float(wh) * 0.5f - float(int(t.size()) * 11 - 3 + 12) * float(S) * 0.5f;
+        for (int i = 0; i < items; ++i) {
+            const float y0 = top + float(6 + (i + 2) * 11) * float(S) - 1.5f * float(S);
+            pauseRects_.push_back({210.0f, y0 / s, 430.0f, (y0 + 11.0f * float(S)) / s});
+        }
         return;
     }
     const int W = assets::PcSprites::kWidth, H = assets::PcSprites::kHeight;
     rgba_.assign(size_t(W) * H * 4, 0);
+    if (own) {
+        // fxux: the title in its pause font when it has the letters (PAUSED), else the menu's white 32; the items in the
+        // menu's white 24 (the chosen one yellow 24, as the menus' hovered rows), 28 apart from the PC's Continue row
+        auto row = [&](const std::string& text, int y, int base) {
+            auto id = [&](char c) { return c > ' ' && c <= '~' ? base + (c - 0x20) : 0; };
+            int width = 0;
+            for (char c : text)
+                width += id(c) == 0 || pcSprites_.width(id(c)) == 0 ? 8 : pcSprites_.width(id(c)) + 1;
+            int x = (0x280 - width) / 2;
+            for (char c : text) {
+                if (id(c) == 0 || pcSprites_.width(id(c)) == 0) {
+                    x += 8;
+                    continue;
+                }
+                pcSprites_.draw(rgba_, id(c), x, y);
+                x += pcSprites_.width(id(c)) + 1;
+            }
+        };
+        if (L[0] != "PAUSED")
+            row(L[0], 196, 0xFE);   // (white 32)
+        for (int i = 0; i < items; ++i) {
+            const int y = 0xF8 + 28 * i;
+            row(L[size_t(i) + 1], y, i == selection ? 0x23C : 0x19D);
+            pauseRects_.push_back({210.0f, float(y - 4), 430.0f, float(y + 24)});
+        }
+        // relfix2 (user 2026-11-03): the menu's 24 / 32 fonts have no edge of their own (hard to read over bright
+        // scenes): a black edge around them as the pause font's own (PAUSED, Continue, Exit): 1 pixel solid, a soft
+        // second one; PAUSED is drawn after it with its own edge
+        {
+            std::vector<uint8_t> a(size_t(W) * H, 0);
+            for (size_t p = 0; p < a.size(); ++p) a[p] = rgba_[p * 4 + 3];
+            for (int y = 0; y < H; ++y)
+                for (int x = 0; x < W; ++x) {
+                    if (a[size_t(y) * W + size_t(x)]) continue;
+                    int edge = 0;
+                    for (int dy = -2; dy <= 2 && edge < 255; ++dy)
+                        for (int dx = -2; dx <= 2; ++dx) {
+                            const int sx = x + dx, sy = y + dy;
+                            if (sx < 0 || sy < 0 || sx >= W || sy >= H || !a[size_t(sy) * W + size_t(sx)]) continue;
+                            const int d = std::abs(dx) + std::abs(dy);
+                            edge = std::max(edge, std::max(std::abs(dx), std::abs(dy)) <= 1 ? 255 : d <= 3 ? 120 : 0);
+                        }
+                    if (!edge) continue;
+                    uint8_t* d = &rgba_[(size_t(y) * W + size_t(x)) * 4];
+                    d[0] = d[1] = d[2] = 0;
+                    d[3] = uint8_t(edge);
+                }
+        }
+        if (L[0] == "PAUSED") {
+            int width = 0, x = 0;
+            for (char c : L[0]) width += pcSprites_.width(glyph(c, 0x2000000)) + 1;
+            x = (0x280 - width) / 2;
+            for (char c : L[0]) {
+                pcSprites_.draw(rgba_, glyph(c, 0x2000000), x, 200);
+                x += pcSprites_.width(glyph(c, 0x2000000)) + 1;
+            }
+        }
+        upload(rgba_, W, H, ww, wh);
+        return;
+    }
+    pauseRects_.push_back({230.0f, 244.0f, 410.0f, 270.0f});   // (the PC's two rows: as main.cpp had them)
+    pauseRects_.push_back({230.0f, 270.0f, 410.0f, 296.0f});
     for (const Line& l : lines) {
         int width = 0;   // 0x427F64
         for (const char* c = l.text; *c; ++c) {
@@ -1174,6 +1475,55 @@ SeatImg spriteImg(port::Mem& mem, bool pc, const assets::PcSprites& pcs, uint32_
 // label built from the countdown's digit and player 2's label's "P", through the ramp too; the rounds as they are.
 // Arcade: the sheets through a private 2D layer (no game banks used); PC: its own matching sprites. The band moves down
 // past anything the game draws there (the boss life bar, a title card: tile layers 0 / 2 not empty under it).
+// GitHub #25 (user 2026-11-03: "9 lives support"; HOTD 3 / 4 / Scarlet Dawn show "x N" above 5): the arcade's HUD has
+// five torch places a player (cells 6 .. 25 / 0x34 .. 0x21, players 1 / 2 meet in the middle: no room for 9), so with
+// more than 5 lives hud_lives_draw keeps the first torch and this draws "x N" where the second torch is (player 1:
+// cells 10 / 12, player 2 mirrored: 0x2F / 0x31), rows 0x2A-0x2B as the torches: the name entry's letter X (0x1AC) and
+// the results' score digits (0x181 + n), white as the game draws them, the PC's own matching sprites with PC models.
+// In play and in the chapter's results (the torches' own times), not in the cut-scenes (their HUD is taken off)
+void Hud::drawLivesCount(const Runtime& rt, int ww, int wh)
+{
+    port::Mem& mem = rt.mem;
+    if (mem.at<int16_t>(G::game_mode) != 4 || !mem.mapped(kTileRam))
+        return;
+    if (mem.at<uint8_t>(G::scene_state) != 2 && !rt.clear.active)
+        return;
+    const bool pc = rt.pcModels && pcSprites_.loaded();
+    if (!pc && rt.pcModels)
+        return;
+    const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
+    const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
+    for (int p = 0; p < 2; ++p) {
+        const Player& pl = mem.at<Player>(G::players, uint32_t(p));
+        if (pl.state != 5 || pl.lives <= 5)
+            continue;
+        const bool left = p == 0;
+        const uint32_t pieces[2][2] = {{0x1ACu, uint32_t(left ? 10 : 0x2F)},
+                                       {0x181u + uint32_t(std::min<int32_t>(pl.lives, 9)), uint32_t(left ? 12 : 0x31)}};
+        seatRgba_.assign(size_t(W) * H * 4, 0);
+        bool any = false;
+        if (pc) {
+            for (const auto& c : pieces)
+                if (const int id = kArcadeToPcSprite[c[0]]) {
+                    pcSprites_.draw(seatRgba_, id, int(c[1]) * 10, 0x2A * 10);
+                    any = true;
+                }
+        } else {
+            static PrivLayer l;
+            l.reset();
+            for (const auto& c : pieces)
+                any = l.put(mem, c[0], int(c[1]), 0x2A) || any;
+            if (any)
+                any = assets::Arcade2D::compose(l.tiles.data(), l.chars.data(), l.pal.data(), true, seatRgba_);
+        }
+        if (!any)
+            continue;
+        // widescreen with the corners at the window's edges (display2): beside the side's torch
+        const float x0 = anchorEdges && !rt.clear.active ? leftEdge(W, H, ww, wh) : 0.0f;
+        upload(seatRgba_, W, H, ww, wh, left ? -x0 : x0);
+    }
+}
+
 void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
 {
     port::Mem& mem = rt.mem;
@@ -1299,7 +1649,12 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
             if (mem.u32(G::ammo_enabled) != 0 && !rt.lg_hide_bullets[seat])   // (Arsenal Mode: drawArsenalAmmo's)
                 for (int i = 0; i < int(pl.rounds) && i < (rt.pm_on() ? 12 : 6); ++i)   // PC Mode: up to 12 (0x50B7E4)
                     pieces.push_back({left ? 2 + 2 * i : 0x3B - 2 * i, 0x26 + dy, 0x10, 0});
-            const int n = std::min<int>(pl.lives, mem.at<uint8_t>(G::max_lives));
+            // (GitHub #25: more than 5 lives: one torch and "x N" as players 1 / 2's, drawLivesCount)
+            const int n = pl.lives > 5 ? 1 : std::min<int>(pl.lives, mem.at<uint8_t>(G::max_lives));
+            if (pl.lives > 5) {
+                pieces.push_back({left ? 10 : 0x2F, 0x2A + dy, 0x1AC, 0});
+                pieces.push_back({left ? 12 : 0x31, 0x2A + dy, 0x181u + uint32_t(std::min<int32_t>(pl.lives, 9)), 0});
+            }
             for (int i = 0; i < n; ++i) {
                 pieces.push_back({left ? 4 * i + 6 : 0x34 - 4 * i, 0x2B + dy, 0x14, 1});
                 const uint32_t step = (mem.u32(0xCA6F0 + uint32_t(i) * 4) + mem.u32(G::frame_counter)) / 6 % 7;
@@ -1498,7 +1853,7 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
 }
 
 // widescreen: the window outside the 4:3 screen (496 x 384, or the PC's 640 x 480, fitted to the height) cleared black
-void Hud::blackSides(int ww, int wh, float grey)
+void Hud::blackSides(int ww, int wh, float grey, int sides)
 {
     const int gw = int(std::lround(double(wh) * 496.0 / 384.0));
     if (gw >= ww)
@@ -1507,10 +1862,14 @@ void Hud::blackSides(int ww, int wh, float grey)
     gl::Viewport(0, 0, ww, wh);
     gl::Enable(gl::SCISSOR_TEST);
     gl::ClearColor(grey, grey, grey, 1.0f);
-    gl::Scissor(0, 0, bar, wh);
-    gl::Clear(gl::COLOR_BUFFER_BIT);
-    gl::Scissor(ww - bar - ((ww - gw) & 1), 0, bar + ((ww - gw) & 1), wh);
-    gl::Clear(gl::COLOR_BUFFER_BIT);
+    if (sides & 1) {
+        gl::Scissor(0, 0, bar, wh);
+        gl::Clear(gl::COLOR_BUFFER_BIT);
+    }
+    if (sides & 2) {
+        gl::Scissor(ww - bar - ((ww - gw) & 1), 0, bar + ((ww - gw) & 1), wh);
+        gl::Clear(gl::COLOR_BUFFER_BIT);
+    }
     gl::Disable(gl::SCISSOR_TEST);
 }
 
@@ -1518,24 +1877,27 @@ void Hud::blackSides(int ww, int wh, float grey)
 // its right column taken top to bottom, and either the staff roll (event 3: kind120_letterbox_open_frame's credit
 // sheets beside the 3D window; the PC draws its own sheets there, not reaching the 4:3 edge) or a card whose 2D picture
 // (rgba_, W x H, just drawn) is opaque at the screen's left and right edges (kind116_end_sprite's GAME OVER card). The
-// rank cards fill the cover too but are see-through at the edges (the 3D shows around them on the arcade's screen)
-bool Hud::endingCard(const Runtime& rt, int W, int H) const
+// rank cards fill the cover too but are see-through at the edges (the 3D shows around them on the arcade's screen).
+// bugs1 (#34, user report: "the other half can extend to full widescreen, as on the M2 emulator"): the staff roll's
+// sheets are the screen's right part (kind120_letterbox_open_frame narrows the 3D window to 8 .. 256), so only the right
+// side is blacked (the sheet's black goes on to the edge); the 3D window's left part goes on to the window's left edge
+int Hud::endingCard(const Runtime& rt, int W, int H) const
 {
     port::Mem& mem = rt.mem;
     if (mem.at<int16_t>(G::game_mode) != 4 || mem.u32(G::game_submode) != 8 || !mem.mapped(0x1004000))
-        return false;
+        return 0;
     for (int y : {0, 47})
         if (mem.at<uint16_t>(0x1004000u + uint32_t(y * 0x80 + 61 * 2)) == 0)
-            return false;
+            return 0;
     if (mem.at<int8_t>(G::event_index) == 3)
-        return true;
+        return std::getenv("HOTD_CREDITS_43") ? 3 : 2;   // (HOTD_CREDITS_43=1: both sides, as before)
     if (rgba_.size() != size_t(W) * H * 4)
-        return false;
+        return 0;
     for (int x : {0, W - 1})
         for (int y : {H / 8, H / 2, H * 7 / 8})
             if (rgba_[(size_t(y) * W + x) * 4 + 3] < 128)
-                return false;
-    return true;
+                return 0;
+    return 3;
 }
 
 void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool showDebug, const std::vector<std::string>& debug)
@@ -1612,8 +1974,8 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     else if (rt.pcModels && pcSprites_.loaded()) {
         if (pcUnderFrame_ != (long long)rt.frameCount) {   // (not when drawUnder drew it under the 3D)
             drawPc2D(rt, ww, wh);
-            if (widescreen && endingCard(rt, assets::PcSprites::kWidth, assets::PcSprites::kHeight))
-                blackSides(ww, wh);   // credits43: the ending's 4:3 cards (the 2D is inside the 4:3 screen)
+            if (const int sides = widescreen ? endingCard(rt, assets::PcSprites::kWidth, assets::PcSprites::kHeight) : 0)
+                blackSides(ww, wh, 0.0f, sides);   // credits43: the ending's 4:3 cards (the 2D is inside the 4:3 screen)
         }
     }
     else if (rt.pcModels) {
@@ -1622,15 +1984,19 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     }
     else {
         drawArcade2D(rt, ww, wh);
-        if (widescreen && endingCard(rt, assets::Arcade2D::kWidth, assets::Arcade2D::kHeight))
-            blackSides(ww, wh);
+        if (const int sides = widescreen ? endingCard(rt, assets::Arcade2D::kWidth, assets::Arcade2D::kHeight) : 0)
+            blackSides(ww, wh, 0.0f, sides);
     }
     if (!paused && !clean && rt.coop4_on())   // the 4P mode: players 3 / 4's HUD at the top corners
         drawSeatHud(rt, ww, wh);
     if (!paused && !clean && rt.lgWeapon[0] >= 0)   // Light Gun Edition: Arsenal Mode's rounds
         drawArsenalAmmo(rt, ww, wh);
+    if (!paused && !clean && rt.mem.at<uint8_t>(G::max_lives) > 5)   // GitHub #25: "x N" beside the torch
+        drawLivesCount(rt, ww, wh);
     if (!paused && !clean && rt.boss.shown)   // Boss Mode: the fight's clock (0x418CC8)
         drawBossClock(rt, ww, wh);
+    if (!paused && !clean && rt.survival.active())   // Survival Mode: the wave line and the banner (game/survival.h)
+        drawSurvival(rt, ww, wh, scale);
     // the chapter clear (kind 176): its lines appear as the original's sprites do (420, 360, 300, 240 frames left)
     if (rt.clear.active && rt.pcModels && !pcSprites_.loaded() && !paused && !clean) {   // the placeholder only: the sprites show it
         const int t = rt.clear.held ? -1 : rt.clear.timer;
@@ -1693,6 +2059,12 @@ void Hud::drawSights(const Runtime& rt, int ww, int wh, const float aim[4][2])
                 cross_[p].drawAt(ww, wh, aim[p][0], aim[p][1]);
         } else if (drawCross[p] && !paused && !clean && !ending && (st == 5 || st == 8) && mode == 4) {
             drewSight[p] = true;
+            if (!showSights || game::sightStyleKept(sights[p].style) == game::kSightOff)
+                continue;   // gunfb: no crosshair (Show Crosshairs off, or the player's Crosshair Off): nothing drawn
+            // rainbow2: Rainbow Blood's HUD & Crosshair (Crosshair / Both): the sight cycles through the rainbow, each
+            // player half a cycle (P2) or a quarter (P3 / P4) on, also with Colours: Together, so they stay apart
+            static const float kSightPhase[4] = {0.0f, 0.5f, 0.25f, 0.75f};
+            sightTintOn_[p] = (rainbowBloodSettings().hud & 1) && rainbowColour(rt, kSightPhase[p], sightTint_[p], true);
             if (buildSeatSight(p, rt.pcModels, wh))
                 drawSight(p, ww, wh, aim[p][0], aim[p][1]);
             else
@@ -1797,12 +2169,43 @@ void Hud::drawArsenalAmmo(const Runtime& rt, int ww, int wh)
     }
 }
 
+bool Hud::vrSight(const Runtime& rt, int seat, int wh, unsigned& tex, float& aspect)
+{
+    const int16_t mode = rt.mem.at<int16_t>(G::game_mode);
+    const uint32_t sub = rt.mem.u32(G::game_submode);
+    const bool ending = mode == 4 && (sub == 7 || sub == 8);
+    if (seat < 0 || seat >= rt.seat_count() || pauseSelection >= 0 || clean || ending || mode != 4)
+        return false;
+    if (!showSights || game::sightStyleKept(sights[seat].style) == game::kSightOff)
+        return false;   // gunfb: no crosshair
+    const int32_t st = rt.mem.at<Player>(rt.player_rec(seat)).state;
+    if ((st != 5 && st != 8) || !buildSeatSight(seat, rt.pcModels, wh))
+        return false;
+    tex = seatTex_[seat];
+    aspect = seatSprite_[seat] ? float(seatW_[seat]) / float(std::max(1, seatH_[seat]))
+                               : float(seatDw_[seat]) / float(std::max(1, seatDh_[seat]));
+    return true;
+}
+
 } // namespace hotd::game
 
 // ---- blood2: a Remake menu screen composed on the GPU (Frontend::gpuLayers) ----
 namespace hotd::game {
 namespace {
 
+// redblocks (user 2026-11-04: the Remake main menu under big flat dark-red squares on the layers' 32 px tiles, the
+// widgets gone, the hand a box): the Remake passes' own vertex shader, the whole quad's texture (0..1, v down).
+// They shared the 2D layer's kVs, whose uUV (wide2d: the texture's range) they never set: every texel read at
+// (0, 0) (the splatter's corner: its dark red over each tile it has), and the backdrop's uUV read as that range
+const char* kRemakeVs = R"(#version 330 core
+uniform vec4 uRect;   // x, y, w, h in normalized device coordinates (y up)
+out vec2 vUV;
+void main() {
+    vec2 c = vec2(gl_VertexID & 1, gl_VertexID >> 1);
+    vUV = vec2(c.x, 1.0 - c.y);
+    gl_Position = vec4(uRect.xy + c * uRect.zw, 0.0, 1.0);
+}
+)";
 // the backdrop: the source's part across the screen, grey and dark, tinted (c * mul + add), the vignette (as
 // Frontend::rBackground's CPU loop, per window pixel)
 const char* kRemakeBgFs = R"(#version 330 core
@@ -1845,7 +2248,7 @@ void main() {
 
 gl::GLuint linkRemake(const char* fs, std::string& err)
 {
-    const gl::GLuint v = compile(gl::VERTEX_SHADER, kVs, err), f = v ? compile(gl::FRAGMENT_SHADER, fs, err) : 0;
+    const gl::GLuint v = compile(gl::VERTEX_SHADER, kRemakeVs, err), f = v ? compile(gl::FRAGMENT_SHADER, fs, err) : 0;
     if (!v || !f)
         return 0;
     const gl::GLuint p = gl::CreateProgram();
@@ -1952,6 +2355,29 @@ void texParams(bool mip)
 
 void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
 {
+    // menublocks (user 2026-11-04: the main menu's live background under big flat dark-red squares on the layers' 32 px
+    // tiles, the hand a dark box, the layers faded out (the idle), right after the settings pictures were made in the
+    // background; not reproduced here): the layers drawn opaque, as by another program. Our GL objects checked each
+    // frame; one gone (another part's clean-up deleting a name it no longer owned) -> all of them made again, the
+    // layers uploaded again
+    if (bgProg_ && fgProg_ && (!gl::IsProgram(bgProg_) || !gl::IsProgram(fgProg_) || !gl::IsVertexArray(vao_) || !gl::IsTexture(bgTex_) ||
+                    (fgGen_ != ~0ull && !gl::IsTexture(fgTex_)) || (splatGen_ && !gl::IsTexture(splatTex_[splatCur_])))) {
+        std::fprintf(stderr, "remake menu: its GL objects were gone (programs %d %d, vao %d): made again\n",
+                     int(gl::IsProgram(bgProg_)), int(gl::IsProgram(fgProg_)), int(gl::IsVertexArray(vao_)));
+        for (unsigned* p : {&bgProg_, &fgProg_})
+            if (gl::IsProgram(*p)) gl::DeleteProgram(*p);
+        if (!gl::IsVertexArray(vao_))
+            gl::GenVertexArrays(1, &vao_);
+        bgProg_ = fgProg_ = 0;
+        bgGen_ = fgGen_ = partsGen_ = animGen_ = ~0ull;
+        bgSrc_ = nullptr;
+        bgW_ = bgH_ = fgW_ = fgH_ = 0;
+        splatGen_ = 0;
+        splatOld_ = false;
+        handId_ = -1;
+        partTex_.clear();
+        animTex_.clear();
+    }
     if (!bgProg_) {
         std::string err;
         bgProg_ = linkRemake(kRemakeBgFs, err);
@@ -2004,6 +2430,15 @@ void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
     gl::Viewport(0, 0, ww, wh);
     gl::Disable(gl::DEPTH_TEST);
     gl::Disable(gl::BLEND);
+    // menublocks: every other state these passes rely on set here too (none left over from the settings pictures' or
+    // the live attract's renders): no scissor / stencil / culling, all channels written, the blend adding, unit 0's
+    // own sampling (no sampler object)
+    gl::Disable(gl::SCISSOR_TEST);
+    gl::Disable(gl::STENCIL_TEST);
+    gl::Disable(gl::CULL_FACE);
+    gl::ColorMask(gl::TRUE_, gl::TRUE_, gl::TRUE_, gl::TRUE_);
+    gl::BlendEquation(gl::FUNC_ADD);
+    gl::BindSampler(0, 0);
     gl::UseProgram(bgProg_);
     rect(uBgRect_, x0, y0, pw, ph);
     gl::Uniform3f(uBgMul_, L.mul[0], L.mul[1], L.mul[2]);
@@ -2081,6 +2516,7 @@ void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
     gl::Enable(gl::BLEND);
     gl::BlendFunc(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);   // (premultiplied)
     gl::UseProgram(fgProg_);
+    gl::Uniform1f(uFgShadow_, 0.0f);   // (menublocks: not the hand's shadow, whatever was left)
     rect(uFgRect_, x0, y0, pw, ph);
     // misc18: a whole-picture layer drawn scissored to its tiles with pixels and their neighbours within the filter's
     // reach (2 texels magnified, more for the mip levels when smaller); the scissors cut the window along the same tile

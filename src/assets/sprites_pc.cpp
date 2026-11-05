@@ -196,6 +196,9 @@ bool PcSprites::load(const std::string& installDir, std::string& err, int stage,
     brownPages_.clear();
     pages_.clear();   // pchotfix: only this load's pages (drawable)
     brown_ = false;
+    dir_ = installDir, tbl_ = tbl, pal_ = pal;   // (rainbow2: the blood texels, found on first use)
+    bloodMask_.clear();
+    bloodMaskTried_ = false;
     // perf (2026-10-21): the pages converted on several threads (each page on its own; a page number read twice takes
     // the later one's texels, as when the later one overwrote the earlier)
     struct Job { const std::vector<uint8_t>* body; std::vector<uint8_t>* px; std::vector<uint8_t>* bx; };
@@ -347,6 +350,9 @@ void PcSprites::draw(std::vector<uint8_t>& canvas, int id, int x, int y, int cx0
         if (it == pages.end() || it->second.size() < 256 * 256 * 4)
             continue;
         const std::vector<uint8_t>& px = it->second;
+        const std::vector<uint8_t>* mask = nullptr;   // rainbow2: the page's blood texels (setBloodTexelTint)
+        if (bloodTexOn_ && !brown_)
+            if (const auto bm = bloodMask_.find(p.page); bm != bloodMask_.end()) mask = &bm->second;
         for (int j = 0; j < p.y1 - p.y0; ++j) {
             const int sy = y + p.y0 + j, v = p.v + j;
             if (sy < cy0 || sy >= cy1 || v > 255)
@@ -363,9 +369,70 @@ void PcSprites::draw(std::vector<uint8_t>& canvas, int id, int x, int y, int cx0
                 if (sp.shade)
                     for (int k = 0; k < 3; ++k)
                         d[k] = uint8_t(s[k] * sp.shade / 255);
+                if (mask && (*mask)[size_t(v * 256 + u)])
+                    tintTexel(d, 2, bloodTex_);
+                else if (tintMode_)
+                    tintTexel(d, tintMode_, tint_);
             }
         }
     }
+}
+
+// rainbow2 (Rainbow Blood): 1 the red share of a texel (blood art: the grey under it kept), 2 its brightest channel
+// (a blood texel, the HUD: the shading kept), times rgb
+void PcSprites::tintTexel(uint8_t* d, int mode, const float rgb[3])
+{
+    if (mode == 1) {
+        const int m = std::max(d[1], d[2]), share = d[0] - m;
+        if (share > 0)
+            for (int k = 0; k < 3; ++k)
+                d[k] = uint8_t(std::clamp(float(k == 0 ? m : d[k]) + float(share) * rgb[k] + 0.5f, 0.0f, 255.0f));
+    } else {
+        const float v = float(std::max({d[0], d[1], d[2]}));
+        for (int k = 0; k < 3; ++k)
+            d[k] = uint8_t(std::clamp(v * rgb[k] + 0.5f, 0.0f, 255.0f));
+    }
+}
+
+void PcSprites::setTint(int mode, const float* rgb)
+{
+    tintMode_ = rgb ? mode : 0;
+    if (rgb)
+        for (int k = 0; k < 3; ++k) tint_[k] = rgb[k];
+}
+
+// the blood texels: those that differ between the green and the blue blood sets (B_GREEN.VMC / B_BLUE.VMC: the GAME
+// OVER screen's blood, pages 219 / 220), found once on first use
+void PcSprites::setBloodTexelTint(const float* rgb)
+{
+    bloodTexOn_ = rgb != nullptr;
+    if (!rgb)
+        return;
+    for (int k = 0; k < 3; ++k) bloodTex_[k] = rgb[k];
+    if (bloodMaskTried_)
+        return;
+    bloodMaskTried_ = true;
+    std::vector<uint16_t> list;
+    for (const auto& [number, px] : pages_)
+        list.push_back(uint16_t(number));
+    std::vector<std::vector<uint8_t>> green, blue;
+    std::string err;
+    const std::vector<uint8_t>* t = tbl_.empty() ? nullptr : &tbl_;
+    const std::vector<uint8_t>* p = tbl_.empty() ? nullptr : &pal_;
+    if (!pcBloodPages(dir_, 1, list, green, err, t, p) || !pcBloodPages(dir_, 2, list, blue, err, t, p) ||
+        green.size() != list.size() || blue.size() != list.size())
+        return;
+    size_t n = 0;
+    for (size_t k = 0; k < list.size(); ++k) {
+        std::vector<uint8_t> m(256 * 256, 0);
+        bool any = false;
+        for (size_t i = 0; i < m.size() && i * 4 + 3 < green[k].size() && i * 4 + 3 < blue[k].size(); ++i)
+            if (green[k][i * 4 + 3] && std::memcmp(&green[k][i * 4], &blue[k][i * 4], 3) != 0)
+                m[i] = 1, any = true, ++n;
+        if (any)
+            bloodMask_[int(list[k])] = std::move(m);
+    }
+    std::fprintf(stderr, "PC sprites: %zu blood texels for Rainbow Blood\n", n);
 }
 
 bool PcSprites::drawable(int id) const

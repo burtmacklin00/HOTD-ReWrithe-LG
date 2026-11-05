@@ -425,7 +425,7 @@ void Frontend::remakeGallery(const GalleryText& g)
         reFrame_[0] = c.stageX, reFrame_[1] = 26, reFrame_[2] = c.stageW, reFrame_[3] = 400;
         rePanels_[0] = c.lx + c.lw + 6, rePanels_[1] = info ? c.rx - 10 : cw_, rePanels_[2] = kHeight - 44;
     }
-    rHelp_[0] = reFrame_[0] + reFrame_[2] / 2, rHelp_[1] = 8, rHelp_[2] = std::max(200, reFrame_[2] - 20);
+    rHelp_[0] = reFrame_[0] + reFrame_[2] / 2, rHelp_[1] = 8, rHelp_[2] = std::max(200, reFrame_[2] - 60);   // (polish: clear of the columns)
     // the controls along the bottom
     std::vector<RePrompt> legend = {
         {"Drag|RS", "Rotate", nullptr},
@@ -436,6 +436,7 @@ void Frontend::remakeGallery(const GalleryText& g)
         {"M|Y", "Next Motion", act(3)},
         {"T|Start", "Hide UI", act(11)},
         {"B|View", "Background", act(7)},
+        {"H|-", "Blood / Damage", act(34)},   // (gallery blood: the panels under the file)
         {"Esc|B", "Back", act(6), 1},
     };
     if (full) {   // (the full view: T / Escape show the page again)
@@ -541,18 +542,82 @@ void Frontend::remakeGallery(const GalleryText& g)
     // galfix2 (user: "Add < > so players know they can change the motion, model, light, background, layout"): each
     // row's value between arrows; a click on "<" (or Left) steps back, on the rest of the row (or Right) forward
     struct Opt { std::string label, value, help; int action, back; bool on; };
-    const std::vector<Opt> opts = {
-        {"Motion", g.motion.empty() ? std::string("-") : g.motion.substr(0, g.motion.find("  (")),
-         "Its next motion (or damage step). Key: M (Shift+M back), pad: Y. Click < or > (or Left / Right)", 3, 30, !g.motion.empty()},
-        {"Model", g.source, g.otherSource ? "The arcade's or the PC release's models. Key: S. Click < or >" : "Only one model source is there", 2, 2, g.otherSource},
-        {"Light", g.light, "The light: the game's, or from the side (8 ways round). Key: L. Click < or > (or Left / Right)", 14, 31, true},
-        {"Background", g.background, "The stage: dark, the game's skies, plain colours, rooms. Key: B, pad: View. Click < or >", 7, 32, true},
-        {"Layout", "Remake", "The Gallery's other layouts: the portraits, the Classic page. Key: K. Click < or >", 15, 33, true},
-    };
+    std::vector<Opt> opts;
+    // gallery blood (user 2026-11-03): two more panels under the file, H (or a click on their names) between them: Blood
+    // (the Gallery's own Blood Color, its custom colour, Rainbow Blood and its settings, Blood Particles: the model
+    // shown in them at once; Options and Mods keep theirs) and Damage (the game's damage and part-loss models per body
+    // part)
+    const int panel = std::clamp(g.panel, 0, 2);
+    if (panel == 1) {
+        static const char* const kColours[6] = {"Red", "Green", "Blue", "Purple", "Yellow", "Custom"};
+        const char* const keep = "The Gallery's own: Options and Mods keep theirs.";
+        auto channel = [&](const char* name, int shift, int up) {
+            return Opt{name, std::to_string((g.bloodRgb >> shift) & 255),
+                       std::string("The custom colour's ") + (shift == 16 ? "red" : shift == 8 ? "green" : "blue") +
+                           ", by 16 (picks Custom). Click < or >",
+                       up, up + 1, true};
+        };
+        opts = {
+            {"Blood Color", kColours[std::clamp(g.bloodColor, 0, 5)],
+             std::string("The blood's colour on the model, its wounds and its blood. Key: G (Shift+G back). ") + keep, 40, 41, true},
+            channel("Custom Red", 16, 42),
+            channel("Custom Green", 8, 44),
+            channel("Custom Blue", 0, 46),
+            {"Rainbow Blood", g.rainbow ? "On" : "Off", std::string("The Rainbow Blood mod's colours. Key: N. ") + keep, 48, 48, true},
+            {"Rainbow Colours", g.rainbowColours, "Rainbow Blood: all blood one colour at a time, or each splash its own", 49, 49, g.rainbow},
+            {"Rainbow Speed", g.rainbowSpeed, "Rainbow Blood: how fast the colours change", 50, 51, g.rainbow},
+            {"Creature Blood", g.creatureBlood, "Rainbow Blood: the creature's own wounds (its own colour, cycling, or as painted)", 52, 53, g.rainbow},
+            {"Blood Particles", g.particles ? "On" : "Off",
+             std::string("The blood burst of a new damage step, the drips from a cut part. Key: J. ") + keep, 54, 55, true},
+        };
+    } else if (panel == 2) {
+        bool any = false;
+        for (size_t p = 0; p < g.partNames.size() && p < g.partStates.size() && p < g.partSteps.size(); ++p) {
+            const bool on = g.partSteps[p] > 0;
+            any = any || on;
+            opts.push_back({g.partNames[p], g.partStates[p],
+                            on ? "The game's own damage models for this part, in the order shots bring them (Off: shot away). "
+                                 "Keys: Z the part, X its next state (Shift+X back). Click < or >"
+                               : "The game has no damage models for this part of it",
+                            60 + int(p), 70 + int(p), on});
+        }
+        opts.push_back({"All Parts", "Whole", "Every part whole again. Key: Shift+Z", 59, 59, any});
+    } else {
+        opts = {
+            {"Motion", g.motion.empty() ? std::string("-") : g.motion.substr(0, g.motion.find("  (")),
+             "Its next motion (or damage step). Key: M (Shift+M back), pad: Y. Click < or > (or Left / Right)", 3, 30, !g.motion.empty()},
+            {"Model", g.source, g.otherSource ? "The arcade's or the PC release's models. Key: S. Click < or >" : "Only one model source is there", 2, 2, g.otherSource},
+            {"Light", g.light, "The light: the game's, or from the side (8 ways round). Key: L. Click < or > (or Left / Right)", 14, 31, true},
+            {"Background", g.background, "The stage: dark, the game's skies, plain colours, rooms. Key: B, pad: View. Click < or >", 7, 32, true},
+            {"Layout", "Remake", "The Gallery's other layouts: the portraits, the Classic page. Key: K. Click < or >", 15, 33, true},
+        };
+    }
     const int optH = 15, optY = 430 - int(opts.size()) * optH - 34;
     {
-        Widget* vh = rWidget(c.rx, optY - 16, c.rw, 9, &Frontend::drawRText, "Viewer");
-        vh->user = int(tint(0xC8241A)), vh->id = 0, vh->seed = 59;
+        // the panels' names (the shown one lit; a click shows it, H the next)
+        static const char* const kPanels[3] = {"Viewer", "Blood", "Damage"};
+        // polish (user 2026-11-03: the tabs were small words crowded on the rule, the hand pointing at one covered it):
+        // each a little larger with room round it, its hit area a box from 6 above the word to the rows (the hand can
+        // point at the box's left or top and leave the word in sight), the current one underlined
+        float x = float(c.rx);
+        for (int p = 0; p < 3; ++p) {
+            const float w = rTextWidth(kPanels[p], 10.0f) + 22.0f;
+            Widget* vh = rWidget(int(x), optY - 18, int(w), 10, &Frontend::drawRText, kPanels[p]);
+            vh->user = int(p == panel ? tint(0xC8241A) : kDim), vh->id = 0, vh->seed = 59 + p;
+            vh->help = "The settings under the file: the viewer's, the blood's (the Gallery's own), the body parts' damage. Key: H";
+            Widget* hit = rWidget(int(x) - 6, optY - 24, int(w), 22, nullptr, "");   // (the larger hit area)
+            hit->help = vh->help;
+            setHandlers(hit, [act, p](Widget&) { act(36 + p)(); }, &Frontend::hitRect);
+            if (p == panel) {   // the current tab's underline
+                Widget* ul = rWidget(int(x), optY - 6, int(w - 22.0f), 1, &Frontend::drawReRule);
+                (void)ul;
+            }
+            x += w;
+        }
+    }
+    if (panel == 2 && !g.damageNote.empty()) {   // (a creature without damage models, a still model: why)
+        Widget* dn = rWidget(c.rx, optY + int(opts.size()) * optH + 2, c.rw, 8, &Frontend::drawRText, g.damageNote);
+        dn->user = int(kDim), dn->id = 0, dn->seed = 58;
     }
     for (size_t i = 0; i < opts.size(); ++i) {
         Widget* o = rWidget(c.rx, optY + int(i) * optH, c.rw, optH - 1, &Frontend::drawReOpt, opts[i].label);
@@ -582,8 +647,9 @@ void Frontend::remakeGallery(const GalleryText& g)
     reFile_.slide = 1;
     reFile_.box[0] = c.rx - 8, reFile_.box[1] = 20, reFile_.box[2] = c.rw + 16, reFile_.box[3] = optY - 40;
     reFile_.wantSig = reFile_.wantKey + "|" + g.text + "|" + g.facts + "|" + g.where + "|" + g.group + std::to_string(g.index) + "/" +
-                      std::to_string(g.count) + "|" + (card ? "card" : "") + std::to_string(bloodHue_);
-    const int bottom = optY - 24;   // (above "Viewer")
+                      std::to_string(g.count) + "|" + (card ? "card" : "") + std::to_string(bloodHue_) +
+                      "|b" + std::to_string(optY);   // (polish: the room it was laid out for: another panel's rows, another layout)
+    const int bottom = optY - 26;   // (above "Viewer"; polish: its tabs' hit boxes)
     reFile_.draw = [this, g, card, cardW, cardH, rx = c.rx, rw = c.rw, bottom]() {
         const float W = float(rw), X = float(rx);
         // (lang: the text translated, then cut by the language's widths (English: as before); its lines drawn raw)
@@ -670,7 +736,10 @@ void Frontend::remakeGallery(const GalleryText& g)
         std::vector<std::string> noteLines;
         for (const std::string& n : notes)
             for (const std::string& l : wrap(n + ".", 9.5f, W)) noteLines.push_back(l);
-        const float statH = float(stats.size()) * (card ? 29.0f : 17.0f);   // (beside a card: two lines a stat)
+        // (beside a card: two lines a stat; polish: one line each when the room is short and the values fit beside their
+        // labels, so a short panel (the Blood one's nine rows) keeps the description whole: the Hermit's was cut)
+        bool tall = card != nullptr;
+        float statH = float(stats.size()) * (tall ? 29.0f : 17.0f);
         float cardDH = 0, cardDW = 0, cardMinK = 0.7f;
         if (card) {
             // galact (user 2026-10-28, again: "Hangedman weak-point card bigger"): beside the stats (right), up to 58 % of
@@ -679,11 +748,19 @@ void Frontend::remakeGallery(const GalleryText& g)
             const float s = std::min({W * 0.58f / float(cardW), 130.0f / float(cardH), 3.0f});
             const float old = std::min({W / float(cardW), 92.0f / float(cardH), 1.6f});
             cardDW = float(cardW) * s, cardDH = float(cardH) * s;
-            cardMinK = std::min(1.0f, 0.7f * old / s);
+            cardMinK = std::min(1.0f, 0.5f * old / s);   // (polish: down to half the old size before the description gives way)
         }
         auto block = [&]() { return card ? std::max(statH, 22.0f + cardDH) : statH; };   // (the stats and the card side by side)
-        const float need = float(body.size()) * step + (noteLines.empty() ? 0.0f : 6.0f + float(noteLines.size()) * 13.0f) + 12.0f + block();
+        float need = float(body.size()) * step + (noteLines.empty() ? 0.0f : 6.0f + float(noteLines.size()) * 13.0f) + 12.0f + block();
         const float room = float(bottom) - y;
+        if (need > room && card) {
+            bool fits = true;
+            const float sw = W - cardDW * cardMinK - 12.0f;
+            for (const Stat& s : stats)
+                fits = fits && rTextWidth(s.label, 8.5f) + 14.0f + rTextWidth(s.value, 10.0f) <= sw;
+            if (fits) tall = false, statH = float(stats.size()) * 17.0f;
+        }
+        need = float(body.size()) * step + (noteLines.empty() ? 0.0f : 6.0f + float(noteLines.size()) * 13.0f) + 12.0f + block();
         if (need > room && card) {   // the card smaller first
             const float k = std::clamp((cardDH - (need - room)) / cardDH, cardMinK, 1.0f);   // (galfix2: not below 70 %: the description gives way)
             cardDW *= k, cardDH *= k;
@@ -714,20 +791,24 @@ void Frontend::remakeGallery(const GalleryText& g)
             // (galact: translated before it is cut to fit: a cut value matched no key and stayed English)
             std::string v = T(s.value);
             // (beside a card: the value on its own line under the label, so the narrower column keeps it whole)
-            const float vroom = card ? SW : SW - rTextWidth(s.label, 8.5f) - 14.0f;
+            const float vroom = tall ? SW : SW - rTextWidth(s.label, 8.5f) - 14.0f;
             const RawText raw(this);
             v = util::utf8Fit(v, "..", [&](const std::string& t) { return rTextWidthRaw(t, 10.0f) <= vroom; });
-            if (card)
+            if (tall)
                 rText(v, X, y + 12.0f, 10.0f, kRowLit, 0, 0.0f, 78, kTx);
             else
                 rText(v, X + SW, y, 10.0f, kRowLit, 2, 0.0f, 78, kTx);
-            const float ry = card ? y + 26.0f : y + 14.0f;
+            const float ry = tall ? y + 26.0f : y + 14.0f;
             for (int px = int(X * S); px < int((X + SW) * S); ++px)
                 for (int py = int(ry * S); py < int(ry * S) + 1; ++py)
                     rBlend(px, py, 0xFFFFFF, 0.1f);
-            y += card ? 29.0f : 17.0f;
+            y += tall ? 29.0f : 17.0f;
         }
         if (card) {
+            if (top + 14.0f + cardDH > float(bottom) && cardDH > 0.0f) {   // (polish: never over the rows under the file)
+                const float k = std::max(0.0f, float(bottom) - top - 14.0f) / cardDH;
+                cardDW *= k, cardDH *= k;
+            }
             const float cx = X + W - cardDW;
             float cy = top;
             rText("Weak point", cx, cy, 8.5f, kDim, 0, 0.0f, 79, kTx);
@@ -762,7 +843,7 @@ void Frontend::remakeScenes(const ScenesText& s, const GalleryText& g)
         };
     };
     reColumn(g, int(g.categories.empty() ? 6 : g.categories.size()));
-    rHelp_[0] = (c.stageX + c.rx) / 2, rHelp_[1] = 8, rHelp_[2] = std::max(200, c.rx - c.stageX - 20);
+    rHelp_[0] = (c.stageX + c.rx) / 2, rHelp_[1] = 8, rHelp_[2] = std::max(200, c.rx - c.stageX - 60);   // (polish)
     reFrame_[0] = c.stageX, reFrame_[1] = 26, reFrame_[2] = c.stageW, reFrame_[3] = 400;
     rePanels_[0] = c.lx + c.lw + 6, rePanels_[1] = c.rx - 10, rePanels_[2] = kHeight - 44;
     // the scenes in the middle, under their chapters' headings

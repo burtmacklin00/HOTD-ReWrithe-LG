@@ -26,10 +26,33 @@
 #else
 #include <cstdint>
 #include <dlfcn.h>
-#include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
 #include <vector>
+#if defined(__ANDROID__) && __ANDROID_API__ < 33
+// quest: Android before API 33 has no execinfo.h: the frames from the unwinder, no symbol names (dladdr below gives
+// the module + offset)
+#include <unwind.h>
+namespace {
+struct UnwindState { void** at; int left, n; };
+_Unwind_Reason_Code unwindOne(_Unwind_Context* c, void* arg)
+{
+    auto* s = static_cast<UnwindState*>(arg);
+    if (s->left <= 0) return _URC_END_OF_STACK;
+    if (const uintptr_t pc = _Unwind_GetIP(c)) *s->at++ = reinterpret_cast<void*>(pc), --s->left, ++s->n;
+    return _URC_NO_REASON;
+}
+int backtrace(void** frames, int max)
+{
+    UnwindState s{frames, max, 0};
+    _Unwind_Backtrace(unwindOne, &s);
+    return s.n;
+}
+char** backtrace_symbols(void* const*, int) { return nullptr; }
+} // namespace
+#else
+#include <execinfo.h>
+#endif
 #endif
 
 namespace hotd::util {

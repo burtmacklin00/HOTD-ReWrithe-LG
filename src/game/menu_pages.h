@@ -83,12 +83,18 @@ struct MenuHooks {
 
 // the rows of a category's page
 std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, const MenuHooks& h);
+// fxux: a settings page's rows opened from the pause (Frontend::rowsFilter): "from the next game" notes, the rows a
+// game cannot change grey (online: every game rule too)
+void menuInGameRows(std::vector<Frontend::Extra>& rows, const std::string& title, bool online);
 // menus3 (preview_art.h): a comparison picture "<kind>_<choice>" (models_0 / 1, blood_0 .. 5) as its in-memory key
 // (the models, the blood colour, player 1's crosshair: a changed one is another picture); "": no such picture
 std::string previewKey(const std::string& name, const LaunchConfig& c, bool pcOk);
 // the frame the game rendered for those models (0 arcade, 1 PC), kept in the pictures' folder: kind
 // kPreviewBlood base_<arcade|pc>.png (the attract), kPreviewModels (prevbridge) bridge_<arcade|pc>.png (Chapter 1)
-std::string previewBaseFile(const std::string& dir, int models, int kind = 0);
+std::string previewBaseFile(const std::string& dir, int models, int kind = 0, int variant = 0);
+// fxux: kPreviewMarks marks_<arcade|pc>_<0 Arcade Dots / Solid, 1 Smooth>.png and kPreviewTransp
+// transp_arcade_<Transparency mode 0..2>.png; the base file of an in-memory key ("" none)
+std::string previewKeyFile(const std::string& dir, const std::string& key);
 // the picture of a key: the base with the crosshair (and the blood burst); false: no base yet
 bool previewRender(const std::string& key, const std::string& dir, const LaunchConfig& c, const MenuHooks& h,
                    std::vector<uint8_t>& rgba, int& w, int& hgt);

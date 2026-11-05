@@ -554,6 +554,8 @@ std::unique_ptr<StageData> PcSource::loadStage(int stage, std::string& err)
                     const int v = std::max({a[i], a[i + 1], a[i + 2]});
                     for (int c = 0; c < 3; ++c)
                         a[i + size_t(c)] = uint8_t(rgb[c] * v / 255);
+                    if ((cfg_.blood & PcConfig::kBloodRainbow) && a[i + 3] >= 128)
+                        a[i + 3] = 250;   // cosmods: Rainbow Blood's mark (render/renderer.h kRainbowAlpha: the renderer colours it)
                     ++tinted;
                 }
             }

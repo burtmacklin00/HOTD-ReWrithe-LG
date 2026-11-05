@@ -42,9 +42,11 @@ template <class P> void Game<P>::heap_reset()
 template <class P> void Game<P>::skin_buffers_alloc()
 {
     if constexpr (!P::pc) {
-        mem.set32(0x51FDC8, mem_alloc(0x3480));
-        mem.set32(0x51FDCC, mem_alloc(0x3480));
-        mem.set32(0x51FDD0, mem_alloc(0x3480));
+        // (Survival Mode: 0x348 bytes more each for every body slot past 16, game.h extraBodySlots; 0 otherwise)
+        const uint32_t size = 0x3480 + uint32_t(extraBodySlots) * 0x348;
+        mem.set32(0x51FDC8, mem_alloc(size));
+        mem.set32(0x51FDCC, mem_alloc(size));
+        mem.set32(0x51FDD0, mem_alloc(size));
     }
 }
 

@@ -13,6 +13,7 @@
 #include "assets/sprites_pc.h"
 #include "render/overlay.h"
 
+#include <array>
 #include <string>
 #include <algorithm>
 #include <vector>
@@ -37,9 +38,15 @@ public:
     // style, 2 the PC's own sight sprites, 3.. the drawn ones, 9 custom; size, thickness, colour) and the crosshairs
     // folders (the custom sets)
     SeatSight sights[4];
+    // gunfb (Video > Show Crosshairs; LaunchConfig::showCrosshairs): off, no sight drawn for anyone (a player's own
+    // Crosshair Off: theirs alone); the sight still counts as shown for the desktop cursor (drewSight: hidden)
+    bool showSights = true;
     std::vector<std::string> customDirs;
     // the launcher's aspect is widescreen (full-window flashes) rather than the original 4:3 (pillarboxed)
     bool widescreen = true;
+    // bugs1 (#35, Options > Video "Hit Marks"): the hit marks (the blood / claw marks over the screen when a player is
+    // hit) true see-through, as the 1998 PC port's Direct3D mode, instead of the arcade's stipple (every other pixel)
+    bool translucentMarks = false;
     // display2: widescreen: the per-player HUD (Runtime::cellSide) at the window's left / right edges, the rest of the
     // 2D picture centred over the 4:3 part (original 4:3: everything where the arcade's screen lies)
     bool anchorEdges = false;
@@ -59,6 +66,28 @@ public:
     // no 2D sprites, subtitle or sights (0x418CC8's `if (!0x5CD358)` around pc_sprites_render / 0x41B114 / the sights),
     // only the 3D picture and the pause menu (0x41AB7C, drawPause)
     int pauseSelection = -1;
+    // GitHub #5 (Chapter Retry): the pause's own lines (title, then the items) when they are not the PC's PAUSED /
+    // Continue / Exit. fxux: with the PC's sprites they are drawn in the PC's menu font (SPR.RBH's white / yellow 24:
+    // the pause font has no S / g / R / y), else as text
+    std::vector<std::string> pauseLines;
+    // fxux: the pause item under a point of the PC's 640 x 480 screen fitted to the window's height (x from the 4:3
+    // part's left, y from the top), as the last drawPause laid them out; -1 none
+    // Light Gun Edition: easier to shoot: each item owns the whole band up to halfway to its neighbours (the first and
+    // the last a further one and a half rows beyond), 100 .. 540 across
+    int pauseItemAt(float x, float y) const
+    {
+        const size_t n = pauseRects_.size();
+        if (n == 0 || x < 100.0f || x >= 540.0f)
+            return -1;
+        for (size_t i = 0; i < n; ++i) {
+            const float c = (pauseRects_[i][1] + pauseRects_[i][3]) * 0.5f, hgt = pauseRects_[i][3] - pauseRects_[i][1];
+            const float top = i == 0 ? c - hgt * 2.0f : (c + (pauseRects_[i - 1][1] + pauseRects_[i - 1][3]) * 0.5f) * 0.5f;
+            const float bot = i + 1 == n ? c + hgt * 2.0f : (c + (pauseRects_[i + 1][1] + pauseRects_[i + 1][3]) * 0.5f) * 0.5f;
+            if (y >= top && y < bot)
+                return int(i);
+        }
+        return -1;
+    }
     // the cut-scene viewer's Clean View (game/scene_view.h, ours): the 3D picture, the cut-scene bars and the fades only:
     // no 2D layer over the 3D (lamps, ammo, prompts, captions), no players 3 / 4 HUD, no sights
     bool clean = false;
@@ -79,6 +108,9 @@ public:
     // crt (render/crt.h): draw() leaves the sights out; drawSights draws them (over the filtered picture: crisp)
     bool deferSights = false;
     void drawSights(const Runtime& rt, int windowWidth, int windowHeight, const float aim[4][2]);
+    // vr (docs/vr.md): player `seat`'s sight as draw would show it now (the same conditions; drawCross aside), as a
+    // texture (built for a wh-pixel-high picture) and its width / height; false: no sight now
+    bool vrSight(const Runtime& rt, int seat, int wh, unsigned& tex, float& aspect);
     // before the 3D (arcade models): clears the frame to `clear` and draws the low-priority 2D cells, which the 3D then
     // covers where it draws (MAME model2 screen_update: low cells, polygons, priority cells). Returns false (nothing
     // drawn, the frame left alone) when there are none: the renderer clears as usual.
@@ -117,10 +149,25 @@ public:
 
 private:
     Overlay player_[2], centre_, debug_, cross_[4], bar_, boss_, title_, clear_, label_;
+    Overlay survival_, survivalBanner_;   // Survival Mode (game/survival.h): the round lines at the top, the moment's banner in the middle
+    Overlay survivalSign_[SurvivalMode::kItems];   // Survival's shop signs (between the rounds)
+    bool signLit_[SurvivalMode::kItems] = {};
+    void drawSurvival(const Runtime& rt, int ww, int wh, int scale);
     int barRows_ = -1;
     // the arcade 2D layer: one 496 x 384 texture, drawn over the 3D picture
     unsigned program_ = 0, vao_ = 0, texture_ = 0;
     int uRect_ = -1;
+    int uTint_ = -1;   // rainbow2: the sights in the rainbow (a > 0.5: the picture's brightest channel times rgb)
+    bool sightTintOn_[4] = {};
+    float sightTint_[4][3] = {};   // (rainbow2: each player's sight colour this frame, drawSights)
+    std::vector<uint8_t> hudMask_;   // rainbow2: the arcade layer's HUD / hit-mark cells alone (rainbow2D)
+    std::vector<uint8_t> cellsHud_;  // (rainbow2: Runtime::cellHud and the score lines)
+    // rainbow2 (Rainbow Blood): the arcade layer's hit marks (and with its HUD option the player HUD) in the rainbow, in
+    // the pass's pictures (the pixels of those cells that show)
+    void rainbow2D(const Runtime& rt, const uint8_t* tiles, bool high, std::vector<uint8_t>* const* pics, int n);
+    // bugs1 (#35): translucentMarks for the arcade layer's hit marks in the pass's pictures (as rainbow2D finds them)
+    void translucent2D(const Runtime& rt, const uint8_t* tiles, bool high, std::vector<uint8_t>* const* pics, int n);
+    std::vector<uint8_t> markMask_, markLayer_;   // (translucent2D: the marks' cells alone; drawPc2D: one PC mark)
     // blood2 (drawRemake): the backdrop's program and textures (backdrop, widgets now / before a new splatter, hand)
     unsigned bgProg_ = 0, fgProg_ = 0, bgTex_ = 0, fgTex_ = 0, splatTex_[2] = {}, handTex_ = 0;
     int uFgRect_ = -1, uFgAlpha_ = -1, uFgShadow_ = -1, uBgRect_ = -1, uBgUV_ = -1, uBgGrey_ = -1, uBgMul_ = -1, uBgAdd_ = -1, uBgFade_ = -1, uBgAlpha_ = -1;
@@ -152,6 +199,9 @@ private:
     int seatDy_[2] = {-0x25, -0x25};   // players 3 / 4's band offset as drawSeatHud placed it last
     SeatImg arsenalBullet_[4][2];      // [weapon][arcade, PC]
     SeatImg arsenalDigit_[4][10][2];   // [seat][digit][arcade, PC]
+    // GitHub #25: players 1 / 2 with more than 5 lives: "x N" beside their one torch (the name entry's X 0x1AC and the
+    // results' digits 0x181.., drawn as drawSeatHud draws its pieces: no game banks used)
+    void drawLivesCount(const Runtime& rt, int ww, int wh);
     std::vector<uint8_t> seatTiles_, seatRgba_;
     SeatImg seatLabel_[2][2];   // "3P" / "4P" [seat - 2][arcade, PC], built once from the art
     uint64_t seatEmptySince_[2] = {};   // players 3 / 4's RELOAD! prompt: the game frame (+ 1) their gun went empty, 0 none
@@ -161,10 +211,13 @@ private:
     void upload(const std::vector<uint8_t>& rgba, int w, int h, int ww, int wh, float dx = 0.0f, bool fit = false);
     void pcFadeDraw(float level, int ww, int wh);
     void fillRect(const uint8_t rgb[3], int ww, int wh, int y0, int y1);   // window rows y0..y1 (top 0), opaque
-    void blackSides(int ww, int wh, float grey = 0.0f);   // widescreen: the window outside the 4:3 screen black (a 4:3 card; grey 1: white)
-    // credits43: the ending's full-height 2D card (the staff roll's, GAME OVER) is up; rgba_: the 2D just drawn (W x H)
-    bool endingCard(const Runtime& rt, int W, int H) const;
+    // widescreen: the window outside the 4:3 screen black (a 4:3 card; grey 1: white); sides: bit 0 the left, bit 1 the right
+    void blackSides(int ww, int wh, float grey = 0.0f, int sides = 3);
+    // credits43: the ending's full-height 2D card (the staff roll's, GAME OVER) is up; rgba_: the 2D just drawn (W x H).
+    // The sides to black (blackSides' bits): 0 none; the staff roll only the right (bugs1 #34)
+    int endingCard(const Runtime& rt, int W, int H) const;
     void drawPause(int selection, int ww, int wh);
+    std::vector<std::array<float, 4>> pauseRects_;   // (fxux: the items' rectangles, 640 x 480 units: x0, y0, x1, y1)
     // lang (docs/translating.md): the cut-scene subtitles with a translation (sub.<event>.<line>): the game's own line
     // hidden (its text cells / the PC's line), the translation drawn in the language's font over the 4:3 screen
     std::vector<std::string> subLines(const Runtime& rt);   // the translations shown now (empty: none)

@@ -11,6 +11,7 @@
 #include "render/renderer.h"
 
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <map>
 #include <memory>
@@ -93,7 +94,21 @@ public:
     // game's, still worked out from the frame: the models' places come from it); null: the game's. Draws only
     const Camera* camOverride = nullptr;
     bool sky = true;
+    // vr (2026-11-03, docs/vr.md): set, draw hands this frame's items to it instead of drawing them (the VR frame
+    // draws them once per eye through `renderer`, from `cam`: the game's camera, blended as the picture would be).
+    // Empty (always outside VR): draw draws as before
+    std::function<void(const std::vector<DrawItem>& items)> drawOverride;
+    // vr: the game camera of a frame as camera -> world (row-major 3x3 rotation, columns right / up / forward of the
+    // left-handed camera, then the eye's position): Runtime::camera inverted (the eye-independent aim reference)
+    static void cameraToWorld(const float* coproCamera, float rot[9], float pos[3]);
+    // vr (openxr worker 2026-11-03): one of the game's own models placed by the VR frame (the players' gun hand 0x719,
+    // Rogan's left hand 0x717 on the controllers): an item from the model source (the PC files' model with PC models
+    // on), the arcade's texture set of the area the last draw used, world = rot (row-major) x model + pos. slot 0..3:
+    // its placement (kept until the next call for that slot). false: the model is not loaded
+    bool placedItem(int slot, uint32_t id, const float rot[9], const float pos[3], DrawItem& out);
 private:
+    Placement placed_[4];   // vr: placedItem's placements
+    int variant_ = -1;      // vr: the arcade texture set the last draw picked
     RagdollWalls walls_;                              // leftovers: see ragdollWalls()
     std::map<const Placement*, int> wallOf_;          // a world placement's object in walls_ (standing triangles only)
     // ipolish: the door-sized models the game draws (not world placements): their triangles in model space (9 floats
@@ -178,6 +193,7 @@ private:
     uint32_t palAnimSerial_ = ~0u;          // Runtime::polyPaletteAnim.serial last sent (palanim)
     uint16_t bloodEntry_ = 0;             // polygon palette entry 1023 last sent (the blood colour, arcade models)
     int bloodCustom_ = -1;                // display: the custom blood colour 0xRRGGBB (experimental), else -1
+    int xlatBlood_ = -1;                  // the custom colour last put into the blood rows' translation (-1 none)
 };
 
 } // namespace hotd::game

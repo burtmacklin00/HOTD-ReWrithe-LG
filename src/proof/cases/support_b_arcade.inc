@@ -53,6 +53,8 @@
     case 0x56360: a.enemy_act6_frame(regs[0]); return true;
     case 0x56320: a.enemy_act6_bite(regs[0]); return true;
     case 0x5BE60: a.kind101_corpse(regs[0]); return true;
+    case 0x5C0A0: a.kind118_corpse(regs[0]); return true;
+    case 0x5BF80: a.kind118_corpse_frame(regs[0]); return true;
     case 0x387B0: a.turn_motion_set(regs[0], regs[1], int32_t(regs[2]), int32_t(regs[3])); return true;
     case 0x311C0: a.voice_message(int32_t(regs[0])); return true;
     case 0x45480: a.depth_list_add(regs[0]); return true;

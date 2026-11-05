@@ -44,6 +44,7 @@ Xelu's Free Controller & Key Prompts by Nicolae "Xelu" Berbece (Those Awesome Gu
   updated by Paul Paun - thoseawesomeguys.com/prompts (CC0)
 Input Prompts by Kenney - kenney.nl (CC0)
 Special Elite font by Astigmatic (Apache 2.0), used to make the "ReWrithe" wordmark
+OpenXR loader by The Khronos Group (Apache 2.0), for VR headsets (Windows)
 Microsoft Visual C++ runtime (redistributable files)
 
 Every licence text: NOTICE.txt.

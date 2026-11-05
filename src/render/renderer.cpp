@@ -56,6 +56,15 @@ uniform float uHybrid;          // depthfix: Depth Buffer's key band (renderer.h
 uniform int uKeyless;           // depthopt: the item drawn per pixel under Arcade Sort (a mod's depth = buffer): its keys unread
 uniform vec2 uProj;             // depthfix: the projection's depth terms: ndc z = uProj.x - uProj.y / view z
 uniform float uBiasScale;       // depthfix: the near plane (the NDC biases were tuned at near 1; Free Cam 0.1)
+uniform int uRainbow;           // cosmods: RenderOptions::rainbow (0 off, 1 per item, 2 one hue, 3 the custom colour)
+uniform vec3 uBloodRgb;         // cosmods: RenderOptions::bloodRgb (mode 3)
+uniform float uRainbowPhase;
+uniform vec3 uRainbowTable[90];  // cosmods: the game's rainbow (the Chapter 4 screens: palette_animation, 0xAB120), 0..1
+uniform int uRainbowGame;       // 1: vRainbow from uRainbowTable, 0: a plain hue
+uniform int uRainbowSync;       // cosmods: the animated palette entry the blood takes (the screens' own colour), -1 none
+uniform float uBodyHue;         // cosmods: DrawItem::bloodHue (-1 none; 0..1 a creature's own hue; 2..3 cycling with an offset; 4..5 the same, blood rows only; 6..7 the same, wounds as painted)
+flat out vec3 vRainbow;         // cosmods: the rainbow colour of this item (PC: the marked blood texels times it)
+flat out float vRainbowPal;     // cosmods: 1 = this polygon is the blood entry 1023 in the rainbow colour (fragment: no row lookup)
 out vec3 vWorld;
 out vec2 vUV;
 flat out uvec4 vRect;
@@ -268,8 +277,29 @@ R"(
                 vColor.rgb = uvec3(g);
             }
         }
-        uint p = texelFetch(uPalAnim, ivec2(int(pal), 0), 0).r;
+        // cosmods: Rainbow Blood in step with the Chapter 4 screens (Fast): the blood entry takes their animated entry
+        int palIdx = uRainbowSync >= 0 && uRainbow != 0 && uRainbow != 3 && pal == 1023u ? uRainbowSync : int(pal);
+        uint p = texelFetch(uPalAnim, ivec2(palIdx, 0), 0).r;
         if ((p & 0x8000u) != 0u) vColor.rgb = uvec3(p & 31u, (p >> 5) & 31u, (p >> 10) & 31u);
+    }
+    // cosmods: Rainbow Blood (RenderOptions::rainbow): the hue now, per draw item (its place) or one for all; arcade the
+    // blood entry 1023 in it (not in the grey look: the game greys the blood too), PC the marked texels (fragment)
+    vRainbow = vec3(1.0);
+    vRainbowPal = 0.0;
+    if (uRainbow == 3) vRainbow = uBloodRgb;   // the custom Blood Color: the wounds only (entry 1023 has it already)
+    else if (uRainbow != 0) {
+        // the splashes: a broad wave over the world (an RGB keyboard's: one rainbow in ~250 units, so a flying drop
+        // changes colour slowly; was ~20 units and flickered); a body's parts: one colour, cycling (DrawItem::bloodHue)
+        float h = uRainbowPhase + (uRainbow == 1 ? dot(uOffset, vec3(0.0043, 0.0029, 0.0061)) : 0.0);
+        if (uBodyHue >= 0.0 && uBodyHue < 1.0) h = uBodyHue;   // a creature's own colour
+        else if (uBodyHue >= 2.0 && uRainbow == 1) h = uRainbowPhase + fract(uBodyHue);   // cycling with the body's own offset (Together: one colour for all)
+        if (uRainbowGame == 1) {   // the game's own rainbow (palette_animation's 90-colour table 0xAB120), blended
+            float s = fract(h) * 90.0;
+            int i = int(s) % 90;
+            vRainbow = mix(uRainbowTable[i], uRainbowTable[(i + 1) % 90], s - floor(s));
+        } else
+            vRainbow = clamp(abs(fract(h + vec3(0.0, 2.0, 1.0) / 3.0) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+        if (uShading == 1 && pal == 1023u && uGrey == 0 && uRainbowSync < 0) vRainbowPal = 1.0;
     }
 }
 )";
@@ -287,6 +317,21 @@ flat in float vSortKz;
 flat in float vSortDepth;
 flat in float vKeyBand;
 in float vBandAdj;
+flat in vec3 vRainbow;
+flat in float vRainbowPal;
+uniform int uRainbow;
+uniform float uBodyHue;
+uniform int uBloodRows;         // rainbow2: RenderOptions::bloodRowMask (bit = colour row 0..31)
+// cosmods: Rainbow Blood's creature wounds (arcade): the red of a creature's painted blood (its skin's colour rows, not
+// the blood entry) in the creature's colour. A pixel's red beyond its other channels is the blood's share: that share
+// takes the hue, the grey under it stays; only clearly red pixels (saturation 0.55+, green and blue alike: not orange
+// skin or brown cloth)
+vec3 woundTint(vec3 c) {
+    float m = max(c.g, c.b);
+    float s = (c.r - m) / max(c.r, 1e-3);
+    float w = smoothstep(0.55, 0.75, s) * step(0.06, c.r) * (1.0 - smoothstep(0.15, 0.3, abs(c.g - c.b) / max(c.r, 1e-3)));
+    return mix(c, vec3(m) + (c.r - m) * vRainbow, w);
+}
 uniform float uHybrid;
 uniform vec2 uProj;
 out vec4 oColor;
@@ -298,6 +343,7 @@ uniform int uLighting;
 uniform vec3 uLightDir;
 uniform float uAmbient;
 uniform int uFilter;
+uniform int uTransp;             // RenderOptions::transparency: 0 Smooth, 1 Clean Edges, 2 Dithered (arcade)
 uniform vec3 uCamPos;
 uniform int uM2Gamma;            // MAME's output curve: max((v - 64) * 255 / 191, 0)
 uniform int uM2Known;            // Model 2 lighting setup known (light vector + parameter table)
@@ -398,6 +444,28 @@ float bilinearL(vec2 uv, int L, out float a) {
     a = mix(mix(float(s00 != 15.0), float(s10 != 15.0), f.x), mix(float(s01 != 15.0), float(s11 != 15.0), f.x), f.y);
     return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
 }
+// team (2026-11-03, Transparency "Clean Edges" / "Dithered"): the bilinear shade of the solid texels only (shade 15,
+// transparent, left out of the mix: Smooth's mix pulls the edge texels toward entry 15, a brown / dark fringe round blood
+// splatters, floor stains and water); a = their cover, as bilinearL's
+float bilinearSolid(vec2 uv, int L, out float a) {
+    vec2 p = uv / float(1 << L) - 0.5;
+    if ((vFL.x & INSIDERECT) != 0u) p = clamp(p, vec2(0.0), vec2(ivec2(vRect.zw) >> L) - 1.0);
+    ivec2 i = ivec2(floor(p));
+    vec2 f = p - floor(p);
+    float s00 = shadeAtL(i, L), s10 = shadeAtL(i + ivec2(1, 0), L), s01 = shadeAtL(i + ivec2(0, 1), L), s11 = shadeAtL(i + ivec2(1, 1), L);
+    vec4 w = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y) *
+             vec4(float(s00 != 15.0), float(s10 != 15.0), float(s01 != 15.0), float(s11 != 15.0));
+    a = w.x + w.y + w.z + w.w;
+    return a > 0.0 ? dot(w, vec4(s00, s10, s01, s11)) / a : 15.0;
+}
+// the cut of a translucent texture's filtered cover: Smooth / Clean Edges at half cover; Dithered by a 4 x 4 ordered (Bayer)
+// threshold per screen pixel, a screen-door stipple like the Model 2's checker polygons
+bool coverCut(float a) {
+    if (uTransp != 2) return a < 0.5;
+    ivec2 q = ivec2(gl_FragCoord.xy) & 3;
+    const float kBayer[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+    return a < (kBayer[q.y * 4 + q.x] + 0.5) / 16.0;
+}
 // Model 2 microtexture (MAME fetch_bilinear_texel level -1; polish2): a 128 x 128 detail texture on the other sheet at
 // (utexx, utexy), its coordinates scaled by 2^(2^minlod), blended in up to ~50 % where the polygon is closer than
 // level 0 (layer bits 8 = on, 9-10 = minlod, 11 = utexx / 128, 12-13 = utexy / 128: ArcadeSource::buildMeshes)
@@ -443,7 +511,7 @@ void prepassDiscards() {
                     bilinearL(vUV, L + 1, a2);
                     a = mix(a, a2, fract(lod));
                 }
-                if (a < 0.5) discard;
+                if (coverCut(a)) discard;
             } else if (shadeAt(ivec2(floor(vUV))) == 15.0) discard;
         }
         if (fromPack && replSample(re, vUV, uFilter == 1, false).a < 0.5) discard;
@@ -461,6 +529,8 @@ void prepassDiscards() {
         }
     }
 }
+)"  // (MSVC: the raw string's size limit)
+R"(
 void main() {
 #ifdef SORT_FRAGDEPTH
     gl_FragDepth = vSortDepth >= 0.0 ? vSortDepth : gl_FragCoord.z;   // Arcade Sort: the polygon's key (vertex shader)
@@ -524,19 +594,24 @@ void main() {
                 float lod = uMip == 1 ? (dist > 0.0 ? 2.0 * log2(z) - log2(dist) : 100.0) : 0.0;
                 int L = clamp(int(floor(lod)), 0, maxLevel);
                 float a;
-                shade = bilinearL(vUV, L, a);
+                bool solid = translucent && uTransp != 0 && !fromPack;   // (Clean Edges / Dithered: the solid texels' colour)
+                shade = solid ? bilinearSolid(vUV, L, a) : bilinearL(vUV, L, a);
                 if (lod > 0.0 && L < maxLevel) {
                     float a2;
-                    float s2 = bilinearL(vUV, L + 1, a2);
+                    float s2 = solid ? bilinearSolid(vUV, L + 1, a2) : bilinearL(vUV, L + 1, a2);
                     float fr = fract(lod);
-                    shade = mix(shade, s2, fr);
+                    if (solid) {   // the two levels' solid shades by their cover
+                        float w0 = a * (1.0 - fr), w1 = a2 * fr;
+                        shade = w0 + w1 > 0.0 ? (shade * w0 + s2 * w1) / (w0 + w1) : 15.0;
+                    } else
+                        shade = mix(shade, s2, fr);
                     a = mix(a, a2, fr);
                 } else if (lod < 0.0 && (int(vFL.y) & 0x100) != 0) {
                     // MAME: frac = min(-mml >> minlod, 127) / 256, mml = 128 x the level
                     float fr = min(floor(floor(-lod * 128.0) / float(1 << ((int(vFL.y) >> 9) & 3))), 127.0) / 256.0;
                     shade = mix(shade, microShade(vUV), fr);
                 }
-                if (translucent && a < 0.5 && !fromPack) discard;
+                if (translucent && !fromPack && coverCut(a)) discard;
             } else {
                 shade = shadeAt(ivec2(floor(vUV)));
                 if (translucent && shade == 15.0 && !fromPack) discard;
@@ -553,6 +628,38 @@ void main() {
         oColor = vec4(texelFetch(uXlat, ivec2(b, int(vColor.r)), 0).r,
                       texelFetch(uXlat, ivec2(b, 32 + int(vColor.g)), 0).r,
                       texelFetch(uXlat, ivec2(b, 64 + int(vColor.b)), 0).r, 1.0);
+        // cosmods: the rainbow blood (entry 1023), each channel between its rows 0 and 31 at this brightness: smooth.
+        // Its 5-bit values through the rows flickered (user's clip 2026-11-03): rows between are other colours (the
+        // creatures' swapped rows), so a channel crossing one jumped
+        if (vRainbowPal > 0.5) {
+            vec3 t = oColor.rgb;   // (angle: GLSL ES indexes a fragment output by constants only; it failed to compile)
+            for (int c = 0; c < 3; ++c) {
+                float lo = texelFetch(uXlat, ivec2(b, 32 * c), 0).r, hi = texelFetch(uXlat, ivec2(b, 32 * c + 31), 0).r;
+                t[c] = lo + (hi - lo) * vRainbow[c];
+            }
+            oColor.rgb = t;
+        }
+        // rainbow2: the creatures' blood rows (uBloodRows: the rows GGSET set by the blood colour) in the rainbow, every
+        // shade (the pale pink inside the wounds too), as tintBloodRows does with the custom colour (game/view.cpp): per
+        // brightness the grey under the row (its lowest channel) kept, the colour above it the rainbow's (its brightest
+        // channel scaled to 1), times that brightest channel. Per pixel and per item: each splash / body its own hue,
+        // nothing re-uploaded. Not with Creature Blood Off (uBodyHue 6..7: the wounds as painted) or the grey look
+        int bloodRows = 0;   // (the channels coloured here)
+        if ((uRainbow == 1 || uRainbow == 2) && uBloodRows != 0 && uGrey == 0 && uBodyHue < 6.0) {
+            float top = max(max(vRainbow.r, vRainbow.g), max(vRainbow.b, 1e-3));
+            vec3 t = oColor.rgb;   // (angle: a fragment output indexed by constants only)
+            for (int c = 0; c < 3; ++c) {
+                int row = int(vColor[c]);
+                if (row < 32 && ((uBloodRows >> row) & 1) != 0) {
+                    float x0 = texelFetch(uXlat, ivec2(b, row), 0).r, x1 = texelFetch(uXlat, ivec2(b, 32 + row), 0).r,
+                          x2 = texelFetch(uXlat, ivec2(b, 64 + row), 0).r;
+                    float lo = min(x0, min(x1, x2)), hi = max(x0, max(x1, x2));
+                    t[c] = (lo + (hi - lo) * vRainbow[c] / top) * top;
+                    ++bloodRows;
+                }
+            }
+            oColor.rgb = t;
+        }
         // a pack picture: the reference picture holds the original's colours as the export would write them here (full
         // light, the load-time colour table, the palette entry the loader found closest to the picture). k = this
         // pixel's original brightness (its lighting, palette animation, the colour rows the game swaps: GGSET's bright
@@ -590,6 +697,10 @@ void main() {
             oColor.rgb = sep;
         }
         if (uM2Gamma == 1) oColor.rgb = max((floor(oColor.rgb * 255.0 + 0.5) - 64.0) / 191.0, 0.0);
+        // cosmods: Rainbow Blood's creature wounds, on the colour as shown (after the monitor curve: before it the reds
+        // are paler, (140, 40, 30) on screen is (168, 94, 86) here)
+        // (rainbow2: only a fallback now, for the pixels the blood rows did not colour in all three channels)
+        if (uRainbow != 0 && uBodyHue >= 0.0 && uBodyHue < 4.0 && uGrey == 0 && bloodRows < 3) oColor.rgb = woundTint(oColor.rgb);
         oColor.rgb *= uFade;   // draw_fade_begin scales the geometrizer's colour table (no blending on the Model 2)
     } else {
         // PC (THOTD.EXE 0x577870 / 0x577CA0): no lighting; textured polygons have diffuse white, untextured ones a flat
@@ -609,6 +720,8 @@ void main() {
             if (uClampUV == 1) c = textureLod(uLayers, vec3(clamp(vUV, vec2(0.5), vec2(vRect.zw) - 0.5) / vec2(vRect.zw), float(vFL.y)), 0.0);
             else c = texture(uLayers, vec3(vUV / vec2(vRect.zw), float(vFL.y)));
             if (c.a < 0.5) discard;
+            // cosmods: Rainbow Blood's marked blood texels (alpha 250: white-tinted at the load), times the rainbow colour
+            if (uRainbow != 0 && uRainbow != 3 && c.a > 0.95 && c.a < 0.999) c.rgb = mix(c.rgb, c.rgb * vRainbow, clamp((1.0 - c.a) * 51.0, 0.0, 1.0));
         } else {
             c = vec4(vColor) / 255.0;
         }
@@ -989,6 +1102,7 @@ bool Renderer::init(std::string& err)
     uLightDir_ = gl::GetUniformLocation(program_, "uLightDir");
     uAmbient_ = gl::GetUniformLocation(program_, "uAmbient");
     uFilter_ = gl::GetUniformLocation(program_, "uFilter");
+    uTransp_ = gl::GetUniformLocation(program_, "uTransp");
     uCamPos_ = gl::GetUniformLocation(program_, "uCamPos");
     uM2Known_ = gl::GetUniformLocation(program_, "uM2Known");
     uM2Gamma_ = gl::GetUniformLocation(program_, "uM2Gamma");
@@ -1008,6 +1122,13 @@ bool Renderer::init(std::string& err)
     uTieItem_ = gl::GetUniformLocation(program_, "uTieItem");
     uIdMode_ = gl::GetUniformLocation(program_, "uIdMode");
     uGrey_ = gl::GetUniformLocation(program_, "uGrey");
+    uRainbow_ = gl::GetUniformLocation(program_, "uRainbow");   // (cosmods)
+    uRainbowPhase_ = gl::GetUniformLocation(program_, "uRainbowPhase");
+    uBloodRgb_ = gl::GetUniformLocation(program_, "uBloodRgb");
+    uRainbowTable_ = gl::GetUniformLocation(program_, "uRainbowTable");
+    uRainbowGame_ = gl::GetUniformLocation(program_, "uRainbowGame");
+    uRainbowSync_ = gl::GetUniformLocation(program_, "uRainbowSync");
+    uBloodRows_ = gl::GetUniformLocation(program_, "uBloodRows");   // (rainbow2)
     uSepia_ = gl::GetUniformLocation(program_, "uSepia");
     uM2Light_ = gl::GetUniformLocation(program_, "uM2Light");
     uM2Diffuse_ = gl::GetUniformLocation(program_, "uM2Diffuse");
@@ -1426,17 +1547,32 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     // view (world -> camera: rows right, up, forward) and a left-handed perspective (camera +z forward)
     float r[3], u[3], f[3];
     cam.basis(r, u, f);
-    const float e[3] = {cam.pos[0] + debugJitter[0], cam.pos[1] + debugJitter[1], cam.pos[2] + debugJitter[2]};
+    float e[3] = {cam.pos[0] + debugJitter[0], cam.pos[1] + debugJitter[1], cam.pos[2] + debugJitter[2]};
     float view[16] = {r[0], u[0], f[0], 0, r[1], u[1], f[1], 0, r[2], u[2], f[2], 0,
                       -(r[0] * e[0] + r[1] * e[1] + r[2] * e[2]), -(u[0] * e[0] + u[1] * e[1] + u[2] * e[2]),
                       -(f[0] * e[0] + f[1] * e[1] + f[2] * e[2]), 1};
     static const char* nearEnv = std::getenv("HOTD_NEAR");   // debugging: every camera's near plane (comparisons)
-    const float n = std::clamp(nearEnv ? float(std::atof(nearEnv)) : cam.nearZ, 0.01f, 1.0f), fa = 20000.0f, t = 1.0f / std::tan(cam.fovY / 2), aspect = float(width) / float(height);
+    const float n = std::clamp(nearEnv ? float(std::atof(nearEnv)) : eye ? eye->nearZ : cam.nearZ, 0.01f, 1.0f), fa = 20000.0f, t = 1.0f / std::tan(cam.fovY / 2), aspect = float(width) / float(height);
     // (trailer footage: HOTD_CAM_ZOOM=1.6 narrows every 3D view, a closer camera; the picture only)
     static const float camZoom = std::getenv("HOTD_CAM_ZOOM") ? std::max(0.2f, float(std::atof(std::getenv("HOTD_CAM_ZOOM")))) : 1.0f;
-    float proj[16] = {t * camZoom / aspect, 0, 0, 0, 0, t * camZoom, 0, 0, 0, 0, (fa + n) / (fa - n), 1, 0, 0, -2 * fa * n / (fa - n), 0};
+    float proj[16] = {t * camZoom / aspect, 0, 0, 0, 0, t * camZoom, 0, 0, cam.shift[0], cam.shift[1], (fa + n) / (fa - n), 1,
+                      0, 0, -2 * fa * n / (fa - n), 0};   // (w = z: the shift moves every point the same on screen)
+    if (eye) {   // vr: the eye's own view and (off-axis) frustum; the eye position / forward for the shading from its view
+        std::memcpy(view, eye->view, sizeof view);
+        for (int k = 0; k < 3; ++k) {
+            r[k] = view[k * 4], u[k] = view[k * 4 + 1], f[k] = view[k * 4 + 2];
+        }
+        for (int k = 0; k < 3; ++k)
+            e[k] = -(r[k] * view[12] + u[k] * view[13] + f[k] * view[14]);
+        const float sx = eye->tanRight - eye->tanLeft, sy = eye->tanUp - eye->tanDown;
+        proj[0] = 2.0f / sx;
+        proj[5] = 2.0f / sy;
+        proj[8] = -(eye->tanRight + eye->tanLeft) / sx;
+        proj[9] = -(eye->tanUp + eye->tanDown) / sy;
+    }
     float vp[16];
     multiply(proj, view, vp);
+    std::memcpy(lastViewProj, vp, sizeof vp);
 
     // depthfix: Depth Buffer (and the viewer's Free Cam) with the key band (the vertex / fragment shader);
     // HOTD_KEY_BAND=x sets it (0: the plain per-pixel depth, comparisons)
@@ -1451,6 +1587,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     gl::UniformMatrix4fv(uViewProj_, 1, gl::FALSE_, vp);
     gl::Uniform1i(uLighting_, opt.lighting ? 1 : 0);
     gl::Uniform1i(uFilter_, opt.filter ? 1 : 0);
+    gl::Uniform1i(uTransp_, std::clamp(opt.transparency, 0, 2));   // (team: Transparency)
     float l[3] = {opt.lightDir[0], opt.lightDir[1], opt.lightDir[2]};
     float len = std::sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
     gl::Uniform3f(uLightDir_, l[0] / len, l[1] / len, l[2] / len);
@@ -1462,6 +1599,13 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     gl::Uniform1i(uMip_, opt.mipmap ? 1 : 0);
     gl::Uniform1i(uGrey_, opt.grey ? 1 : 0);
     gl::Uniform1i(uGreyRepl_, opt.grey ? 1 : 0);
+    gl::Uniform1i(uRainbow_, opt.rainbow);   // (cosmods: Rainbow Blood)
+    gl::Uniform1f(uRainbowPhase_, opt.rainbowPhase);
+    gl::Uniform3f(uBloodRgb_, opt.bloodRgb[0], opt.bloodRgb[1], opt.bloodRgb[2]);
+    gl::Uniform1i(uRainbowGame_, opt.rainbowGame ? 1 : 0);
+    gl::Uniform1i(uRainbowSync_, opt.rainbowSync);
+    if (opt.rainbowGame) gl::Uniform3fv(uRainbowTable_, 90, &opt.rainbowTable[0][0]);
+    gl::Uniform1i(uBloodRows_, int(opt.bloodRowMask));   // (rainbow2: the blood rows in the rainbow)
     gl::Uniform1i(uPcFilter_, opt.pcBilinear ? 1 : 0);
     gl::Uniform1i(uHasRepl_, 0);
     if (opt.grey) {
@@ -1492,7 +1636,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         float f[9];
         int n = -1;   // -1: not sent yet in this draw
     };
-    enum { kOffset, kRot, kBias, kFloorY, kFloorPull, kPush, kFade, kRamp, kFlat, kUV, kShading, kM2Known, kM2Light, kGrey, kHasRepl,
+    enum { kOffset, kRot, kBias, kFloorY, kFloorPull, kPush, kFade, kRamp, kBodyHue, kFlat, kUV, kShading, kM2Known, kM2Light, kGrey, kHasRepl,
            kClampUV, kSortItem, kHybrid, kKeyless, kSideOnly, kSlots };
     Cache cache[kSlots];
     auto changed = [&](int slot, const float* v, int n) {
@@ -1554,10 +1698,11 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         unitTex[unit] = tex;
         unitKnown[unit] = true;
     };
-    static gl::GLint uRamp = -2, uStops = -2;
+    static gl::GLint uRamp = -2, uStops = -2, uBodyHue = -2;
     if (uRamp == -2) {
         uRamp = gl::GetUniformLocation(program_, "uRamp");
         uStops = gl::GetUniformLocation(program_, "uRampStops");
+        uBodyHue = gl::GetUniformLocation(program_, "uBodyHue");   // (cosmods: Rainbow Blood's creature colour)
     }
     int rampStopsSent = -1;
     static gl::GLint uLook = -2;   // Light Gun Edition: the fun modes' looks
@@ -1571,7 +1716,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     const bool sendItemIndex = debugTie != 0 || debugIds;
     // endfloor: DrawItem::sideOnly items draw only outside the centred 4:3 picture (its half width: 248 / 192 of the
     // half height, the view being hor+)
-    gl::Uniform2f(uSideClip_, float(width) * 0.5f, float(height) * 0.5f * (248.0f / 192.0f));
+    gl::Uniform2f(uSideClip_, float(width) * 0.5f, eye ? -1.0f : float(height) * 0.5f * (248.0f / 192.0f));   // (vr: whole)
     const GpuStage* bound = nullptr;
     const GpuSet* setSent = nullptr;   // the set whose light tables are in the uniforms
     int boundSet = -1;
@@ -1653,6 +1798,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         set1f(kFade, uFade_, it.fade);
         set1i(kSideOnly, uSideOnly_, it.sideOnly ? 1 : 0);
         set1i(kRamp, uRamp, it.ramp >= 0 && it.ramp < 4 ? it.ramp : -1);
+        set1f(kBodyHue, uBodyHue, it.bloodHue);   // cosmods
         if (it.ramp >= 0 && it.ramp < 4 && rampStopsSent != it.ramp) {
             gl::Uniform3fv(uStops, 5, &rampStops[it.ramp][0][0]);
             rampStopsSent = it.ramp;

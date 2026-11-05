@@ -1,14 +1,20 @@
 cmake_minimum_required(VERSION 3.21)
 
 # THE version (a release: change this line only): the exes' VERSIONINFO, the main menu's corner, hotd --version
-project(hotd_m2 VERSION 1.1.0 LANGUAGES C CXX)
-# Light Gun Edition: its own build number on top of the ReWrithe version (v1.1.0-lg1): raise it for each release of
-# this edition; the release tag must match (git tag v1.1.0-lg1)
-set(HOTD_LG_EDITION "lg12")
+project(hotd_m2 VERSION 1.2.0 LANGUAGES C CXX)
+# Light Gun Edition: its own build number on top of the ReWrithe version (v1.2.0-lg13): raise it for each release of
+# this edition; the release tag must match (git tag v1.2.0-lg13)
+set(HOTD_LG_EDITION "lg13")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# quest (docs/quest.md): an NDK in a folder with spaces (Windows) is called by its 8.3 short name (CLANG_~1.EXE for
+# clang++.exe), and clang then links as C (no libc++: "undefined operator new"): the C++ driver said explicitly
+if(ANDROID AND CMAKE_HOST_WIN32)
+    add_link_options("--driver-mode=g++")
+endif()
 
 # SDL3: by default use an installed copy (set CMAKE_PREFIX_PATH or SDL3_DIR to it).
 # HOTD_FETCH_SDL3=ON downloads and builds SDL3 from GitHub instead.
@@ -29,7 +35,7 @@ else()
     find_package(SDL3 REQUIRED CONFIG COMPONENTS SDL3-shared)
 endif()
 
-add_executable(hotd
+set(HOTD_GAME_SOURCES
     src/main.cpp
     src/util/crash_log.cpp
     src/game/host.cpp
@@ -68,8 +74,11 @@ add_executable(hotd
     src/game/jukebox_measure.cpp
     src/game/pcmode_scores.cpp
     src/game/bossmode.cpp
+    src/game/survival.cpp
+    src/game/horde.cpp
     src/game/menu_pages.cpp
     src/game/ragdoll.cpp
+    src/game/cosmods.cpp
     src/game/pause.cpp
     src/game/pads.cpp
     src/game/lightguns.cpp
@@ -81,10 +90,23 @@ add_executable(hotd
     src/game/menu_cursor.cpp
     src/game/keybinds_test.cpp
     src/game/bot.cpp
+    src/game/typing.cpp
+    src/game/typing_hud.cpp
     src/game/scene_view.cpp
     src/net/net_game.cpp
     src/net/online_menu.cpp
     src/net/rollback.cpp)
+# quest (2026-11-03, docs/quest.md): on Android the game is SDL's libmain.so (SDLActivity loads it and calls SDL_main);
+# everywhere else the hotd executable as before
+if(ANDROID)
+    add_library(hotd SHARED ${HOTD_GAME_SOURCES} src/util/android_app.cpp)
+    set_target_properties(hotd PROPERTIES OUTPUT_NAME main)
+    target_link_libraries(hotd PRIVATE android log EGL)
+    target_link_options(hotd PRIVATE "-Wl,-z,max-page-size=16384")   # (16 KB pages: newer Android; the Quest's 4 KB too)
+    target_compile_options(hotd PRIVATE -Wno-error=format-security)   # (the NDK's default; the game's printf helpers)
+else()
+    add_executable(hotd ${HOTD_GAME_SOURCES})
+endif()
 
 # Netplay (docs/netplay.md): UDP + Monocypher 4.0.3 (src/third_party/monocypher, CC0 / BSD-2-Clause) on every system,
 # so every PC speaks the same protocol (cross-play); random bytes from the OS
@@ -95,6 +117,7 @@ if(WIN32)
     target_link_libraries(hotd_net PUBLIC ws2_32 bcrypt iphlpapi)
 endif()
 target_link_libraries(hotd PRIVATE hotd_net)
+if(NOT ANDROID)   # (quest: the APK is the game alone; the developer tools stay desktop programs)
 # the netplay tests without the game: crypto, the handshake, replay / tamper rejection, a parser fuzz (127.0.0.1 only)
 add_executable(hotd_nettest src/net/nettest.cpp)
 target_link_libraries(hotd_nettest PRIVATE hotd_net)
@@ -104,6 +127,7 @@ endif()
 # shake to reload (src/game/shake.h) against synthetic sensor traces, offline (relpad)
 add_executable(hotd_shaketest src/game/shake_test.cpp)
 target_include_directories(hotd_shaketest PRIVATE src)
+endif()
 
 # OGG music (Music\TrackNN.ogg) needs stb_vorbis: HOTD_STB_DIR = a folder with stb_vorbis.c, or HOTD_FETCH_STB=ON to
 # download nothings/stb from GitHub. Without it the game builds and runs without music (the cues are logged).
@@ -166,7 +190,17 @@ if(HOTD_ARCADE_SOUND AND NOT HOTD_ARCADE_SOUND_DEFAULT)
     message(WARNING "HOTD_ARCADE_SOUND: Musashi or the SCSP sources not found; arcade sound off")
     set(HOTD_ARCADE_SOUND OFF)
 endif()
+# quest: a cross build (Android) cannot run its own m68kmake: HOTD_M68KOPS_DIR = a folder with the m68kops.c / .h a
+# host build generated (the Windows build's build/m68kgen; tools/make_quest_apk.ps1 passes it)
+set(HOTD_M68KOPS_DIR "" CACHE PATH "Pre-generated Musashi m68kops.c / m68kops.h (cross builds)")
+if(HOTD_ARCADE_SOUND AND CMAKE_CROSSCOMPILING AND NOT EXISTS "${HOTD_M68KOPS_DIR}/m68kops.c")
+    message(WARNING "HOTD_ARCADE_SOUND: a cross build needs HOTD_M68KOPS_DIR (a host build's m68kgen); arcade sound off")
+    set(HOTD_ARCADE_SOUND OFF)
+endif()
 if(HOTD_ARCADE_SOUND)
+    if(CMAKE_CROSSCOMPILING)
+        set(HOTD_M68K_GEN ${HOTD_M68KOPS_DIR})
+    else()
     # m68kmake generates m68kops.c / m68kops.h from m68k_in.c
     add_executable(hotd_m68kmake ${HOTD_MUSASHI_DIR}/m68kmake.c)
     if(MSVC)
@@ -179,6 +213,7 @@ if(HOTD_ARCADE_SOUND)
         COMMAND hotd_m68kmake ${HOTD_M68K_GEN} ${HOTD_MUSASHI_DIR}/m68k_in.c
         DEPENDS hotd_m68kmake ${HOTD_MUSASHI_DIR}/m68k_in.c
         COMMENT "Musashi: m68kmake (m68kops.c / m68kops.h)")
+    endif()
     add_library(hotd_arcade_sound STATIC
         ${HOTD_MUSASHI_DIR}/m68kcpu.c
         ${HOTD_M68K_GEN}/m68kops.c
@@ -232,6 +267,7 @@ add_library(hotd_engine STATIC
     src/render/bidi.cpp
     src/game/lang.cpp
     src/render/crt.cpp
+    src/render/gamma.cpp
     src/util/png.cpp
     src/util/png_read.cpp
     src/util/recolour.cpp
@@ -270,8 +306,10 @@ if(WIN32)   # the package's game exe stub (util/game_exe.h): no DLLs (static run
     endif()
     add_dependencies(hotd hotd_presets)
 endif()
+if(NOT ANDROID)
 add_executable(hotd_viewer src/viewer/main.cpp src/game/files_check.cpp)   # files_check: a package's ROM zip -> regions
 target_link_libraries(hotd_viewer PRIVATE hotd_engine)
+endif()
 
 # Ported game logic (one routine per original function), no SDL: proven by hotd_proof against recorded runs.
 add_library(hotd_logic STATIC
@@ -304,6 +342,52 @@ configure_file(src/res/hotd_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/h
 target_link_libraries(hotd PRIVATE hotd_engine hotd_logic)
 if(WIN32)
     target_link_libraries(hotd PRIVATE winhttp)   # util/update_check.cpp
+endif()
+# Experimental modes (user 2026-11-03: not in a public release until they are polished; docs/porting.md "Experimental
+# modes"): The Typing of the Dead 0 and Horde Mode (Survival Mode: HOTD_SURVIVAL_MODE below). ON (development builds, build\Release and the
+# private portable): their menu items, command-line options and High Scores tables. OFF (every release package:
+# tools/make_portable_hotd.ps1 -Release, the GitHub release workflow, the Linux / macOS packages, the Quest APK): none
+# of them is reachable; their options are refused with a message. Their code is still compiled (unreachable)
+option(HOTD_EXPERIMENTAL_MODES "The Typing of the Dead 0 and Horde Mode in the menus / command line (Survival: HOTD_SURVIVAL_MODE)" ON)
+target_compile_definitions(hotd PRIVATE HOTD_EXPERIMENTAL_MODES=$<IF:$<BOOL:${HOTD_EXPERIMENTAL_MODES}>,1,0>)
+message(STATUS "Experimental modes (TotD 0, Horde): ${HOTD_EXPERIMENTAL_MODES}")
+# Survival Mode (user 2026-11-03): in the release builds too, labelled "Very Experimental / Proof of Concept" (its menu
+# item, its help line, a notice when it starts). OFF: left out as the experimental modes are (with them ON it is always in)
+option(HOTD_SURVIVAL_MODE "Survival Mode (Very Experimental / Proof of Concept) with the experimental modes OFF" ON)
+target_compile_definitions(hotd PRIVATE HOTD_SURVIVAL_MODE=$<IF:$<BOOL:${HOTD_SURVIVAL_MODE}>,1,0>)
+message(STATUS "Survival Mode: ${HOTD_SURVIVAL_MODE}")
+# VR mode (docs/vr.md): the VR frame, the desktop preview and the aim (always built: nothing runs without --vr);
+# HOTD_OPENXR=ON adds the OpenXR backend (needs the Khronos OpenXR SDK's loader: find_package(OpenXR), Apache 2.0)
+target_sources(hotd PRIVATE src/vr/vr.cpp src/vr/vr_aim.cpp src/vr/vr_preview.cpp src/vr/vr_scene.cpp)
+# openxr (2026-11-03): the Khronos OpenXR SDK's prebuilt loader (never committed; private/deps/openxr: OpenXRConfig.cmake
+# at its root, include/openxr, x64/bin/openxr_loader.dll, share/doc/openxr/LICENSE). HOTD_OPENXR defaults ON when the
+# SDK is found (OpenXR_DIR, CMAKE_PREFIX_PATH or that folder), OFF otherwise: builds without it work as before.
+# openxr_loader.dll is copied beside hotd.exe (the release packages carry it with its Apache 2.0 licence)
+if(NOT DEFINED OpenXR_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/private/deps/openxr/OpenXRConfig.cmake")
+    set(OpenXR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/private/deps/openxr" CACHE PATH "The OpenXR SDK's config folder")
+endif()
+find_package(OpenXR CONFIG QUIET)
+option(HOTD_OPENXR "Build the OpenXR VR backend (needs the OpenXR SDK: OpenXR_DIR / CMAKE_PREFIX_PATH)" ${OpenXR_FOUND})
+if(HOTD_OPENXR)
+    if(NOT OpenXR_FOUND)
+        find_package(OpenXR CONFIG REQUIRED)
+    endif()
+    message(STATUS "OpenXR (VR headsets): ${OpenXR_DIR}")
+    target_sources(hotd PRIVATE src/vr/vr_openxr.cpp)
+    target_compile_definitions(hotd PRIVATE HOTD_OPENXR)
+    target_link_libraries(hotd PRIVATE OpenXR::openxr_loader)
+    if(WIN32)
+        target_link_libraries(hotd PRIVATE opengl32)   # (wglGetCurrentDC / wglGetCurrentContext: the GL binding)
+        if(MSVC)   # delay-loaded: hotd.exe starts without the DLL (vr_openxr.cpp loads it on --vr openxr, says so if missing)
+            target_link_options(hotd PRIVATE "/DELAYLOAD:openxr_loader.dll")
+            target_link_libraries(hotd PRIVATE delayimp)
+        endif()
+        add_custom_command(TARGET hotd POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:OpenXR::openxr_loader>" "$<TARGET_FILE_DIR:hotd>"
+            VERBATIM)
+    endif()
+else()
+    message(STATUS "OpenXR (VR headsets): not built (no SDK: OpenXR_DIR); --vr preview only")
 endif()
 
 # Windows resources of hotd.exe and hotd_viewer.exe: icon, version information, asInvoker manifest (src/res/hotd.rc.in).
@@ -373,14 +457,17 @@ if(MSVC)
 endif()
 
 # Differential checker: the port against MAME / PC-harness records (docs/proof.md).
+if(NOT ANDROID)
 add_executable(hotd_proof src/proof/main.cpp)
 target_link_libraries(hotd_proof PRIVATE hotd_logic)
 if(MSVC)
     target_compile_definitions(hotd_proof PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
+endif()
 
 foreach(t hotd hotd_engine hotd_viewer hotd_logic hotd_proof hotd_net hotd_nettest hotd_shaketest)
-    if(MSVC)
+    if(NOT TARGET ${t})   # (quest: Android builds the game alone)
+    elseif(MSVC)
         target_compile_options(${t} PRIVATE /W4 /utf-8)
     else()
         # the port's routines keep the original's parameter lists (many unused): GCC / Clang would list thousands
@@ -400,13 +487,24 @@ if(NOT WIN32)
         set(_hotd_rpath "$ORIGIN")
     endif()
     foreach(t hotd hotd_viewer)
+        if(TARGET ${t})
         set_target_properties(${t} PROPERTIES BUILD_RPATH "${_hotd_rpath}" INSTALL_RPATH "${_hotd_rpath}")
+        endif()
     endforeach()
+    # linux (2026-11-03): the C++ runtime linked in (GCC), so a package built with a newer GCC than the player's system
+    # (SteamOS, an older desktop) needs only glibc and the bundled libSDL3 (no GLIBCXX_3.4.xx of the system's libstdc++)
+    option(HOTD_STATIC_CXX_RUNTIME "Link libstdc++ / libgcc statically (Linux packages)" ON)
+    if(HOTD_STATIC_CXX_RUNTIME AND NOT APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        foreach(t hotd hotd_viewer hotd_nettest)
+            target_link_options(${t} PRIVATE -static-libstdc++ -static-libgcc)
+        endforeach()
+    endif()
 endif()
 # netplay's float determinism (docs/netplay.md): the game logic with strict IEEE float arithmetic, no contraction into
 # fused multiply-adds. MSVC's default /fp:precise (said explicitly; x64 without /arch:AVX2 emits no FMA at all)
 foreach(t hotd hotd_logic hotd_proof)
-    if(MSVC)
+    if(NOT TARGET ${t})
+    elseif(MSVC)
         target_compile_options(${t} PRIVATE /fp:precise)
     else()
         target_compile_options(${t} PRIVATE -ffp-contract=off -fno-fast-math)

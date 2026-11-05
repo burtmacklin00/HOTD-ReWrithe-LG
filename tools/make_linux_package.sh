@@ -4,9 +4,12 @@
 # hotd_viewer.sh launchers, the same data/ layout as the Windows package (tools/make_portable_hotd.ps1).
 # NO GAME DATA goes in: the player puts their own arcade ROM zip and PC game in data/arcade and data/pc.
 #
-#   tools/make_linux_package.sh [-b <build folder>] [-o <output folder>] [--no-build] [--no-tar]
+#   tools/make_linux_package.sh [-b <build folder>] [-o <output folder>] [--no-build] [--no-tar] [--experimental]
 #
-# Default build folder: build-linux (cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release ..., docs/porting.md).
+# Default build folder: build-linux (cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+# -DHOTD_EXPERIMENTAL_MODES=OFF ..., docs/porting.md). A release package needs HOTD_EXPERIMENTAL_MODES=OFF (no Typing of
+# the Dead 0 or Horde, Survival Mode in: docs/porting.md "Experimental modes"): the script stops on a build folder with them on,
+# unless --experimental (a package for testing only).
 # Default output: <main checkout>/private/portable/HOTD ReWrithe Linux (inside private/, never committed).
 # For a binary that runs on every SteamOS / older desktop Linux, build in Valve's Steam Runtime "sniper" SDK (glibc
 # 2.31); a build made on a newer distribution needs that distribution's glibc or newer (the script prints the
@@ -17,12 +20,14 @@ build="$repo/build-linux"
 out=""
 dobuild=1
 dotar=1
+experimental=0
 while [ $# -gt 0 ]; do
     case "$1" in
         -b) build="$2"; shift 2 ;;
         -o) out="$2"; shift 2 ;;
         --no-build) dobuild=0; shift ;;
         --no-tar) dotar=0; shift ;;
+        --experimental) experimental=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -32,6 +37,13 @@ if [ ! -d "$priv" ]; then   # a git worktree: private/ is in the main checkout
     [ -n "$common" ] && priv="$(dirname "$common")/private"
 fi
 [ -z "$out" ] && out="$priv/portable/HOTD ReWrithe Linux"
+
+# 0. the experimental modes off (a release package; docs/porting.md "Experimental modes")
+if [ "$experimental" = 0 ] && ! grep -Eq '^HOTD_EXPERIMENTAL_MODES:BOOL=(OFF|0|FALSE|NO)$' "$build/CMakeCache.txt" 2>/dev/null; then
+    echo "error: $build is not configured with -DHOTD_EXPERIMENTAL_MODES=OFF (a release package leaves out Typing of the Dead 0," >&2
+    echo "       and Horde; Survival Mode stays in); reconfigure it, or pass --experimental for a testing package" >&2
+    exit 2
+fi
 
 # 1. Release build
 if [ "$dobuild" = 1 ]; then
@@ -48,7 +60,10 @@ mkdir -p "$out/bin"
 cp "$build/hotd" "$build/hotd_viewer" "$out/bin/"
 strip --strip-unneeded "$out/bin/hotd" "$out/bin/hotd_viewer" 2>/dev/null || true
 sdlOf() { ldd "$1" | sed -n 's/^.*libSDL3\.so\.0 => \(.*\) (0x[0-9a-f]*)$/\1/p'; }   # (paths may have spaces)
-sdl="$(sdlOf "$build/hotd")"
+# linux2 (2026-11-03): an SDL built by the build itself (HOTD_FETCH_SDL3) first: ldd would pick a system libSDL3 (e.g.
+# a distribution's 3.4 with X11 / Wayland linked in) over it, as the exe's rpath is only $ORIGIN
+sdl="$build/_deps/sdl3-build/libSDL3.so.0"
+[ -f "$sdl" ] || sdl="$(sdlOf "$build/hotd")"
 [ -f "$sdl" ] || { echo "libSDL3.so.0 not found (ldd $build/hotd)" >&2; exit 1; }
 cp -L "$sdl" "$out/bin/libSDL3.so.0"
 readelf -d "$out/bin/hotd" | grep -q 'R.*PATH.*\$ORIGIN' || { echo "bin/hotd has no rpath \$ORIGIN (CMakeLists.txt)" >&2; exit 1; }
@@ -68,7 +83,16 @@ cat > "$out/hotd_viewer.sh" <<'EOF'
 cd "$(dirname "$0")" || exit 1
 exec ./bin/hotd_viewer "$@"
 EOF
-chmod +x "$out/hotd.sh" "$out/hotd_viewer.sh" "$out/bin/hotd" "$out/bin/hotd_viewer"
+# linux (2026-11-03): the setup (as HOTDReWritheSetup.bat on Windows): the game files check, Install (a copy in a
+# folder of your choice with desktop / applications menu entries) or Play from here
+cat > "$out/hotd-setup.sh" <<'EOF'
+#!/bin/sh
+# Opens the setup of The House of the Dead: ReWrithe: checks your game files; Install copies the game to a folder of
+# your choice (default ~/Games/HOTD ReWrithe) with a desktop and an applications menu entry; or Play from here.
+cd "$(dirname "$0")" || exit 1
+exec ./bin/hotd --setup "$@"
+EOF
+chmod +x "$out/hotd.sh" "$out/hotd_viewer.sh" "$out/hotd-setup.sh" "$out/bin/hotd" "$out/bin/hotd_viewer"
 
 # empty: for the player's own files only (a note in each: a tar keeps empty folders, but the player sees what goes where)
 mkdir -p "$out/data/pc" "$out/data/arcade" "$out/data/music" "$out/data/mods"
@@ -96,6 +120,11 @@ Quick start (desktop Linux)
    the main menu comes up. Mouse = gun.
 Settings, the log (hotd.log) and crash reports are in this folder's settings/. Everything else works as in the
 Windows package's README (menus, controls, Options, Online Co-op).
+Or run ./hotd-setup.sh: drop or pick your ROM zip and PC game (a folder, .zip, CD image .cue / .bin / .iso; .7z / .rar
+need bsdtar or 7-Zip installed), then Install (a copy in ~/Games/HOTD ReWrithe or a folder you choose, with a desktop
+icon and an applications menu entry; nothing outside that folder and those entries is written; uninstall:
+bin/hotd --uninstall in the installed copy) or Play from here.
+Updates: the game says when a new version is out and opens the download page (Linux does not update itself).
 
 Steam Deck (SteamOS)
 --------------------
@@ -106,7 +135,8 @@ Steam Deck (SteamOS)
    - in the game: run ./hotd.sh once, Options -> System -> Add to Steam, with Steam CLOSED (it rewrites its list when
      it exits): right-click Steam in the task bar -> Exit first, then press Add, then start Steam again; or
    - by hand: Steam -> Games -> "Add a Non-Steam Game to My Library" -> Browse -> pick hotd.sh (set "File type: All
-     files" to see it) -> Add Selected Programs.
+     files" to see it) -> Add Selected Programs (bin/hotd itself works too: it finds its folder by itself). Steam's
+     Launch Options are passed on, e.g. --windowed.
 3. Back to Game Mode: the game is in the Library under Non-Steam. It starts fullscreen at 1280 x 800.
 Controls on the Deck: Steam Input gives the game an Xbox-style pad: a stick aims, R2 shoots, L2 reloads, Start
 pauses. Gyro aim: pick a Steam Input layout that passes the gyro to the game as a motion sensor (a "Gamepad with
@@ -124,7 +154,8 @@ Windows Firewall part).
 
 Requirements
 ------------
-64-bit x86 Linux with OpenGL 3.3 (Mesa / the GPU driver), glibc as new as the build machine's (see the release notes).
+64-bit x86 Linux with OpenGL 3.3 (Mesa / the GPU driver) and glibc 2.31 or newer (the release is built in the Steam
+Runtime 3 "sniper" SDK: SteamOS 3, Linux Mint 20+, Ubuntu 20.04+, Debian 11+, current Fedora / Arch).
 The bundled bin/libSDL3.so.0 is used (not the system's). Audio through PipeWire / PulseAudio / ALSA (SDL's own).
 Made by tools/make_linux_package.sh in the rewrite's repository.
 EOF
@@ -133,6 +164,14 @@ EOF
 for d in ui fonts lang mods; do
     [ -d "$repo/data/$d" ] && mkdir -p "$out/data/$d" && cp -R "$repo/data/$d/." "$out/data/$d/"
 done
+# a release package: the modes left out (Typing of the Dead 0, Horde) leave the language files too, as the Windows
+# package (make_portable_hotd.ps1 -Release; the user, 2026-11-03: "don't even show them")
+if [ "$experimental" = 0 ]; then
+    for f in "$out"/data/lang/*.txt; do
+        awk '{ if ($0 !~ /^[ \t]*#/ && index($0, " = ")) { k = tolower(substr($0, 1, index($0, " = ") - 1));
+               if (k ~ /typing of the dead|totd|horde/) next } print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    done
+fi
 cp "$repo/LICENSE" "$out/LICENSE.txt"
 cp "$repo/NOTICE.md" "$out/NOTICE.txt"
 cp "$repo/docs/release/CREDITS.txt" "$out/CREDITS.txt"
@@ -155,7 +194,8 @@ echo "Package: $out"
 echo "$(find "$out" -type f | wc -l) files, $(du -sh "$out" | cut -f1); needs $glibc or newer; SDL $(basename "$(readlink -f "$sdl")")"
 if [ "$dotar" = 1 ]; then
     ver="$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' "$build/CMakeCache.txt" 2>/dev/null)"   # (CMakeLists.txt project VERSION)
-    tarball="$(dirname "$out")/hotd-rewrithe-${ver:+v$ver}${ver:-$(date +%Y-%m-%d)}-linux-x86_64.tar.gz"
+    [ -n "$ver" ] && tag="v$ver" || tag="$(date +%Y-%m-%d)"   # (was "v1.1.01.1.0": both expansions applied)
+    tarball="$(dirname "$out")/hotd-rewrithe-$tag-linux-x86_64.tar.gz"
     tar -C "$(dirname "$out")" -czf "$tarball" "$(basename "$out")"
     (cd "$(dirname "$tarball")" && sha256sum "$(basename "$tarball")") > "$(dirname "$out")/SHA256SUMS-linux.txt"
     echo "Tarball: $tarball ($(du -h "$tarball" | cut -f1))"

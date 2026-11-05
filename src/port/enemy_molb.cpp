@@ -337,7 +337,8 @@ template <class P> void Game<P>::kind35_molb_lunge_wait(uint32_t obj)
 // (gravity 0.0408); else molb_lunge_target is freed and it regroups
 template <class P> void Game<P>::kind35_molb_leap_decide(uint32_t obj)
 {
-    if (combat_active() == 0 || mem.u32(G::molb_leaping) != 0 || ((rand() & 7) & 0xFF) == 0) {
+    if (combat_active() == 0 || mem.u32(G::molb_leaping) != 0 || ((rand() & 7) & 0xFF) == 0 ||
+        (gAttackHold && gAttackHold(obj))) {   // (ours: The Typing of the Dead 0's attack window, game.h: it regroups)
         mem.set32(G::molb_lunge_target, 0);
         kind35_molb_regroup(obj);
         return;

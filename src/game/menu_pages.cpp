@@ -4,10 +4,12 @@
 
 #include "game/chapters.h"
 #include "game/lang.h"
+#include "game/lives.h"
 #include "game/pad_prompts.h"
 #include "game/pads.h"
 #include "render/bidi.h"
 #include "render/crt.h"
+#include "render/gamma.h"
 #include "render/gl_backend.h"
 #include "render/renderer.h"
 #include "util/png_read.h"
@@ -87,12 +89,13 @@ void volumeList(std::vector<X>& r, int& v, std::function<void()> save)
     r.back().barStep = 5;   // (the drag snaps to 5 %; Left / Right step 5 %)
 }
 // the Crosshair row's built-in styles in the list's order (sights.h; 5 / 8 removed) and their names
-constexpr int kSightList[] = {0, 1, 2, 3, 4, 6, 7, 10};
+// (gunfb: Off, no crosshair drawn, for the light guns, after the capped cross)
+constexpr int kSightList[] = {0, 1, 2, 3, 4, 6, 7, 10, 11};
 constexpr int kSightListN = int(sizeof kSightList / sizeof kSightList[0]);
 const char* sightMenuName(int style)
 {
     static const char* const k[kSightStyles] = {"Auto", "Arcade", "PC", "Cross", "Ring + Dot", "Dotted Ring", "Brackets",
-                                                "Gap Cross", "Pointer", "", "Capped Cross"};
+                                                "Gap Cross", "Pointer", "", "Capped Cross", "Off"};
     return k[std::clamp(style, 0, kSightStyles - 1)];
 }
 }
@@ -108,7 +111,7 @@ static void teamFlashRow(std::vector<X>& r, LaunchConfig& c, std::function<void(
                      return std::string(k[std::clamp(c.teamFlash - 1, 0, 2)]);
                  },
                  [&c, save]() { c.teamFlash = c.teamFlash <= 1 ? 2 : c.teamFlash == 2 ? 3 : 1; save(); },
-                 "Online: the other PCs' players' shot flashes in full, reduced or off. Players on this PC always show in full"});
+                 "The shot flashes of CPU teammates and of the other PCs' players online: full, reduced or off. Players on this PC always show in full"});
     indexed(r, {"Full", "Reduced", "Off"}, [&c]() { return std::clamp(c.teamFlash - 1, 0, 2); },
             [&c, save](int k) { c.teamFlash = k + 1; save(); });
 }
@@ -172,6 +175,53 @@ static void resetRow(std::vector<X>& r, const MenuHooks& h, int page)
                  "Put every setting on this page back to its default (asks first)"});
 }
 
+// fxux (user 2026-11-03: "Settings in the pause menu, the full Options pages over the paused game"): the rows of a page
+// opened from the pause. The game copies the settings it can use at once (main.cpp liveSettings: the draw-only Video
+// ones, the volumes, the controls, the crosshairs); a setting the game read at its start says "from the next game"
+// in its help, a row that would leave the game (Repair, What's New, Online Co-op ...) or reload what the game uses
+// (Language, Mods) is grey with why. Online every game rule (the host's for both PCs) is grey too
+void menuInGameRows(std::vector<Frontend::Extra>& rows, const std::string& title, bool online)
+{
+    static const char* const kNext = " (In a game: from the next game.)";
+    static const char* const kLocked = "Not in a game: Exit to the main menu to change it";
+    static const char* const kOnline = "Online: the host's settings are used in this game";
+    const bool rules = title == "Gameplay" || title == "Advanced" || title == "Options";   // ("Options": the Remake's Game tab)
+    // the rules rows that still apply at once (draw-only or this PC's own)
+    static const char* const kLive[] = {"Hold to Skip Cut-scenes", "Score Display", "Teammate Crosshair Flashes", "Auto Reload",
+                                        "Edge Reload", "Chapter Retry", "Advanced", "Music Numbering"};
+    static const char* const kNextRows[] = {"Models", "Aspect", "Sound", "Player 1 Input", "Player 2 Input", "Player 3 Input",
+                                            "Player 4 Input", "Light Gun Type", "Players in Arcade", "Solo Player Seat"};
+    static const char* const kLockRows[] = {"Repair / Change Files", "Check for Updates", "What's New", "Language", "Local 2 Players",
+                                            "Local 4 Players", "Online Co-op", "Trailer Mode", "Game Speed"};
+    auto in = [](const std::string& n, const char* const* list, size_t count) {
+        return std::find_if(list, list + count, [&n](const char* s) { return n == s; }) != list + count;
+    };
+    for (Frontend::Extra& e : rows) {
+        if (e.name.empty() || e.raw)
+            continue;
+        const bool volume = e.help.rfind("The sound effects' volume", 0) == 0 || e.help.rfind("The music's volume", 0) == 0;
+        std::string lock;
+        if (title == "Mods")
+            lock = "Mods apply when a game starts: Exit to the main menu to change them";
+        else if (in(e.name, kLockRows, std::size(kLockRows)))
+            lock = kLocked;
+        else if (online && rules && !volume && e.name != "Advanced")
+            lock = kOnline;
+        if (!lock.empty() && e.click) {
+            const auto was = e.off;   // (a reason of its own first)
+            e.off = [was, lock]() {
+                const std::string w = was ? was() : std::string();
+                return w.empty() ? lock : w;
+            };
+            continue;
+        }
+        const bool next = in(e.name, kNextRows, std::size(kNextRows)) ||
+                          (rules && !volume && !in(e.name, kLive, std::size(kLive)) && e.value);
+        if (next && e.help.find(kNext) == std::string::npos)
+            e.help += kNext;
+    }
+}
+
 void menuReset(LaunchConfig& c, int page)
 {
     const LaunchConfig d;
@@ -179,9 +229,11 @@ void menuReset(LaunchConfig& c, int page)
     case kCatVideo:
         c.models = d.models, c.aspect = d.aspect, c.menuStyle = d.menuStyle, c.liveBackground = d.liveBackground;
         c.fullscreen = d.fullscreen, c.exclusive = d.exclusive, c.frameRate = d.frameRate, c.menuFps = d.menuFps, c.vsync = d.vsync, c.smooth = d.smooth;
-        c.crosshairs = d.crosshairs, c.hitSparks = d.hitSparks, c.muzzleFlash = d.muzzleFlash, c.bloodParticles = d.bloodParticles;
+        c.crosshairs = d.crosshairs, c.hitSparks = d.hitSparks, c.muzzleFlash = d.muzzleFlash, c.shotFlashSize = d.shotFlashSize, c.showCrosshairs = d.showCrosshairs;
+        c.bloodParticles = d.bloodParticles, c.clearMarks = d.clearMarks, c.transparency = d.transparency;
         c.resFullW = d.resFullW, c.resFullH = d.resFullH, c.resWinW = d.resWinW, c.resWinH = d.resWinH;
         c.crt = d.crt;
+        c.gamma = d.gamma, c.menuGamma = d.menuGamma;
         break;
     case kCatAudio:
         c.sound = d.sound, c.sfxVolume = d.sfxVolume, c.music = d.music, c.musicVolume = d.musicVolume, c.menuMusic = d.menuMusic;
@@ -191,9 +243,12 @@ void menuReset(LaunchConfig& c, int page)
         c.gunKind = d.gunKind, c.gunFlash = d.gunFlash, c.gunBorder = d.gunBorder;   // (padpass)
         c.padPrompts = d.padPrompts, c.buttonStyle = d.buttonStyle, c.iconOutline = d.iconOutline;   // (padglyphs; menus3)
         c.touchCursor = d.touchCursor, c.gyroCursor = d.gyroCursor, c.cursorSpeed = d.cursorSpeed;
+        c.gyroCursorSpeed = d.gyroCursorSpeed, c.mouseSens[0] = d.mouseSens[0], c.mouseSens[1] = d.mouseSens[1];   // (#36)
         for (int p = 0; p < 4; ++p) c.gunDev[p].clear(), c.gunName[p].clear();   // (ipolish: Light Guns: Assign)
         break;
     case kCatGameplay:
+        c.lives = d.lives;   // (#30: Starting Lives / Max Lives)
+        c.chapterRetry = d.chapterRetry;   // (#5)
         c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
         break;
@@ -313,9 +368,63 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         r.push_back({"Gun Muzzle Flash", [&c]() { return onOff(c.muzzleFlash); },
                      [&c, save]() { c.muzzleFlash = !c.muzzleFlash; save(); },
                      "The flash on the guns of Rogan and G when they fire in the cut-scenes (draw only)"});
+        // gunfb (a light-gun player 2026-11-03 found the shot flash too large): the flash at the aim when you fire,
+        // the arcade's size by default (checked against MAME: the same share of the picture at any resolution)
+        r.push_back({"Shot Flash Size", [&c]() {
+                         static const char* const k[3] = {"Small", "Arcade", "Large"};
+                         return std::string(k[std::clamp(c.shotFlashSize, 0, 2)]);
+                     },
+                     [&c, save]() { c.shotFlashSize = (c.shotFlashSize + 1) % 3; save(); },
+                     "The flash where you shoot: Small, Arcade (the original's size) or Large (draw only)"});
+        r.back().clickBack = [&c, save]() { c.shotFlashSize = (c.shotFlashSize + 2) % 3; save(); };
+        indexed(r, {"Small", "Arcade", "Large"}, [&c]() { return std::clamp(c.shotFlashSize, 0, 2); },
+                [&c, save](int k) { c.shotFlashSize = k; save(); });
         r.push_back({"Blood Particles", [&c]() { return onOff(c.bloodParticles); },
                      [&c, save]() { c.bloodParticles = !c.bloodParticles; save(); },
                      "The blood spray and bursts where shots hit (draw only; the blood marks stay)"});
+        // fxux (user 2026-11-03: "Hit Marks and Transparency are broken and bad UX"): the two see-through settings side
+        // by side in the same words: "Arcade Dots" (the arcade's stipple: half the pixels, or a dot pattern by the
+        // cover) and "Smooth" (no dots). Hit Marks (bugs1 #35): the 2D marks when a player is hit. With the PC models
+        // its first choice is the PC's own solid mark pictures ("Solid", not dots)
+        {
+            auto setM = [&c, save](int k) { c.clearMarks = k != 0; save(); };
+            r.push_back({"Hit Marks", [&c]() { return std::string(c.clearMarks ? "Smooth" : c.models == 1 ? "Solid" : "Arcade Dots"); },
+                         [&c, save]() { c.clearMarks = !c.clearMarks; save(); },
+                         "The blood and claw marks on the screen when you are hit: Arcade Dots (as the arcade; Solid with the PC "
+                         "models) or Smooth (evenly see-through, as the 1998 PC's Direct3D)"});
+            r.back().clickBack = r.back().click;
+            indexed(r, {c.models == 1 ? "Solid" : "Arcade Dots", "Smooth"}, [&c]() { return c.clearMarks ? 1 : 0; }, setM);
+            previewed(r, h, "marks");
+            r.back().previewLook = {c.models == 1 ? "Solid Mark" : "Dotted Edge", c.models == 1 ? "See-through" : "Smooth Edge"};   // (relfix2)
+        }
+        // team (2026-11-03; a trailer comment asked for the emulator's "mesh transparency"): the see-through texels'
+        // edges (blood splatters, floor stains, water, the creatures' wounds) stippled by their cover in a screen-door
+        // pattern like the Model 2's checker polygons (Arcade Dots, launcher.ini transparency=2), cut at half cover with
+        // the solid texels' colour (Smooth, 1), or cut with the transparent texels' colour in the mix (Smooth, Dark
+        // Edges, 0: the look before the setting). Auto (3, the default): Arcade Dots with the arcade models. fxux: the
+        // list in the order Auto, Arcade Dots, Smooth, Dark Edges; the PC models have no partly covered texels (colour
+        // key, point sampling: sharp edges, as the 1998 PC): grey there, with why
+        {
+            static const int kOrder[4] = {3, 2, 1, 0};   // (the list's choices -> launcher.ini values)
+            auto at = [&c]() { return 3 - std::clamp(c.transparency, 0, 3); };
+            auto setT = [&c, save](int k) { c.transparency = kOrder[std::clamp(k, 0, 3)]; save(); };
+            r.push_back({"Transparency", [&c]() {
+                             static const char* const kName[4] = {"Smooth, Dark Edges", "Smooth", "Arcade Dots", "Auto: Arcade Dots"};
+                             return std::string(c.models == 1 ? "PC: Sharp Edges" : kName[std::clamp(c.transparency, 0, 3)]);
+                         },
+                         [at, setT]() { setT((at() + 1) % 4); },
+                         "The see-through edges of blood and water in the 3D: Arcade Dots (a dot pattern, as the arcade), Smooth, "
+                         "or Smooth, Dark Edges (the old look). Auto: Arcade Dots"});
+            r.back().clickBack = [at, setT]() { setT((at() + 3) % 4); };
+            indexed(r, {"Auto", "Arcade Dots", "Smooth", "Smooth, Dark Edges"}, at, setT);
+            r.back().off = [&c]() {
+                return c.models == 1 ? std::string("The PC models' blood and water have sharp edges (as the 1998 PC): this setting is for the arcade models")
+                                     : std::string();
+            };
+            previewed(r, h, "transp");
+            r.back().previewList = {1, 2, 3};   // (Arcade Dots, Smooth, Dark Edges side by side; Auto: Arcade Dots)
+            r.back().previewLook = {"Dotted Edge", "Dotted Edge", "Smooth Edge", "Dark Edge"};   // (relfix2)
+        }
         // angle (render/gl_backend.h): OpenGL 3.3, or DirectX through ANGLE for older graphics; at the next start
         {
             static const char* const kRenderers[] = {"Auto", "OpenGL", "DirectX (ANGLE)"};
@@ -331,6 +440,31 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // depthopt (user 2026-10-27): no Draw Depth row (clipfix's): with the arcade models Arcade Sort is the arcade's
         // own picture and the Depth Buffer only adds glitches. launcher.ini drawdepth= and --draw-depth stay (advanced,
         // docs/modding.md); a mod's own models / pictures pick theirs (mod.ini depth =, assets/mods.h)
+        // gamma (render/gamma.h, GitHub issue #23 "the game is too dark"): a power curve over the whole picture, 0.60 -
+        // 2.00 in steps of 0.05 as a bar (0 .. 140 over the 0.60 floor); menu.cfg + save only: the frames pick it up
+        // (the menu's own frames too: the change shows at once)
+        // polish (user 2026-11-03): two of them, Game Gamma (the play: launcher.ini gamma=, --gamma) and Menu Gamma (the
+        // menus, the Gallery, the front-end screens: menugamma=, --menu-gamma)
+        for (int which = 0; which < 2; ++which) {
+            int* const g = which == 0 ? &c.gamma : &c.menuGamma;
+            auto text = [](int v) { char b[8]; return std::string(gammaText(v, b)); };
+            auto setG = [g, save](int v) { *g = std::clamp(v, int(kGammaMin), int(kGammaMax)); save(); };
+            r.push_back({which == 0 ? "Game Gamma" : "Menu Gamma", [g, text]() { return text(*g); },
+                         [g, setG]() { setG(*g >= kGammaMax ? kGammaMin : *g + kGammaStep); },
+                         which == 0 ? "The play's picture: brighter dark tones above 1.00 (the original), darker below; black stays black. "
+                                      "The cabinets looked brighter: try 1.30 to 1.60"
+                                    : "The menus, the Gallery and the other screens outside the play: brighter above 1.00 (the original), "
+                                      "darker below"});
+            r.back().clickBack = [g, setG]() { setG(*g <= kGammaMin ? kGammaMax : *g - kGammaStep); };
+            constexpr int n = (kGammaMax - kGammaMin) / kGammaStep + 1;
+            indexed(r, namesOf(n, [text](int i) { return text(kGammaMin + i * kGammaStep); }),
+                    [g]() { return (*g - kGammaMin) % kGammaStep == 0 ? (*g - kGammaMin) / kGammaStep : -1; },
+                    [setG](int k) { setG(kGammaMin + k * kGammaStep); });
+            r.back().barGet = [g]() { return *g - kGammaMin; };
+            r.back().barSet = [setG](int v) { setG(kGammaMin + (v + kGammaStep / 2) / kGammaStep * kGammaStep); };
+            r.back().barMax = kGammaMax - kGammaMin;
+            r.back().barStep = kGammaStep;
+        }
         // crt (render/crt.h, worker "crt"): the preset here, the rest on its page; menu.cfg + save only (the frames
         // pick cfg.crt up)
         r.push_back({"CRT Filter", [&c]() { return std::string(crtPresetName(c.crt.preset)); },
@@ -346,6 +480,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "Off: no crosshairs in the game (as the arcade with light guns); the Firing Range still shows them"});
         r.push_back({"Crosshairs", []() { return page("Firing Range"); }, [h]() { if (h.rangePage) h.rangePage(); },
                      "Each player's crosshair (style, colour, size, thickness), tried out on a firing range"});
+        // (Light Gun Edition: v1.2.0's Show Crosshairs is the row above, ours: one row, launcher.ini crosshairs=)
         break;
     case kCatAudio:
         r.push_back({"Sound", [&c]() { return std::string(c.sound == 1 ? "Arcade" : c.sound == 2 ? "PC" : "Auto"); },
@@ -510,6 +645,34 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
             r.push_back({"Arcade textures keep their colour for now", nullptr, nullptr,
                          "The custom blood colour does not change the arcade models' own textures yet"});
         }
+        // GitHub #30 (user 2026-11-03): the lives a player starts with and the most a life up / a chapter's bonus brings,
+        // two settings (game/lives.h; the arcade's operator menu sets them as one of 12 pairs; the default 3 up to 5)
+        {
+            const auto setLives = [&c, save](int s, int m) { c.lives = livesCode(s, m); save(); };
+            r.push_back({"Starting Lives", [&c]() { return std::to_string(livesStartOf(c.lives)); },
+                         [&c, setLives]() { const int s = livesStartOf(c.lives) % kLivesCap + 1; setLives(s, std::max(s, livesMostOf(c.lives))); },
+                         "The lives each player starts with (and gets again with a continue): every player, 3P / 4P too"});
+            indexed(r, namesOf(kLivesCap, [](int i) { return std::to_string(i + 1); }), [&c]() { return livesStartOf(c.lives) - 1; },
+                    [&c, setLives](int k) { setLives(k + 1, std::max(k + 1, livesMostOf(c.lives))); });
+            r.back().clickBack = [&c, setLives]() {
+                const int s = (livesStartOf(c.lives) + kLivesCap - 2) % kLivesCap + 1;
+                setLives(s, std::max(s, livesMostOf(c.lives)));
+            };
+            r.push_back({"Max Lives", [&c]() { return std::to_string(livesMostOf(c.lives)); },
+                         [&c, setLives]() { const int m = livesMostOf(c.lives) % kLivesCap + 1; setLives(std::min(m, livesStartOf(c.lives)), m); },
+                         "The most lives a player can have: life-ups and a chapter's bonus stop there (the arcade's default: 5)"});
+            indexed(r, namesOf(kLivesCap, [](int i) { return std::to_string(i + 1); }), [&c]() { return livesMostOf(c.lives) - 1; },
+                    [&c, setLives](int k) { setLives(std::min(k + 1, livesStartOf(c.lives)), k + 1); });
+            r.back().clickBack = [&c, setLives]() {
+                const int m = (livesMostOf(c.lives) + kLivesCap - 2) % kLivesCap + 1;
+                setLives(std::min(m, livesStartOf(c.lives)), m);
+            };
+        }
+        // GitHub #5 (user 2026-11-03: "Level retry ... like in the remake"): the pause's Retry Chapter and the game over's
+        // question; the chapter from its start, each player's score and lives as the chapter began
+        r.push_back({"Chapter Retry", [&c]() { return onOff(c.chapterRetry); }, [&c, save]() { c.chapterRetry = !c.chapterRetry; save(); },
+                     "Pause and game over: Retry Chapter starts the chapter again, scores and lives as it began. Offline arcade games"});
+        listed(r, {"Off", "On"});
         r.push_back({"Auto Reload", [&c]() { return onOff(c.autoReload); }, [&c, save]() { c.autoReload = !c.autoReload; save(); },
                      "An empty gun reloads by itself (not in the originals): every player, 3P / 4P too; online the host's"});
         r.push_back({"Edge Reload", [&c]() { return onOff(c.edgeReload); }, [&c, save]() { c.edgeReload = !c.edgeReload; save(); },
@@ -517,8 +680,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // Light Gun Edition: the fun modes (local games; online games are always played as normal)
         r.push_back({"Flashlight Mode", [&c]() { return onOff(c.flashlight); }, [&c, save]() { c.flashlight = !c.flashlight; save(); },
                      "Fun mode: the mansion goes dark and each player's gun lights the screen where it aims"});
-        r.push_back({"Big Heads", [&c]() { return onOff(c.bigHeads); }, [&c, save]() { c.bigHeads = !c.bigHeads; save(); },
-                     "Fun mode: every creature's head drawn nearly twice as big"});
+        // (Light Gun Edition: Big Heads: the ReWrithe's own Big Head mod since v1.2.0, Options > Mods)
         r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { c.shotgun = !c.shotgun; save(); },
                      "Fun mode: each shot hits a much wider area, but the gun holds only 3 shells"});
         r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { c.freeFire = !c.freeFire; save(); },
@@ -1058,17 +1220,24 @@ std::vector<Frontend::Extra> menuCoopRows(LaunchConfig& c, const MenuHooks& h)
                  "How many play from the start of Arcade / Chapter Select (the others join with their trigger / start button)"});
     listed(r, {"1", "2", "3", "4"});
     experimental(r, [&c]() { return c.players >= 3; });
+    // GitHub #29 (user 2026-11-03): one player in player 2's seat (G, the blue crosshair, the right HUD), as the arcade's
+    // player 2 start button alone; at the title the start button pressed picks the seat by itself
+    r.push_back({"Solo Player Seat", [&c]() { return std::string(c.soloSeat == 1 ? "Player 2" : "Player 1"); },
+                 [&c, save]() { c.soloSeat = c.soloSeat == 1 ? 0 : 1; save(); },
+                 "Which seat a 1-player game plays in: Player 2 is G with the blue crosshair (as pressing 2P start alone)"});
+    listed(r, {"Player 1", "Player 2"});
+    r.back().off = [&c]() { return c.players == 1 ? std::string() : std::string("Only for 1 player"); };
     // computer teammates (local play): player 2 (any game), players 3 / 4 (the 4P mode)
     for (int p = 1; p < 4; ++p) {
         r.push_back({"Player " + std::to_string(p + 1) + ": Human / CPU",
                      [&c, p]() {
-                         static const char* const k[4] = {"Human", "CPU Easy", "CPU Normal", "CPU Hard"};
-                         return std::string(k[std::clamp(c.seatBot[p], 0, 3)]);
+                         static const char* const k[5] = {"Human", "CPU Easy", "CPU Normal", "CPU Hard", "CPU Expert"};
+                         return std::string(k[std::clamp(c.seatBot[p], 0, 4)]);
                      },
-                     [&c, save, p]() { c.seatBot[p] = (c.seatBot[p] + 1) % 4; save(); },
+                     [&c, save, p]() { c.seatBot[p] = (c.seatBot[p] + 1) % 5; save(); },
                      "Player " + std::to_string(p + 1) + " played by you or by the computer (local play" +
                          (p >= 2 ? std::string(", 4 players mode)") : std::string(")"))});
-        listed(r, {"Human", "CPU Easy", "CPU Normal", "CPU Hard"});
+        listed(r, {"Human", "CPU Easy", "CPU Normal", "CPU Hard", "CPU Expert"});
         if (p >= 2) experimental(r);
     }
     return r;
@@ -1180,6 +1349,9 @@ const char* padFieldHelp(const char* key)
         {"touch", "The touchpad: off, a pointer, or a trackpad"},
         {"touchclick", "The touchpad's click: reload or shoot"},
         {"aimsens", "How fast this player's pad aims: the sticks, the gyro and the trackpad (100%: as tuned)"},
+        {"sticksens", "The sticks' aim alone, on top of Sensitivity and Aim Sensitivity (100%: as tuned)"},
+        {"gyrosens", "The gyro's aim alone, on top of Sensitivity and Aim Sensitivity (100%: as tuned)"},
+        {"touchsens", "The trackpad's aim alone, on top of Sensitivity and Aim Sensitivity (100%: as tuned)"},
         {"trigger", "How far the trigger goes in before it fires"},
         {"adaptive", "DualSense: the trigger's gun-like resistance"},
         {"rumblehit", "Vibration when you are hit"},
@@ -1221,7 +1393,12 @@ std::string previewKey(const std::string& name, const LaunchConfig& c, bool pcOk
         m = k;
     else if (kind == "blood" && k >= 0 && k < 6)
         blood = previewBloodRgb(k, c.bloodRgb);
-    else
+    else if (kind == "marks" && k >= 0 && k < 2)   // fxux: "marks|<models>|<0 / 1>" (no crosshair: as the game drew it)
+        return "marks|" + std::to_string(m) + "|" + std::to_string(k);
+    else if (kind == "transp" && k >= 0 && k < 4 && m == 0) {   // fxux: the list's order Auto, Dots, Smooth, Dark Edges
+        static const int kMode[4] = {2, 2, 1, 0};   // (Auto with the arcade models: Arcade Dots)
+        return "transp|0|" + std::to_string(kMode[k]);
+    } else
         return std::string();
     const SeatSight& s = c.sights[0];
     char b[160];
@@ -1230,9 +1407,26 @@ std::string previewKey(const std::string& name, const LaunchConfig& c, bool pcOk
     return b;
 }
 
-std::string previewBaseFile(const std::string& dir, int models, int kind)
+std::string previewBaseFile(const std::string& dir, int models, int kind, int variant)
 {
-    return dir + (kind == kPreviewModels ? "/bridge_" : "/base_") + (models == 1 ? "pc" : "arcade") + ".png";
+    const std::string mm = models == 1 ? "pc" : "arcade";
+    if (kind == kPreviewMarks || kind == kPreviewTransp)
+        return dir + (kind == kPreviewMarks ? "/marks_" : "/transp_") + mm + "_" + std::to_string(variant) + ".png";
+    return dir + (kind == kPreviewModels ? "/bridge_" : "/base_") + mm + ".png";
+}
+
+std::string previewKeyFile(const std::string& dir, const std::string& key)
+{
+    const size_t a = key.find('|');
+    if (a == std::string::npos)
+        return std::string();
+    const int m = std::atoi(key.c_str() + a + 1);
+    const std::string kind = key.substr(0, a);
+    const size_t b = key.find('|', a + 1);
+    const int v = b == std::string::npos ? 0 : std::atoi(key.c_str() + b + 1);
+    if (kind == "marks" || kind == "transp")
+        return previewBaseFile(dir, m, kind == "marks" ? kPreviewMarks : kPreviewTransp, v);
+    return previewBaseFile(dir, m, kind == "models" ? kPreviewModels : kPreviewBlood);
 }
 
 bool previewRender(const std::string& key, const std::string& dir, const LaunchConfig& c, const MenuHooks& h,
@@ -1246,8 +1440,9 @@ bool previewRender(const std::string& key, const std::string& dir, const LaunchC
     const uint32_t blood = b == std::string::npos ? 0 : uint32_t(std::strtoul(key.c_str() + b + 1, nullptr, 16));
     // the bases read once per file (a new one: its time changed)
     static std::map<std::string, std::pair<std::filesystem::file_time_type, PreviewImg>> bases;
-    const int kind = key.compare(0, 7, "models|") == 0 ? kPreviewModels : kPreviewBlood;   // (prevbridge: Chapter 1's bridge)
-    const std::string f = previewBaseFile(dir, m, kind);
+    const int kind = key.compare(0, 7, "models|") == 0 ? kPreviewModels : key.compare(0, 6, "marks|") == 0 ? kPreviewMarks
+                     : key.compare(0, 7, "transp|") == 0 ? kPreviewTransp : kPreviewBlood;   // (prevbridge: Chapter 1's bridge)
+    const std::string f = previewKeyFile(dir, key);
     std::error_code ec;
     const auto t = std::filesystem::last_write_time(f, ec);
     if (ec)
@@ -1259,6 +1454,10 @@ bool previewRender(const std::string& key, const std::string& dir, const LaunchC
         if (!readPngRgba(f, img.w, img.h, img.rgba, err) || img.w <= 0)
             return false;
         it = bases.insert_or_assign(f, std::make_pair(t, std::move(img))).first;
+    }
+    if (kind == kPreviewMarks || kind == kPreviewTransp) {   // fxux: the picture as the game drew it
+        rgba = it->second.second.rgba, w = it->second.second.w, hgt = it->second.second.h;
+        return w > 0;
     }
     SightArt art;
     std::vector<CustomSight> sets = h.customSights ? h.customSights() : std::vector<CustomSight>();

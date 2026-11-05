@@ -3,17 +3,34 @@
 Dry run of 2026-10-16 (branch `claude/package`, main at c7ac870): Visual Studio 17 2022 Build Tools, CMake, Windows 11.
 Run from the repo root in PowerShell. The package is made OUTSIDE the repo; nothing from `private\` goes in.
 
+## 0. Experimental modes OFF in every public package (user 2026-11-03)
+
+The Typing of the Dead 0 and Horde Mode are **not** in a public release until they are polished; Survival Mode **is**
+(user 2026-11-03), labelled "Very Experimental / Proof of Concept". Every
+release build is configured with **`-DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON`** ([porting.md](../porting.md#experimental-modes)):
+
+- [ ] Windows: `tools\make_portable_hotd.ps1 -Release` (its own `build-release` folder, configured OFF; it stops if the
+      cache says ON and checks that the exe refuses `--totd`). A hand-made build folder: add the flag to its configure.
+- [ ] GitHub release workflow (`.github/workflows/release.yml`): all three configures carry the flag; its tests check the
+      refusal on Windows, Linux and macOS.
+- [ ] Linux / SteamOS: configure `build-linux` with the flag; `tools/make_linux_package.sh` stops on a build without it.
+- [ ] Quest APK: `tools\make_quest_apk.ps1` configures OFF (`-Experimental` only for a testing APK).
+- [ ] From the package: `bin\hotd.exe --survival courtyard` prints "... not in this version ..." (exit 2); More Modes
+      shows Chapter Select, Co-op, Sonic Mode and Back only; High Scores has no Typing of the Dead 0 / Survival / Horde table.
+
+The user's own builds (`build\Release`, the private portable from `make_portable_hotd.ps1` without `-Release`) keep them ON.
+
 ## 1. Configure a clean Release build with music
 
 SDL3 and stb_vorbis are not downloaded by the build unless asked. Two ways:
 
 ```
 # a) offline (what the dry run used): SDL3 source and stb already on disk
-cmake -S . -B build-package -G "Visual Studio 17 2022" -A x64 -DHOTD_FETCH_SDL3=ON ^
+cmake -S . -B build-package -G "Visual Studio 17 2022" -A x64 -DHOTD_FETCH_SDL3=ON -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON ^
   "-DFETCHCONTENT_SOURCE_DIR_SDL3=<folder of the SDL3 release-3.2.10 source>" "-DHOTD_STB_DIR=<folder with stb_vorbis.c>"
 
 # b) on a machine with internet: SDL3 (tag release-3.2.10) and nothings/stb are fetched from GitHub
-cmake -S . -B build-package -G "Visual Studio 17 2022" -A x64 -DHOTD_FETCH_SDL3=ON -DHOTD_FETCH_STB=ON
+cmake -S . -B build-package -G "Visual Studio 17 2022" -A x64 -DHOTD_FETCH_SDL3=ON -DHOTD_FETCH_STB=ON -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON
 ```
 
 The configure output must contain `OGG music: stb_vorbis from <folder>`. If it says `OGG music: off` the package has no music.
@@ -22,8 +39,10 @@ The configure output must contain `OGG music: stb_vorbis from <folder>`. If it s
 ## 2. Build and package
 
 ```
-powershell -ExecutionPolicy Bypass -File tools\make_portable_hotd.ps1 -Build build-package -Out "<scratch folder>"
+powershell -ExecutionPolicy Bypass -File tools\make_portable_hotd.ps1 -Release -Build build-package -Out "<scratch folder>"
 ```
+
+(`-Release` refuses a build folder whose cache has `HOTD_EXPERIMENTAL_MODES` on, and checks the exe refuses `--totd`.)
 
 Since 2026-10-20 (firstrun) the script also checks the exe (VERSIONINFO, asInvoker manifest, no build paths such as
 `C:\Users`, a warning when the build was not configured with `-DHOTD_LOCAL_ICON=OFF`, no game-data files in the folder)
@@ -112,6 +131,10 @@ window, i.e. the looping music track is decoded and mixed all the time; no "buil
     for float determinism (`-ffp-contract=off` is set; NEON vs SSE maths libraries could still differ).
   - The sniper container: gcc-12 / ninja / SDL3's build dependencies (X11, Wayland, PipeWire headers) are assumed to
     be in the SDK image; if not, add an `apt-get install` step or use `ubuntu-22.04` (then glibc 2.35: no SteamOS 3.4-).
+    (linux2, 2026-11-03: checked locally in the same image: the headers are there, but it ships gcc-10 and gcc-14,
+    no gcc-12 any more: the job now takes the newest `g++-N`. The workflow also runs by hand with a choice of
+    platforms and on a push to the branch `ci`, and the macOS job uses `macos-latest`: docs/porting.md "CI without a
+    release".)
   - stb is fetched at `master` (not pinned): pin a commit for reproducible builds.
   - The Windows job's version check compares the tag with `hotd --version`: a tag that differs from CMakeLists.txt fails.
 

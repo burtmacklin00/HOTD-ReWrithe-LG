@@ -488,7 +488,8 @@ template <class P> void Game<P>::dog_st0_bite(uint32_t obj)
     const uint32_t fc = mem.u32(G::motion_frame_counts + uint32_t(m) * 4);
     if (f % fc == 42 && (uint32_t(m) & 0xFFFF) == 0x6D) {
         const int32_t p = of<int8_t>(obj, 0x2E8);
-        if (mem.at<Player>(G::players, uint32_t(p)).state == 5) {
+        // (ours: The Typing of the Dead 0's window, game.h: a held bite snaps at the air; null in the arcade)
+        if (mem.at<Player>(G::players, uint32_t(p)).state == 5 && !(gAttackHold && gAttackHold(obj))) {
             player_hit(p, 1, 1);
             return;
         }

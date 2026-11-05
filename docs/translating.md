@@ -62,11 +62,18 @@ rebuild.
 
 Texts left in English (ASCII) keep the game's own bitmap fonts, so a half-done translation looks like the game.
 
-**Fonts.** The game ships Noto Sans KR, Noto Sans JP, Noto Sans Arabic and Noto Sans Hebrew (Bold; SIL Open Font
-License, `data\fonts\OFL.txt`). For another script, put a free font in `data\fonts` and name it in `lang.font` (check
-its licence allows redistribution if you share your pack). The game reads TrueType and OpenType (CFF) fonts itself (no
-hinting). A character the language's font lacks (Latin letters and digits in an Arabic or Hebrew line) is taken from
-the other fonts in `data\fonts`.
+**Fonts.** The game ships Noto Sans KR, Noto Sans JP, Noto Sans SC (Simplified Chinese), Noto Sans Arabic, Noto Sans
+Hebrew and Noto Sans (Latin / Greek / Cyrillic) (Bold; SIL Open Font License, `data\fonts\OFL.txt`). For another
+script, put a free font in `data\fonts` and name it in `lang.font` (check its licence allows redistribution if you
+share your pack). The game reads TrueType and OpenType (CFF) fonts itself (no hinting). A character the language's
+font lacks (Latin letters and digits in an Arabic or Hebrew line) is taken from the other fonts in `data\fonts`.
+
+**Size.** `lang.font_scale` 1 sizes the font's capitals to the height of the game's letter cells, which is taller
+than the letters drawn in them: a Latin / Cyrillic font matches the game's capitals near 0.65 (`ru.txt`; `tr.txt`, `pl.txt`, `vi.txt` 0.72), CJK near 0.8.
+
+**Capitals.** The Remake style's small capitals (`lang.upper = 1`) only change the Latin letters a-z: a Cyrillic,
+Greek or a Latin-Extended language (Turkish, Polish, Vietnamese) uses `lang.upper = 0` (its letters as written; else `Enter/A` turns into `ENTER/A` beside lower-case
+words).
 
 ## Right-to-left languages (Arabic, Hebrew ...)
 
@@ -94,16 +101,34 @@ scripts (Hindi / Devanagari, Bengali, Tamil ...: conjuncts, reordered vowels), K
 are drawn one after another as they come, which is not correct writing. Arabic ligatures other than lam-alef and
 mark positioning are not done either.
 
-## Shipped languages (2026-10-27)
+## Shipped languages (2026-10-27; Indonesian and the new keys 2026-11-03)
 
-`ko.txt`, `ja.txt`, `ar.txt` and `he.txt` hold every key of en.txt (menus, help lines, the name entry, the Players
+`ko.txt`, `ja.txt`, `ar.txt`, `he.txt` and `id.txt` (Indonesian, the game's own fonts: no `lang.font`) hold every key
+of en.txt (menus, help lines, the name entry, the Players
 page, Firing Range, Mods, the Gallery and Actors, the online pages, the first-run page, the in-game notes, the end
 screen, all 85 subtitles). They are **machine translations (AI)**, marked so in each file's header: a native speaker
 should check them. Names on the sample tables and the arcade's own pictures (RELOAD, CONTINUE?, the chapter cards,
 the name entry's letters) stay as they are. Some labels are short on purpose (the classic PC menu's boxes are narrow).
 `--lang-check` for each: no text too wide that English does not also have (the 5 English sample names on the PC
-Mode scores page are wider than their column in every language). The keys left "not translated" are those that are
+Mode scores page are wider than their column in every language).
+
+`zh.txt` (Simplified Chinese, Noto Sans SC) and `ru.txt` (Russian, Noto Sans; short wordings and abbreviations where
+the boxes are narrow) followed on 2026-11-03: every key, machine-translated (AI) too; `--lang-check` for each: 3 texts
+too wide, the PC Mode scores' sample names that English has too. The keys left "not translated" are those that are
 the same in every language (fps values, pad buttons, key caps, sample names, codes).
+
+`tr.txt` (Turkish), `pl.txt` (Polish) and `vi.txt` (Vietnamese) (2026-11-03, machine-translated too) use Noto Sans
+Bold (`NotoSans-Bold.ttf`: Latin Extended, Vietnamese, Cyrillic) at `lang.font_scale = 0.72` (its capitals the height
+of the game's), with `lang.upper = 0`: the Remake style's capitals are ASCII only (Turkish i would become I, not İ;
+ş ğ ı ł ą ę ś ż and the Vietnamese letters would stay small), and Noto's small letters are about the height of the
+English small capitals. Their texts with a letter past ASCII are drawn in Noto Sans; the ASCII ones keep the game's
+bitmap fonts, as for every language. `--lang-check`: only the texts English has too (the sample names on the PC Mode
+scores page; the 2-21 cut-scene title in Turkish).
+
+`fr.txt` (French), `it.txt` (Italian) and `de.txt` (German) (2026-11-03) also hold every key, machine-translated (AI)
+the same way, in the game's own bitmap fonts (Latin-1: no `lang.font`; French writes "oe" for the joined letter, which
+Latin-1 lacks). Labels are shortened to fit (German especially); `--lang-check` for each: no text too wide that English
+does not also have.
 
 In play, the PC font's words (the PC models' **Continues n**, **Press SPACE to skip Demo**, the PC pause's
 **PAUSED / Continue / Exit**) are drawn as text in the language when one is chosen (the PC font only has the

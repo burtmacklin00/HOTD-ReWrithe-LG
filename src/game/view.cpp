@@ -1,6 +1,7 @@
 #include "game/view.h"
 #include "game/gallery.h"
 #include "game/player_colours.h"
+#include "game/cosmods.h"
 #include "assets/creature_pose.h"
 
 #include <SDL3/SDL.h>
@@ -175,6 +176,28 @@ void releaseStageCpu(StageData& sd, uint32_t keepFrom)
         p.reset();
     }).detach();
 }
+
+// The custom Blood Color (arcade models; user 2026-11-03): the creatures' blood rows (Runtime::bloodRows: the rows GGSET
+// sets by the blood colour) in that colour, every shade of them as the game's own green blood recolours them (the pale
+// pink inside the wounds too). Per brightness the row's (r, g, b): the grey under it kept, the colour above it the
+// custom colour's (the brightest channel scaled to 1), all times the custom colour's brightness
+void tintBloodRows(std::vector<uint8_t>& xlat, const std::set<int>& rows, int rgb)
+{
+    if (rgb < 0 || xlat.size() < 256 * 96)
+        return;
+    const float t[3] = {float(rgb >> 16 & 0xFF) / 255.0f, float(rgb >> 8 & 0xFF) / 255.0f, float(rgb & 0xFF) / 255.0f};
+    const float top = std::max({t[0], t[1], t[2], 1e-3f});
+    for (int row : rows) {
+        if (row < 0 || row >= 32)
+            continue;
+        for (int i = 0; i < 256; ++i) {
+            uint8_t* c[3] = {&xlat[size_t(row * 256 + i)], &xlat[size_t((32 + row) * 256 + i)], &xlat[size_t((64 + row) * 256 + i)]};
+            const float lo = float(std::min({*c[0], *c[1], *c[2]})), hi = float(std::max({*c[0], *c[1], *c[2]}));
+            for (int k = 0; k < 3; ++k)
+                *c[k] = uint8_t(std::clamp((lo + (hi - lo) * t[k] / top) * top + 0.5f, 0.0f, 255.0f));
+        }
+    }
+}
 } // namespace
 
 // remakefix: the menu's live attract: a camera cut between two frames' cameras (Runtime::camera), as draw's
@@ -202,7 +225,10 @@ std::unique_ptr<GameView::Prepared> GameView::prepare(const std::string& regions
     }
     // every creature part model (skeleton nodes of every type): the game may draw any of them
     if (!pcDir.empty()) {
-        p->pcCfg = std::make_unique<PcConfig>(PcConfig{pcDir, blood});
+        // cosmods: Rainbow Blood on: the custom path in white, its blood texels marked for the renderer's colours
+        // (PcConfig::kBloodRainbow); the player's own colour comes back at the next load with the mod off
+        const int pcBlood = rainbowBloodSettings().on ? (PcConfig::kBloodCustom | PcConfig::kBloodRainbow | 0xFFFFFF) : blood;
+        p->pcCfg = std::make_unique<PcConfig>(PcConfig{pcDir, pcBlood});
         p->pcSource = std::make_unique<PcSource>(*p->pcCfg);
     }
     std::string err;
@@ -783,10 +809,34 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     // (finishExtra then starts the next); was a 1.3 s frame each with the arcade models (release hunt: "1.9 s frame")
     if (rt.mem.at<int8_t>(A::G::chapter) == 6 && chapter_ == 3 && extraStage_ < 0 && prefetchStage_ < 0)
         prefetchExtra(2, rt);
+    // Survival Mode's cut creatures (Runtime::actorAreaLook): their texture areas from Chapter 4's stage, loaded ahead (the
+    // first one seen was a 0.6 s frame)
+    if (!rt.actorAreaLook.empty() && chapter_ != 3 && extraStage_ < 0 && prefetchStage_ < 0)
+        prefetchExtra(3, rt);
     float focal = blendItems ? prev->focal + (rt.focal - prev->focal) * alpha : rt.focal;
     if (static const char* fs = std::getenv("HOTD_FOCAL_SCALE"); fs && *fs)   // debugging: zoom the view out / in
         focal *= float(std::atof(fs));
     cam.fovY = 2.0f * std::atan(kHalfH / focal);   // the camera's zoom (camera_path_eval)
+    // bugs1 (#35, the hit screen shake): hit_screen_shake 0x6350 leaves the view offset in 0x51F610 (x) / 0x51F614 (y),
+    // arcade screen pixels (48 frames after a hit: timer x cos(timer x 33.75 degrees), up to 47 lines); every 3D window
+    // set-up (the sky task 0x33F50, the world's, ...) adds them to the geometrizer window's centre (0x804000: y + 0x11A,
+    // x << 16; the Model 2's y runs down), so the whole 3D picture jumps, the 2D layers stay. It was worked out but never
+    // drawn. The PC (0x436EFC) moves its D3D viewport's centre by half that on both axes; our logic is the arcade's.
+    // The picture only (the aim stays where it was, as the arcade's gun reads the screen). HOTD_NO_SHAKE=1: off
+    static const bool noShake = std::getenv("HOTD_NO_SHAKE") != nullptr;
+    const int32_t shakeX = noShake ? 0 : int32_t(rt.mem.u32(0x51F610)), shakeY = noShake ? 0 : int32_t(rt.mem.u32(0x51F614));
+    int32_t centreX = std::clamp(shakeX, -96, 96);
+    // bugs1 (#34): the ending's 3D window (game_ending 0x352A0 / sky_task_ending 0x34150): its centre x is the middle
+    // of its lines 0x53E394 .. 0x53E398 (8 .. 0x1F8, the staff roll narrows it to 8 .. 256: kind120_letterbox_open_frame),
+    // not the screen's 256: the staff roll's scenes are centred in the left part beside the sheets (MAME fullgame_us
+    // snap 0743). It was drawn centred on the whole screen, the scene's middle under the sheets
+    if (rt.mem.at<int16_t>(A::G::game_mode) == 4 && rt.mem.u32(A::G::game_submode) == 8 && rt.mem.at<int8_t>(A::G::chapter) == 6) {
+        const int32_t l = int32_t(rt.mem.u32(0x53E394)), r = int32_t(rt.mem.u32(0x53E398));
+        if (l >= 0 && r > l && r <= 0x200)
+            centreX += (l + r) / 2 - 0x100;
+    }
+    cam.shift[0] = float(centreX) / kHalfH * float(height) / float(std::max(width, 1));
+    cam.shift[1] = -float(std::clamp(shakeY, -96, 96)) / kHalfH;
     // the world task (0x4B300) draws only the current draw zone's placements (BGTB; zone 0 = none). Without this every
     // alternate state (the mansion entrance 0x9E3 / 0x9E4 / 0x9E5, ...) and the pieces of other areas were drawn at once:
     // z-fighting copies and models floating in front of the mansion. The PC world is culled by the same IDs.
@@ -982,6 +1032,13 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     // ... and a placement table of another stage (the prologue's last scene, kind108_zone_set to Chapter 4's world):
     // title-2: that stage's world, loaded on first use (ensureExtra), its draw zone's placements, the texture set of
     // the area the scripts loaded (kind107: area 12) UNVERIFIED (teaser)
+    // the custom Blood Color's blood rows (tintBloodRows): a changed colour rebuilds the translations below
+    const int xlatBlood = !rainbowBloodSettings().on && !pcStage_ ? bloodCustom_ : -1;
+    if (xlatBlood != xlatBlood_) {
+        xlatBlood_ = xlatBlood;
+        colorRowsSerial_ = rt.colorRowsSerial - 1;
+        extraRowsSerial_ = ~0u;
+    }
     extraVariant_ = -1;   // (only while that world is drawn: the game's models come from the chapter's stage again)
     if (plTable != 0 && plTable != rt.mem.u32(0xC0BD0 + uint32_t(chapter_) * 4)) {
         items.clear();
@@ -1002,6 +1059,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
                 std::vector<std::pair<int, int>> swaps(rt.colorRows.begin(), rt.colorRows.end());
                 std::vector<uint8_t> xlat;
                 source_->colorXlat(extra_->textureSets[size_t(extraVariant)].romArea, swaps, xlat);
+                tintBloodRows(xlat, rt.bloodRows, xlatBlood_);
                 renderer.updateXlat(*extra_, extraVariant, xlat);
             }
             // smallfix: the name entry's placement table is still the ending's: its letters take this stage's texture set
@@ -1034,6 +1092,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     int variant = stage_->textureSets.empty() ? -1 : 0;
     for (size_t i = 0; i < stage_->textureSets.size(); ++i)
         if (rt.textureArea > 0 && stage_->textureSets[i].romArea == rt.textureArea) variant = int(i);
+    variant_ = variant;   // (vr: placedItem's texture set)
     // the colour rows the event scripts swapped in (color_row_set) into the current set's colour translation (s1)
     if (rt.colorRowsSerial != colorRowsSerial_ && !std::getenv("HOTD_NO_COLOR_ROWS") && variant >= 0 && stage_->textureSets[size_t(variant)].romArea > 0) {
         colorRowsSerial_ = rt.colorRowsSerial;
@@ -1045,6 +1104,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
             swaps.push_back({row, entry});
         std::vector<uint8_t> xlat;
         source_->colorXlat(stage_->textureSets[size_t(variant)].romArea, swaps, xlat);
+        tintBloodRows(xlat, rt.bloodRows, xlatBlood_);
         renderer.updateXlat(*stage_, variant, xlat);
     }
     // the arcade's texture set (TEXCHG area) applies to arcade models only: the PC stage has one texture set (BIGGER.VMC
@@ -1069,6 +1129,10 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         // nothing), never the arcade's
         if (id == 0)
             return;   // model 0: nothing (both versions)
+        // developer (clips): HOTD_DEV_ONLY_TYPE=t draws no body but creatures of type t (the room stays; the people go)
+        if (static const char* only = std::getenv("HOTD_DEV_ONLY_TYPE"); only && dm.body &&
+            (!rt.mem.mapped(dm.body + 0xCC) || rt.mem.at<int16_t>(dm.body + 0xCC) != std::atoi(only)))
+            return;
         // the sky comes from the game's sky_task (s1, chapter.cpp: SKYTB's sky_index / SKYKD's sky_mode, the dome turned
         // and lifted by its table row), no longer from the texture area's sky list (that drew a second, unlifted copy)
         if (dm.background && (!sky || (std::getenv("HOTD_SKY_ONLY") && std::strtoul(std::getenv("HOTD_SKY_ONLY"), nullptr, 16) != id)))
@@ -1105,7 +1169,10 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
                             if (actorRowsFor_ != extra_.get())
                                 actorRowsFor_ = extra_.get(), actorRowsSets_.clear();
                             if (actorRowsSets_.insert(actorSet).second) {
-                                const GalleryLook look = aa->second == 11 ? galleryLook(60) : aa->second == 12 ? galleryLook(78) : aa->second == 2 ? galleryLook(67) : GalleryLook{};
+                                // (Survival Mode's cut creatures: their own looks, Runtime::actorAreaLook: area -> type)
+                                const auto al = rt.actorAreaLook.find(aa->second);
+                                const GalleryLook look = al != rt.actorAreaLook.end() ? galleryLook(al->second)
+                                                         : aa->second == 11 ? galleryLook(60) : aa->second == 12 ? galleryLook(78) : aa->second == 2 ? galleryLook(67) : GalleryLook{};
                                 std::vector<uint8_t> xlat;
                                 source_->colorXlat(aa->second, parseColorRows(look.rows), xlat);
                                 renderer.updateXlat(*extra_, actorSet, xlat);
@@ -1160,6 +1227,13 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         placements_.push_back(p);
         DrawItem d{from, &m->second, &placements_.back(), m->second.preferredVariant};
         pickVariant(d);
+        // developer (clips): HOTD_DEV_TYPE_AREA="type:area" draws the creatures of that type with the texture set of that
+        // texture area (a creature in another area of its chapter: the Chariot's area-4 pictures in Curien's lab, area 12)
+        if (static const char* ta = std::getenv("HOTD_DEV_TYPE_AREA"); ta && dm.body && from == stage_.get() &&
+            rt.mem.mapped(dm.body + 0xCC) && rt.mem.at<int16_t>(dm.body + 0xCC) == std::atoi(ta) && std::strchr(ta, ':'))
+            for (size_t i = 0; i < stage_->textureSets.size(); ++i)
+                if (stage_->textureSets[i].romArea == std::atoi(std::strchr(ta, ':') + 1))
+                    d.variant = int(i);
         if (from == extra_.get()) {
             const std::vector<int>& ok = d.model->validVariants;
             if (ok.empty() || std::find(ok.begin(), ok.end(), extraVariant_) != ok.end())
@@ -1196,6 +1270,10 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         d.fade = std::clamp(drawFade(dm, 0), 0.0f, 1.0f);
         d.flat = drawFlat(dm, 0);
         d.ramp = dm.ramp;
+        // cosmods: Rainbow Blood's creature colour, for the body's own parts only (a splash or a pool drawn with a body
+        // took that frame's body: its colour jumped every frame, user's clip 2026-11-03)
+        d.bloodHue = dm.shadow ? -1.0f : dm.part != 0 ? creatureBloodHue(dm.body) : creatureBloodKeepsRows(dm.body) ? 6.0f : -1.0f;
+        // (rainbow2: the Chariot draws its body without parts: its blood rows kept there too, creatureBloodKeepsRows)
         // decals: flat models (the water splashes picha00a-19a, 0x9F2-0xA05, all at the floor height) and squashed ones (the
         // _DD shadows: a zero vertical row) lie coplanar with the ground and with each other; drawn after the opaque pass
         // without depth writes, overlaps go by draw order instead of float noise (they flickered as the camera moved)
@@ -1386,7 +1464,14 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     }
     for (size_t di = 0; di < drawn.size(); ++di) {
         const DrawModel& dm = *drawn[di];
-        const bool own = di >= rt.drawList.size();   // the view's overlay: camera space, follows the camera drawn
+        // bugs1 (#22, "the gun flash jumps around the crosshair when shooting fast, mostly while the camera moves"): the
+        // shot flash (shot_effect_flash 0x95140: coprocessor 0x21, camera space, at the aim point for 10 frames) is glued
+        // to the screen in the original. Placed by the newest frame's camera while the picture is drawn from the camera
+        // blended between two frames (Smooth Motion), a new flash stood off the aim by the camera's move since the frame
+        // before (a matched one was blended in the world: off by the turn), each shot somewhere else. Like the view's
+        // overlay: placed from the camera drawn, the newest frame's place, never blended
+        const bool flash = di < rt.drawList.size() && dm.task != 0 && !dm.shadow && rt.mem.u32(dm.task) == A::F::shot_effect_flash;
+        const bool own = di >= rt.drawList.size() || flash;   // the view's overlay: camera space, follows the camera drawn
         M34 w = worldOf(dm, own ? camNow : inv);
         if (trace)
             std::fprintf(trace, "%llu %X %.2f %.2f %.2f%s r %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f\n",
@@ -1686,8 +1771,57 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         }
     // the game's grey / sepia look (fix-logic's Runtime::greyPalette: Chapter 1's opening frames ~182-242, kind 182)
     opt.grey = rt.greyPalette.on && !std::getenv("HOTD_NO_GREY");
+    // (team: Options > Video > Transparency; 3 Auto: the arcade models dithered as the Model 2 draws them, the PC models
+    // with clean edges)
+    opt.transparency = rt.transparency == 3 ? (pcStage_ ? 1 : 2) : rt.transparency;
     if (opt.grey)
         std::copy(&rt.greyPalette.sepia[0][0], &rt.greyPalette.sepia[0][0] + 64 * 3, &opt.sepia[0][0]);
+    // cosmods: the Rainbow Blood mod (game/cosmods.h): the hue from the game's frame (the same picture at the same frame).
+    // PC pages loaded with the mod on keep their marked (white) blood texels until the next load: switched off since,
+    // they are drawn red (one hue, 0)
+    {
+        const RainbowBloodSettings& rb = rainbowBloodSettings();
+        const bool marked = pcStage_ && pcCfg_ && (pcCfg_->blood & PcConfig::kBloodRainbow);
+        // the custom Blood Color (arcade models; user 2026-11-03): the same recolour in that one colour on the enemies'
+        // painted wounds (entry 1023 below has it for the bursts and the gore; the PC pages are tinted at the load)
+        const int custom = !rb.on && !pcStage_ ? bloodCustom_ : -1;
+        customWoundBlood() = custom;
+        opt.rainbow = rb.on ? (rb.together ? 2 : 1) : marked ? 2 : custom >= 0 ? 3 : 0;
+        opt.rainbowPhase = rb.on ? float(std::fmod(double(rt.frameCount) * rb.speed / 60.0, 1.0)) : 0.0f;
+        // Fast: in step with the Chapter 4 screens (user 2026-11-03): their clock, the game's frame counter, one table
+        // step per 1.5 frames (palette_animation's entry 0)
+        if (rb.on && rb.speed > 0.4f) {
+            // (the screens' entry 1009 runs 24 frames of the table behind entry 0 here: matched by pictures)
+            const double off = -24.0;
+            opt.rainbowPhase = float(std::fmod((double(rt.mem.u32(A::G::frame_counter)) + off) / 135.0 + 1.0, 1.0));
+            // arcade models: the blood entry takes the screens' own animated entry (palette_anim_copy: work RAM
+            // 0x52066C + 2i -> entry 1017 - i), drawn through the colour rows as the screens are: the same colour
+
+            if (!pcStage_)
+                opt.rainbowSync = 1009;   // (entry 8: the big screens behind Curien, matched by pictures)
+        }
+        // the colours: the game's own rainbow (user 2026-11-03: as the computer screens behind Curien in Chapter 4,
+        // palette_animation 0x25310 steps 9 entries through the 90-colour RGB555 table 0xAB120, R in the low bits); a
+        // plain hue if the table is not there (each entry has a channel at 31)
+        if (opt.rainbow == 1 || opt.rainbow == 2) {
+            opt.rainbowGame = true;
+            for (int i = 0; i < 90 && opt.rainbowGame; ++i) {
+                const uint16_t v = rt.mem.mapped(0xAB120) ? rt.mem.at<uint16_t>(0xAB120 + 2u * uint32_t(i)) : 0;
+                const int ch[3] = {v & 31, v >> 5 & 31, v >> 10 & 31};
+                opt.rainbowGame = ch[0] == 31 || ch[1] == 31 || ch[2] == 31;
+                for (int c = 0; c < 3; ++c) opt.rainbowTable[i][c] = float(ch[c]) / 31.0f;
+            }
+        }
+        if (custom >= 0)
+            for (int c = 0; c < 3; ++c) opt.bloodRgb[c] = float(custom >> (16 - 8 * c) & 0xFF) / 255.0f;
+        // rainbow2 (user 2026-11-03: the rainbow on all the blood): the creatures' blood rows (every shade of every
+        // painted wound, the people's and the bosses' too) cycle per pixel in the renderer, as the custom colour's
+        // tintBloodRows recolours them; the arcade models only (the PC's blood is its marked texels)
+        opt.bloodRowMask = 0;
+        if (rb.on && !pcStage_)
+            for (int row : rt.bloodRows)
+                if (row >= 0 && row < 32) opt.bloodRowMask |= 1u << row;
+    }
     // the game-over route map (mode 5 from sub-mode 2, fix-world-2): the original's task group draws only the walkers
     // (not ported) over the 2D map, no world
     if (rt.mem.at<uint16_t>(A::G::game_mode) == 5 && rt.mem.u32(A::G::game_submode) >= 4)
@@ -1737,7 +1871,18 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
             renderer.setPaletteAnimation(anim.data());
         }
     }
+    if (drawOverride) {   // vr: the eyes draw the items (docs/vr.md)
+        drawOverride(items);
+        return;
+    }
     renderer.draw(items, camOverride ? *camOverride : cam, width, height, opt);
+}
+
+void GameView::cameraToWorld(const float* coproCamera, float rot[9], float pos[3])
+{
+    const M34 inv = invRigid(fromCopro(coproCamera));
+    std::copy(inv.r, inv.r + 9, rot);
+    std::copy(inv.t, inv.t + 3, pos);
 }
 
 void GameView::toArcade(float px, float py, int width, int height, float& ax, float& ay) const
@@ -1752,6 +1897,30 @@ void GameView::fromArcade(float ax, float ay, int width, int height, float& px, 
     const float s = kHalfH / (float(height) / 2.0f);
     px = float(width) / 2.0f + ax / s;
     py = float(height) / 2.0f - ay / s;
+}
+
+bool GameView::placedItem(int slot, uint32_t id, const float rot[9], const float pos[3], DrawItem& out)
+{
+    if (slot < 0 || slot >= int(std::size(placed_)))
+        return false;
+    const StageData* from = pcStage_ ? pcStage_.get() : stage_.get();
+    if (!from)
+        return false;
+    auto m = from->models.find(id);
+    if (m == from->models.end() || m->second.triangleCount() == 0)
+        return false;
+    Placement& p = placed_[slot];
+    p = Placement{};
+    p.id = p.modelKey = id;
+    std::copy(rot, rot + 9, p.rot);
+    std::copy(pos, pos + 3, p.pos);
+    out = DrawItem{from, &m->second, &p, m->second.preferredVariant};
+    if (from == stage_.get() && variant_ >= 0) {   // (the arcade's texture set of the area, as draw's pickVariant)
+        const std::vector<int>& ok = m->second.validVariants;
+        if (ok.empty() || std::find(ok.begin(), ok.end(), variant_) != ok.end())
+            out.variant = variant_;
+    }
+    return true;
 }
 
 bool GameView::hasModel(uint32_t id) const

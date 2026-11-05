@@ -14,6 +14,8 @@
 #pragma once
 
 #include "game/bossmode.h"
+#include "game/survival.h"
+#include "game/horde.h"
 #include "port/game.h"
 
 #include <array>
@@ -80,6 +82,9 @@ struct DrawModel {
     uint32_t part = 0;         // ragdoll: the body part (BodyPart address) whose draw hook drew it (and its shadow), 0 = none;
                                // the Ragdoll mod (game/ragdoll.h) poses a dead body's models by part. Never read by the logic
     int16_t joint = -1;        // 4P cut-scenes: the body part's joint (part +0x38) when body_part_draw_hook drew it, -1 none
+    uint32_t bossPart = 0;     // relfix (Big Head): the part a boss's own part hook drew (the Chariot's 0x9A040 / 0x9A280,
+                               // the Hermit's 0x87560: they never pass body_part_draw_hook, so `part` stays 0 for them
+                               // and the Ragdoll mod leaves them alone), 0 = none. Never read by the logic
 };
 
 class Ragdolls;   // the Ragdoll mod (game/ragdoll.h): draw-only bodies of the dead
@@ -95,11 +100,24 @@ public:
     struct GunInput {
         bool onScreen = false, trigger = false;
         float x = 0, y = 0;
+        bool held = false;   // Survival Mode's SMG: the trigger is held down (automatic fire); read by nothing else
     };
     GunInput gun[4];   // players 3 / 4: the experimental 4P mode only (docs/coop4.md)
     // --input-test (docs/teaser_status/input.md): what the input task handed the game, counted
     uint32_t inputFrames = 0, shotsIn[4] = {}, reloadsIn[4] = {}, startsIn[4] = {};
     bool livesKept = false;          // testing: a player at 0 lives gets 1 back (game over is not ported yet)
+    // GitHub #29 (user 2026-11-03): a one-player game in player 2's seat (1), as the arcade's player 2 start button alone
+    // gives it: chapter_start puts player 2 in play and player 1 waiting (arcade games only: not PC Mode / 4P)
+    int soloSeat = 0;
+    // GitHub #5 (Chapter Retry): players 1 / 2 as the chapter began (chapter_start, game_chapter_start): in play, score,
+    // lives; the host's retry starts the chapter again and puts these back
+    struct RetryPoint {
+        int chapter = -1;
+        bool in[2] = {};
+        int32_t score[2] = {}, lives[2] = {};
+    };
+    RetryPoint retryPoint;
+    void retry_point_take();
     // developer: the whole-game differential (game/diff_replay.h): a MAME run replayed frame by frame (its inputs, the
     // arcade's player_input_update in the input task, the state record written at each frame's end)
     DiffReplay* diffReplay = nullptr;
@@ -208,6 +226,7 @@ public:
     void body_draw(uint32_t obj) override;                                  // the port's, marked (objectDraw_)
     uint32_t drawBody_ = 0;                                                 // feet2: inside body_draw (DrawModel::body)
     uint32_t drawPart_ = 0;                                                 // ragdoll: the part the draw hook drew last (DrawModel::part)
+    uint32_t drawBossPart_ = 0;                                             // relfix: the part a boss's part hook drew last (DrawModel::bossPart)
     // the Ragdoll mod (game/ragdoll.h, docs/modding.md): after the frame's logic, the dead humanoids' drawn poses replaced
     // by a ragdoll's (the draw list only; the address space is only read). Made on the first frame the mod is on
     std::shared_ptr<Ragdolls> ragdolls;
@@ -260,6 +279,11 @@ public:
     std::map<int, int> colorRows;
     uint32_t colorRowsSerial = 0;
     void color_row_set(int32_t row, int32_t entry) override;               // (chapter.cpp) UNVERIFIED (teaser)
+    // display only (the custom Blood Color, user 2026-11-03): the colour table rows (2 x row + 1) GGSET last set from a
+    // list whose red and green entries differ: the creatures' blood rows (their wounds' every shade, as the game's own
+    // green blood recolours them). Cleared by the area load; a later color_row_set of the row takes it out
+    std::set<int> bloodRows;
+    void ggset_blood_row(int32_t row) override { bloodRows.insert(2 * row + 1); ++colorRowsSerial; }
 
     // --- sound (src/game/audio.h) and the game flow (src/game/flow.cpp) ---
     Audio* audio = nullptr;                                                 // null: silent
@@ -332,7 +356,7 @@ public:
     void sprite_init() override;                                            // 0x170C0
     void player_idle(uint32_t) override {}                                  // 0x55D0 (ret)
     int16_t modeBeforeSet_ = 0;                                             // set_mode's previous mode (attract.cpp)
-    int prologueForGame_ = 0, prologuePlayers_ = 1;                         // PC models: the prologue after the start
+    int prologueForGame_ = 0, prologuePlayers_ = 1, prologueSeat_ = 0;      // PC models: the prologue after the start
     void how_to_play();                                                     // mode 8: 0x265B0 / 0x26740
     void mode8_ammo_draw();                                                 // 0x270D0
     bool lesson_routine(uint32_t routine, uint32_t obj);                    // kind 130 and mode 8's tasks
@@ -481,6 +505,30 @@ public:
     };
     ChapterClear clear;
     BossMode boss;                                                          // Boss Mode (game/bossmode.h): ticked at the end of frame()
+    // Survival Mode (game/survival.h): its lead-in runs undrawn in frame(), its director in the event task's slot (run,
+    // evt_run), its end checked after each frame. Off: none of these hooks does anything
+    SurvivalMode survival;
+    // Horde Mode (game/horde.h): the script's standard creatures get copies (evt_spawned); off (size 0): nothing
+    HordeMode horde;
+    void evt_spawned(uint32_t task, uint32_t rec) override
+    {
+        if (survival.leadIn())
+            survival.captured(*this, task, rec);
+        else if (horde.on() && !survival.active())
+            horde.spawned(*this, task, rec);
+    }
+    // Survival Mode's points (game.h survival_hits: only while survivalScoring)
+    void survival_hits(uint32_t obj, uint32_t seats, int killer, uint32_t headSeats) override
+    {
+        survival.hits(*this, obj, seats, killer, headSeats);
+    }
+    // a creature as ENTB3 makes one (kind -> obj_kinds, the record's fields), in the current task group (survival.cpp)
+    uint32_t survival_spawn(uint32_t kind, uint32_t flags, const float pos[3], const int32_t ang[3], int type, int action,
+                         int life, uint32_t delay, uint32_t substate);
+    std::vector<std::pair<uint32_t, uint32_t>> survivalPatches_;   // ROM-image words Survival changed (address, old value)
+    void survival_restore();                                       // those words set back (a new game, Survival off)
+    uint32_t survivalMusic_ = 0;                                   // the lead-in's last music code (played at the arena)
+    bool survival_cue(uint32_t cue);                               // sound_cue's Survival part (survival.cpp); true: handled
     bool chapterDone = false;                                               // the game's end after a clear (the next chapter is not playable)
     int chapterChanged = -1;                                                // game_chapter_start: the chapter (0-3) now loaded; the host re-inits its view and sets it back to -1
     bool continueUnplayable = false;                                        // developer (--continue-chapters): go on into chapters not marked playable
@@ -569,8 +617,16 @@ public:
     bool hideSparks = false;   // Options > Hit Sparks off: the shots' hit sparks (draw-only)
     bool hideMuzzle = false;   // Options > Gun Muzzle Flash off: the cut-scene guns' flash (draw-only)
     bool hideBlood = false;    // Options > Blood Particles off: the blood bursts / drips (draw-only)
+    int transparency = 3;      // Options > Video > Transparency (draw-only): 0 Smooth, 1 Clean Edges, 2 Dithered (arcade), 3 Auto (by the models); RenderOptions::transparency
     bool hideMarks = false;   // trailer: Trailer Mode: no MISS SHOT marks (models 0x3F5 / 0x3F6; draw-only)
     int ownSeat = -1;
+    // gunfb (a light-gun player 2026-11-03: flashes where nobody of them fired): the computer teammates' seats (bit per
+    // seat, the host sets it each frame): their shot flashes / sparks are a teammate's, so Teammate Crosshair Flashes
+    // reduces or hides them in a local game too (Full, the default, unchanged)
+    unsigned cpuSeats = 0;
+    // gunfb: Video > Shot Flash Size: the shot flash's (shot_effect_flash 0x95140) and its spark's (0x95630) scale, 1 =
+    // the arcade's (draw-only)
+    float shotFlashScale = 1.0f;
     bool teamFlashDraw(DrawModel& d);                                       // false: not drawn
     struct TeamFx { uint8_t kind, age; int8_t seat; float x, y; uint32_t task, model; };
     std::vector<TeamFx> teamFx_;                                            // this frame's shot flashes (teamFlashDraw)
@@ -606,6 +662,10 @@ public:
     // half of the 62-cell screen. The HUD draws side cells at the window's edges in widescreen.
     std::vector<uint8_t> cellSide = std::vector<uint8_t>(4 * 64 * 64, 0);
     std::vector<uint8_t> cellText = std::vector<uint8_t>(64 * 64, 0);   // layer 0 cells a tile_text_draw line holds
+    // rainbow2 (Rainbow Blood's 2D blood and HUD option; display only): what each cell's sprite is, as cellSide (layer
+    // x 64 rows x 64 cells): 1 a per-player HUD sprite (hud_player_sprite), 2 a hit mark 0x28..0x2D, 0 anything else
+    std::vector<uint8_t> cellHud = std::vector<uint8_t>(4 * 64 * 64, 0);
+    bool hud_player_sprite(uint32_t sprite);
     int hud_side_of(uint32_t sprite, int x, int w);
     void pc_cells_clear(uint32_t layer, int x, int y, int w, int h);
 
@@ -681,7 +741,9 @@ public:
     // picked (actor_areas_update, from SceneView::applyCast); GameView draws those models with that area's texture set
     // (the chapter's, else that area's chapter stage). Empty otherwise
     std::map<uint32_t, int> actorAreas;
+    std::map<int, int> actorAreaLook;   // Survival Mode: an area's colour rows taken from this type's look (galleryLook)
     void actor_areas_update();
+    void survival_areas();   // Survival Mode: the cut creatures' part models -> their texture areas (survival.cpp)
     std::vector<DrawModel> actorPreDraw_;
     std::vector<SkinDraw> actorPreSkin_;
     size_t actorOwn_[2] = {0, 0};

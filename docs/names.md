@@ -20,8 +20,8 @@ data say so; "probable" = chapter + behaviour + parts fit, not checked against f
 | 0 | BO_dkiller_kihon | dog_* | **Kenfis** (F-1) | sure: the dogs (kind 97, motions MO_ddog*), Chapter 1 only |
 | 1 | BO_mon_kihon | mon_* | **Saruzou** (F-2) | sure: monkey body, motions MO_saru* / MO_monkabe* (kind 70), Chapter 1 |
 | 2 | BO_tom | hara*, armer* | **Thomas Rogan** (AMS agent, player 1) | sure: developer routines Tom_Adv_00_0, ZombieWalk2Tom; cut scenes |
-| 3 | BO_ebita | ebita_* | **Ebitan a** (B-3) | sure; Chapters 1-3 |
-| 4 | BO_ebitb | ebitb_* | **Ebitan b** (B-4) | sure (hangs upside down: MO_ebitb_sakasa*) |
+| 3 | BO_ebita | ebita_* | **Ebitan A** (B-3) | sure; Chapters 1-3 |
+| 4 | BO_ebitb | ebitb_* | **Ebitan B** (B-4) | sure (hangs upside down: MO_ebitb_sakasa*) |
 | 5 | BO_mr_g | mrg_* | "MrG" (cut) | sure; see cut_content.md |
 | 6 | BO_molb | mol_mobody* (segmented) | **Murrer** (G-1) | probable: segmented worm body, groups, lunge (MO_molj, MO_molkou), kinds 34-39, Chapters 1-2 |
 | 7 | BO_frog_ct | frog_* | **Bouere** (F-3) | probable: frog (kind 69, MO_frog_ljp / sjp jumps), Chapter 1 |
@@ -55,7 +55,7 @@ data say so; "probable" = chapter + behaviour + parts fit, not checked against f
 | 41-43 | BO_neopetit / 2 / 3 | petit*_* | "neopetit" 1-3 (background creatures) | sure (kind 96) |
 | 44 | BO_pkenb | pkenb_a* | not identified | small animal body ("p" + "ken" = dog?), kind 96 like the neopetit |
 | 45 | BO_bentryb | bentryb_* | Bentley (C-2), variant | sure |
-| 46 | BO_pdolob | pdolob_a* | "pdolob" | sure; Chapter 1 waterway |
+| 46 | BO_pdolob | pdolob_a* | **Ebitan C** ("pdolob") | sure (GitHub #4, 2026-11-03: the fan list's third Ebitan, the waterway only); drawn at Chapter 1 event 11, area 1 |
 | 47 | BO_harisb | harisb_* | Harris (D-3), variant | sure |
 | 48 | BO_taraba_b | taraba_body*, legs fr* / fl* | **Taran** (G-3) | probable: spider body with 16 leg parts, Chapter 3 (kind 153); viewer category table called it Hermit until 2026-10-15 |
 | 49 | BO_kenkyu_j | kenhara* | DBR researcher | sure |
@@ -77,7 +77,7 @@ data say so; "probable" = chapter + behaviour + parts fit, not checked against f
 | 65 | BO_bentryd | bentryd_* | Bentley (C-2), variant | sure |
 | 66 | BO_pbaba | pbaba_a* | "baba" (cut) | sure |
 | 67 | BO_zsophi | zsof* | creature Sophie (an ending) | sure: event list 6 event 6, the branch of event 3 for route_choice 2 (kind122_ending_score: no continue, below the top rank card; 0 -> event 4 no Sophie, 1 -> event 5 Sophie 34); texture area 2 (kind111), colour row 13:92 |
-| 68 | BO_kage2 | kageta_a* | not identified ("kageta") | monkey-like body like type 38; separate beam models `kagetabeem` |
+| 68 | BO_kage2 | kageta_a* | **Parlor** (E-4) | probable (GitHub #4, 2026-11-03): Chapters 3-4, Drake's moves, endless laser daggers = its own beam models `kagetabeem`; variant 87 |
 | 69 | BO_devilonx | devilonx_* | The Hangedman, variant | probable (Chapter 4 rematch?) |
 | 70 | BO_moodyb | moodyb_* | Moody (E-3) variant, or **Parlor** (E-4)? | open: Parlor is not settled |
 | 71 | BO_harisc | harisc_* | Harris (D-3), variant | sure |
@@ -102,7 +102,7 @@ data say so; "probable" = chapter + behaviour + parts fit, not checked against f
 | 92 | BO_moodybb | moodyb_* | variant of 70 | |
 | 93 | BO_moodycc | moodyc_* | variant of 88 | |
 
-Not matched yet: **Parlor** (E-4; candidates: types 70 / 88 / 92 / 93, or the kageta types 68 / 87 with their beam
+Matched 2026-11-03 (GitHub #4): **Devilon** (F-4) = the bats (kinds 66-68, wing frames 0x54..0x67, no skeleton type); **Name** (G-2) = the slugs of Chapter 1's waterway (kinds 141 / 142, models `nam_CT*` 0x971.., `namkou_CT*` 0x99E.., `nam_ieki_CT` the spit; "namekuji"); Parlor = type 68 above. Before that, not matched: **Parlor** (E-4; candidates: types 70 / 88 / 92 / 93, or the kageta types 68 / 87 with their beam
 models) and **Name** (G-2; candidate type 91 gfrog). Checking them needs a look at the chapters where they appear (MAME or
 the viewer at the spawn).
 

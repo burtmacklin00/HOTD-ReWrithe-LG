@@ -149,6 +149,17 @@ std::string upper(std::string s)
         if (c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
     return s;
 }
+// upper() of the PC fonts' bytes (Latin-1): the accented small letters too (à..þ but ÷; ÿ has no capital there), so
+// the small capitals of Spanish / Portuguese / French ... match their letters (2026-11-03). Never on UTF-8
+std::string upperPc(std::string s)
+{
+    for (char& c : s) {
+        const uint8_t b = uint8_t(c);
+        if (b >= 'a' && b <= 'z') c = char(b - 'a' + 'A');
+        else if (b >= 0xE0 && b <= 0xFE && b != 0xF7) c = char(b - 0x20);
+    }
+    return s;
+}
 
 // the colours
 constexpr uint32_t kInk = 0xA81410;       // the strips' red letters
@@ -289,12 +300,20 @@ void Frontend::remakeMainMenu()
     const int top = py + 30, bottom = py + ph - 22;
     const int step = std::min(32, (bottom - top) / std::max(1, n));
     const int sh = std::min(26, step - 4);
+    // polish (user 2026-11-03: "Survival Arena: Chapter 1: The Courtyard" ran past its strip): the strips as wide as the
+    // longest label needs, up to the panel's inside (drawRStrip then makes a label still too long smaller)
+    int sw = 212;
+    for (const MainItem& it : items)
+        if (!it.heading)
+            sw = std::max(sw, int(std::ceil(rTextWidth(it.name(), std::min(15.0f, float(sh) * 0.6f)))) + 34);
+    sw = std::min(sw, pw - 24);
     for (int k = 0; k < n; ++k) {
         const MainItem& it = items[size_t(k)];
         Widget* w = widgetNew();
         addChild(root_, w);
-        setRect(w, cw_ / 2 - 106, top + k * step, 212, sh);   // (one column on the panel's centre)
+        setRect(w, cw_ / 2 - sw / 2, top + k * step, sw, sh);   // (one column on the panel's centre)
         w->text = it.name();
+        w->value = it.tag;   // (polish: Survival's small red line under its name)
         w->help = it.help;
         w->seed = 101 + k * 7 + grp * 53;
         w->draw = &Frontend::drawRStrip;
@@ -504,7 +523,13 @@ void Frontend::remakeSettings(const std::string& title, std::vector<Extra>* rows
         }
     }
     // the rows (scrolled: the focus past the last one shown moves them)
-    const int rowTop = py + 12, rowH = 26, maxRows = narrow ? 11 : 12;
+    // relfix2 (user 2026-11-03: the pictures covered the help line and the rows): a page with comparison pictures keeps
+    // a strip of kPrvRows rows' height under its rows for them (above the help line); fewer rows shown, nothing covered
+    bool anyPreview = false;
+    for (const Extra& e : *rows)
+        anyPreview = anyPreview || (e.preview && e.choices.size() >= 2);
+    constexpr int kPrvRows = 4;
+    const int rowTop = py + 12, rowH = 26, fullRows = narrow ? 11 : 12, maxRows = fullRows - (anyPreview ? kPrvRows : 0);
     const int n = int(rows->size());
     remakeScroll_ = std::clamp(remakeScroll_, 0, std::max(0, n - maxRows));
     const int shown = std::min(n - remakeScroll_, maxRows);
@@ -529,15 +554,12 @@ void Frontend::remakeSettings(const std::string& title, std::vector<Extra>* rows
         w->flags |= 0x100;
         w->help = !off.empty() ? off : (exp && e.help.rfind("Experimental", 0) != 0 ? "Experimental: " + e.help : e.help);
         if (e.preview && on && !dd && e.choices.size() >= 2) {   // fix28: the comparison pictures, shown with the focus
-            const int nc = int(e.choices.size()), np = nc <= 3 ? nc : 1, tw = 150, th = 84;
-            const int bw = np * tw + (np - 1) * 6 + 12, bh = th + 30;
-            const int bx = px + pw - 22 - bw;
-            int by = rowTop + (r + 1) * rowH + 2;
-            if (by + bh > py + ph - 4)
-                by = rowTop + r * rowH - bh - 2;
+            // relfix2: in the strip under the rows (below the "more" arrow, above the help line), its whole width; the
+            // pictures sized and centred in it by drawRPreview (relfix's beside-the-labels placement: the rows now free)
+            const int by = rowTop + maxRows * rowH + 14, bh = kPrvRows * rowH - 16;
             Widget* pv = widgetNew();
             addChild(root_, pv);
-            setRect(pv, bx, by, bw, bh);
+            setRect(pv, px + 22, by, pw - 44 - 10, bh);   // (clear of the scroll bar at the right)
             pv->user = i;
             pv->draw = &Frontend::drawRPreview;
             pv->flags |= 0x100;
@@ -689,7 +711,7 @@ void Frontend::remakeSettings(const std::string& title, std::vector<Extra>* rows
         if (bottom - top >= 64)   // (padpass: 70 on a 4:3 screen's 11 rows: the range was missing there)
             rangeWidgets(root_, px + 22, top, pw - 44, bottom - top);
     }
-    rHelp_[0] = px + (pw - 110) / 2, rHelp_[1] = rowTop + maxRows * rowH + 17, rHelp_[2] = pw - 150;
+    rHelp_[0] = px + (pw - 110) / 2, rHelp_[1] = rowTop + fullRows * rowH + 17, rHelp_[2] = pw - 150;
     remakePrompts(root_, current >= 0, dd ? std::function<void()>([this]() { ddClose(); }) : back);
     // remakefix: the dropdown (over everything): under its row's value (above it when there is no room below), the
     // values on a small dark torn panel, the current one marked; picking one steps the row's click to it
@@ -1202,7 +1224,7 @@ float Frontend::rTextWidthRaw(const std::string& sIn, float h) const
     const int capH = std::max(1, spr_.height(glyph('A', 0x10000)));
     float w = 0;
     const std::vector<bool> tall = tallLetters(s);
-    const std::string u = upper(s);
+    const std::string u = upperPc(s);
     for (size_t i = 0; i < u.size(); ++i) {
         const char ch = u[i];
         if (ch == ' ') {
@@ -1284,7 +1306,7 @@ void Frontend::rText(const std::string& sIn, float x, float y, float h, uint32_t
     };
     int idx = 0;
     const std::vector<bool> tall = tallLetters(s);
-    const std::string u = !tf || lang::upperCase() ? upper(s) : s;
+    const std::string u = !tf ? upperPc(s) : lang::upperCase() ? upper(s) : s;
     if (tf) {   // lang: the language's font, its capitals h high on the same baseline, shaded top to bottom
         const float em = lang::pxForCap(h, tf) * S, top = y * S, hp = h * S;
         tf->draw(u, em, x * S, (y + h) * S, [&](int px, int py, float a) {
@@ -2465,9 +2487,26 @@ void Frontend::drawRStrip(Widget& w)
     }
     rPaper(float(x + sx - gx), float(y - gy), float(ww + 2 * gx), float(hh + 2 * gy), w.seed, tilt,
            lit || chosen ? 0 : w.user == 1 ? 2 : 1);
-    const float th = big ? std::min(26.0f, float(hh) * 0.62f) : std::min(15.0f, float(hh) * 0.6f);
-    rText(w.text, float(x + sx + ww / 2), float(y) + (float(hh) - th) / 2 + 1, th, lit || chosen ? paperInk(kInkLit) : w.user == 1 ? kInkGrey : paperInk(kInk), 1,
+    float th = big ? std::min(26.0f, float(hh) * 0.62f) : std::min(15.0f, float(hh) * 0.6f);
+    // polish (user 2026-11-03: the More Modes labels ran past their strips): a label too long for the paper (inside its
+    // torn edges) smaller; a tag (Survival's "Very Experimental / Proof of Concept") a small red line under it
+    const float room = float(ww) - 30.0f;
+    float tagH = 0.0f;
+    if (!big) {
+        if (!w.value.empty()) {
+            th = std::min(th, float(hh) * 0.5f);
+            tagH = std::min(th * 0.7f, float(hh) * 0.34f);
+            if (const float tw = rTextWidth(w.value, tagH); tw > room) tagH = std::max(6.0f, tagH * room / tw);
+        }
+        if (const float tw = rTextWidth(w.text, th); tw > room) th = std::max(8.0f, th * room / tw);
+        if (langCheck && rTextWidth(w.text, th) > room + 2.0f)   // (the sweep: still wider than the strip)
+            langOverflow(langOn() ? lang::tr(w.text) : w.text, 0, int(rTextWidth(w.text, th)), int(room), &w);
+    }
+    const float gap = tagH > 0.0f ? 1.0f : 0.0f, ty = float(y) + (float(hh) - th - gap - tagH) / 2 + 1;
+    rText(w.text, float(x + sx + ww / 2), ty, th, lit || chosen ? paperInk(kInkLit) : w.user == 1 ? kInkGrey : paperInk(kInk), 1,
           0.12f, w.seed, w.user == 1 ? kTxShadow : kTxOutline | kTxShadow);
+    if (tagH > 0.0f)
+        rText(w.value, float(x + sx + ww / 2), ty + th + gap, tagH, w.user == 1 ? kInkGrey : paperInk(0xA01810), 1, 0.0f, w.seed + 1, 0);
     if (lit)   // the arcade's claw marks (0x2A) at the strip's left end
         rBlood(2, float(x + sx - (big ? 6 : 12)), float(y + hh / 2), float(hh) * (big ? 1.1f : 1.5f), 0.0f, 0.9f);
 }
@@ -2994,8 +3033,13 @@ void Frontend::remakeRender()
         const auto it = rPreviewRow_.find(w);
         return it != rPreviewRow_.end() && std::find(lit.begin(), lit.end(), it->second) == lit.end();
     };
-    if (!rPreviewRow_.empty())
+    if (!rPreviewRow_.empty()) {
         sig += "|P" + std::to_string(previewGenSeen_);
+        for (const auto& [pw, row] : rPreviewRow_)   // (relfix2: Hit Marks' / Transparency's picture flips each second)
+            if (!previewHidden(pw) && rPreviewRows_ && pw->user >= 0 && pw->user < int(rPreviewRows_->size()) &&
+                !(*rPreviewRows_)[size_t(pw->user)].previewLook.empty())
+                sig += "|F" + std::to_string(nowMs_ / 1000u);
+    }
     if (sig != fgSig_|| (!gpuLayers && fg_.size() != bytes)) {
         fgSig_ = sig;
         // the CPU: the whole foreground (the static layer + these); the GPU (blood2): each in its own small part
@@ -3066,7 +3110,9 @@ void Frontend::remakeRender()
                 continue;   // (a range crosshair not aiming; fix28: a preview without its row's focus)
             const bool pv = rPreviewRow_.count(w) != 0;   // (fix28: a preview: kept per its row's value and the pictures)
             const std::string pkey = pv && rPreviewRows_ && w->user < int(rPreviewRows_->size()) && (*rPreviewRows_)[size_t(w->user)].value
-                                         ? "P" + std::to_string(previewGenSeen_) + (*rPreviewRows_)[size_t(w->user)].value()
+                                         ? "P" + std::to_string(previewGenSeen_) + (*rPreviewRows_)[size_t(w->user)].value() +
+                                               ((*rPreviewRows_)[size_t(w->user)].previewLook.empty() ? std::string()
+                                                                                                       : "F" + std::to_string(nowMs_ / 1000u % 6u))
                                          : std::string();
             part(w->live ? std::string() : "o" + std::to_string(w->x) + "," + std::to_string(w->y) + "," + std::to_string(w->w) + "," + std::to_string(w->user) + w->value + pkey, float(w->x - 8), float(w->y - 8), float(w->w + 16),
                  float(w->h + 16), [&]() {
@@ -3075,11 +3121,25 @@ void Frontend::remakeRender()
             });
         }
         if (!help_.empty()) part("h" + help_, 0.0f, float(rHelp_[1] - 20), float(cw_), float(kHeight - rHelp_[1] + 20), [&]() {   // the help line (two lines when too wide)
-            const float th = 11.0f;   // (blood2: was 9)
+            // polish (user 2026-11-03: the Gallery's top hint ran into the layout): at the top of the page (the Gallery,
+            // the Cut-scenes) a little smaller, wrapped to its width in as many lines as it needs, downwards
+            const bool topLine = rHelp_[1] < 40;
+            const float th = topLine ? 10.0f : 11.0f;   // (blood2: was 9)
             // lang: the translation, cut into lines by the language's widths (English: as before)
             const std::string help = T(help_);
             const RawText raw(this);
             std::vector<std::string> lines{help};
+            if (topLine) {
+                lines = lang::wrapBy(help, float(rHelp_[2]), [&](const std::string& s) { return rTextWidthRaw(s, th); });
+                if (langCheck && lines.size() > 3)
+                    langOverflow(help, 0, cw_ * 2, cw_, nullptr);
+                float y = float(rHelp_[1]) - 4.0f;
+                for (const std::string& l : lines) {
+                    rText(l, float(rHelp_[0]), y, th, 0xB4AAA2, 1, 0.0f, 0, kTxOutline | kTxShadow);
+                    y += th + 3;
+                }
+                return;
+            }
             if (lang::active()) {
                 lines = lang::wrapBy(help, float(rHelp_[2]), [&](const std::string& s) { return rTextWidthRaw(s, th); });
                 if (langCheck && lines.size() > 2)
@@ -3188,23 +3248,23 @@ void Frontend::drawRPreview(Widget& w)
         return;
     int x, y, ww, hh;
     absRect(w, x, y, ww, hh);
-    rTorn(float(x), float(y), float(ww), float(hh), 17 + w.user, false, 0.96f);
     const int nc = int(e.choices.size());
     const std::string cur = e.value ? e.value() : std::string();
     int curK = e.choiceNow ? e.choiceNow() : -1;
     for (int k = 0; k < nc && curK < 0; ++k)
         if (e.choices[size_t(k)] == cur)
             curK = k;
-    std::vector<int> ks;
-    if (nc <= 3)
+    std::vector<int> ks = e.previewList;
+    if (!ks.empty()) {
+        if (std::find(ks.begin(), ks.end(), curK) == ks.end())
+            curK = ks[0];   // (fxux: Auto shown as the choice it is now)
+    } else if (nc <= 3)
         for (int k = 0; k < nc; ++k) ks.push_back(k);
     else
         ks.push_back(std::max(0, curK));
-    const float tw = 150.0f, th = 84.0f, S = ps_;
-    for (size_t j = 0; j < ks.size(); ++j) {
-        const int k = ks[j];
-        const float tx = float(x + 6) + float(j) * (tw + 6.0f), ty = float(y + 6);
-        const std::string file = e.preview(k);
+    const float np = float(std::max<size_t>(ks.size(), 1)), S = ps_;
+    auto picOf = [&](int k, std::string& file) -> PreviewPic* {
+        file = e.preview(k);
         PreviewPic* pic = nullptr;
         if (!file.empty()) {
             auto it = previewPics_.find(file);
@@ -3225,21 +3285,137 @@ void Frontend::drawRPreview(Widget& w)
             if (it != previewPics_.end() && it->second.w > 0)
                 pic = &it->second;
         }
-        const bool on = k == curK;
-        // the frame: red round the current value's picture, dark round the others
+        return pic;
+    };
+    auto frame = [&](float tx, float ty, float tw, float th, bool on) {   // red round the current value's, dark round the others
         for (int py = int((ty - 2) * S); py < int((ty + th + 2) * S); ++py)
             for (int px = int((tx - 2) * S); px < int((tx + tw + 2) * S); ++px)
                 rBlend(px, py, on ? 0xC01810 : 0x0C0808, 1.0f);
+    };
+    auto none = [&](const std::string& file, float tx, float ty, float tw, float th) {
+        for (int py = int(ty * S); py < int((ty + th) * S); ++py)
+            for (int px = int(tx * S); px < int((tx + tw) * S); ++px)
+                rBlend(px, py, 0x181212, 1.0f);
+        rText(file.empty() && e.preview(-1).empty() ? "No picture" : "Making the picture...", tx + tw / 2, ty + th / 2 - 6, 11.0f,
+              kRowOff, 1);
+    };
+    auto caption = [&](const std::string& s, float cx, float cy, float maxW, float size, uint32_t ink) {   // (fits its picture)
+        const float cw = rTextWidth(s, size), ch = cw > maxW + 4.0f ? std::max(7.0f, size * (maxW + 4.0f) / cw) : size;
+        rText(s, cx, cy + (size - ch) / 2, ch, ink, 1, 0.0f, 0, kTxShadow);
+    };
+    // relfix2 (user 2026-11-03: side by side "the differences aren't noticeable to a player"): Hit Marks / Transparency
+    // (previewLook): one picture that flips between the choices each second (its spot for the close-ups outlined) and a
+    // close-up of each choice: the same small spot, where the pictures differ most, at 3-4 screen pixels a picture
+    // pixel (nearest, the dots as dots), each with its name and what to look for
+    if (e.previewLook.size() >= size_t(nc) && ks.size() >= 2) {
+        const float th = float(hh) - 30.0f, lw = th * 16.0f / 9.0f, ty = float(y + 5);
+        const float zw = std::min(th * 1.5f, (float(ww) - 24.0f - lw - 6.0f * (np - 1.0f)) / np);   // (a small spot: the dots close)
+        const float total = 12.0f + lw + 12.0f + np * zw + 6.0f * (np - 1.0f), x0 = float(x) + (float(ww) - total) / 2.0f;
+        rTorn(x0, float(y), total, float(hh), 17 + w.user, false, 0.96f);
+        std::vector<PreviewPic*> pics;
+        std::vector<std::string> files(ks.size());
+        for (size_t j = 0; j < ks.size(); ++j)
+            pics.push_back(picOf(ks[j], files[j]));
+        // the close-ups' spot (in picture pixels): the crop of zw x th units at z screen pixels a pixel
+        const int z = S >= 2.0f ? 4 : 3;
+        bool same = pics[0] != nullptr;
+        for (PreviewPic* p : pics)
+            same = same && p && p->w == pics[0]->w && p->h == pics[0]->h && p->rgba.size() == pics[0]->rgba.size();
+        int cwB = 0, chB = 0, zx = 0, zy = 0;
+        if (same) {
+            const int W = pics[0]->w, H = pics[0]->h;
+            cwB = std::clamp(int(zw * S) / z, 8, W), chB = std::clamp(int(th * S) / z, 8, H);
+            std::string zkey = std::to_string(cwB) + "x" + std::to_string(chB);
+            for (const std::string& f : files) zkey += "|" + f;
+            auto at = pics[0]->zoom.find(zkey);
+            if (at == pics[0]->zoom.end()) {
+                // the pixels where the pictures differ (by more than a little), then the crop-sized window with the most
+                std::vector<int64_t> sum(size_t(W + 1) * size_t(H + 1), 0);
+                for (int yy = 0; yy < H; ++yy)
+                    for (int xx = 0; xx < W; ++xx) {
+                        int d = 0;
+                        const size_t o = (size_t(yy) * size_t(W) + size_t(xx)) * 4;
+                        for (size_t j = 1; j < pics.size(); ++j) {
+                            int dj = 0;
+                            for (int c = 0; c < 3; ++c)
+                                dj += std::abs(int(pics[j]->rgba[o + size_t(c)]) - int(pics[0]->rgba[o + size_t(c)]));
+                            d += dj > 24 ? 1 : 0;
+                        }
+                        sum[size_t(yy + 1) * size_t(W + 1) + size_t(xx + 1)] = d + sum[size_t(yy) * size_t(W + 1) + size_t(xx + 1)] +
+                                                                              sum[size_t(yy + 1) * size_t(W + 1) + size_t(xx)] -
+                                                                              sum[size_t(yy) * size_t(W + 1) + size_t(xx)];
+                    }
+                int64_t best = -1;
+                std::pair<int, int> pick{(W - cwB) / 2, (H - chB) / 2};
+                for (int yy = 0; yy + chB <= H; yy += 2)
+                    for (int xx = 0; xx + cwB <= W; xx += 2) {
+                        auto S2 = [&](int a, int b) { return sum[size_t(b) * size_t(W + 1) + size_t(a)]; };
+                        const int64_t v = S2(xx + cwB, yy + chB) - S2(xx, yy + chB) - S2(xx + cwB, yy) + S2(xx, yy);
+                        if (v > best)
+                            best = v, pick = {xx, yy};
+                    }
+                at = pics[0]->zoom.emplace(zkey, pick).first;
+            }
+            zx = at->second.first, zy = at->second.second;
+        }
+        // the flipping picture
+        const size_t shown = size_t(nowMs_ / 1000u) % ks.size();
+        const float lx = x0 + 6.0f;
+        frame(lx, ty, lw, th, ks[shown] == curK);
+        if (pics[shown]) {
+            rImage(pics[shown]->rgba, pics[shown]->w, pics[shown]->h, lx, ty, lw, th, 1.0f);
+            if (same) {   // (where the close-ups are from: a thin light outline)
+                const float sx = lw / float(pics[0]->w), sy = th / float(pics[0]->h);
+                const int X0 = int((lx + float(zx) * sx) * S), Y0 = int((ty + float(zy) * sy) * S);
+                const int X1 = int((lx + float(zx + cwB) * sx) * S), Y1 = int((ty + float(zy + chB) * sy) * S);
+                for (int px = X0; px <= X1; ++px)
+                    rBlend(px, Y0, 0xF0E8D0, 0.9f), rBlend(px, Y1, 0xF0E8D0, 0.9f);
+                for (int py = Y0; py <= Y1; ++py)
+                    rBlend(X0, py, 0xF0E8D0, 0.9f), rBlend(X1, py, 0xF0E8D0, 0.9f);
+            }
+        } else
+            none(files[shown], lx, ty, lw, th);
+        const int kS = ks[shown];
+        caption(e.choices[size_t(kS)], lx + lw / 2, ty + th + 4, lw, 11.0f, kS == curK ? kInkLit : kRowText);
+        caption(e.previewLook[size_t(kS)], lx + lw / 2, ty + th + 15, lw, 9.0f, kRowText);
+        // the close-ups
+        for (size_t j = 0; j < ks.size(); ++j) {
+            const int k = ks[j];
+            const float tx = lx + lw + 12.0f + float(j) * (zw + 6.0f);
+            frame(tx, ty, zw, th, k == curK);
+            if (same) {
+                const PreviewPic& p = *pics[j];
+                const int X0 = int(tx * S), Y0 = int(ty * S), W = int(zw * S), H = int(th * S);
+                for (int jj = 0; jj < H; ++jj)
+                    for (int ii = 0; ii < W; ++ii) {
+                        const int sx = std::min(zx + ii / z, p.w - 1), sy = std::min(zy + jj / z, p.h - 1);
+                        const uint8_t* c = &p.rgba[(size_t(sy) * size_t(p.w) + size_t(sx)) * 4];
+                        rBlend(X0 + ii, Y0 + jj, (uint32_t(c[0]) << 16) | (uint32_t(c[1]) << 8) | uint32_t(c[2]), 1.0f);
+                    }
+            } else
+                none(files[j], tx, ty, zw, th);
+            caption(e.choices[size_t(k)], tx + zw / 2, ty + th + 4, zw, 11.0f, k == curK ? kInkLit : kRowText);
+            caption(e.previewLook[size_t(k)], tx + zw / 2, ty + th + 15, zw, 9.0f, kRowText);
+        }
+        return;
+    }
+    // the others (Models, Blood Colour): side by side, as large as the strip lets them (16:9), centred in it
+    const float th = float(hh) - 30.0f;
+    const float tw = std::min(std::max(1.0f, (float(ww) - 12.0f - 6.0f * (np - 1.0f)) / np), th * 16.0f / 9.0f);
+    const float total = 12.0f + np * tw + 6.0f * (np - 1.0f), x0 = float(x) + (float(ww) - total) / 2.0f;
+    rTorn(x0, float(y), total, float(hh), 17 + w.user, false, 0.96f);
+    for (size_t j = 0; j < ks.size(); ++j) {
+        const int k = ks[j];
+        const float tx = x0 + 6.0f + float(j) * (tw + 6.0f), ty = float(y + 6);
+        std::string file;
+        PreviewPic* pic = picOf(k, file);
+        const bool on = k == curK;
+        frame(tx, ty, tw, th, on);
         if (pic)
             rImage(pic->rgba, pic->w, pic->h, tx, ty, tw, th, 1.0f);
-        else {
-            for (int py = int(ty * S); py < int((ty + th) * S); ++py)
-                for (int px = int(tx * S); px < int((tx + tw) * S); ++px)
-                    rBlend(px, py, 0x181212, 1.0f);
-            rText(file.empty() && e.preview(-1).empty() ? "No picture" : "Making the picture...", tx + tw / 2, ty + th / 2 - 6, 11.0f,
-                  kRowOff, 1);
-        }
-        rText(e.choices[size_t(k)], tx + tw / 2, ty + th + 5, 12.0f, on ? kInkLit : kRowText, 1, 0.0f, 0, kTxShadow);
+        else
+            none(file, tx, ty, tw, th);
+        caption(e.choices[size_t(k)], tx + tw / 2, ty + th + 5, tw, 12.0f, on ? kInkLit : kRowText);
     }
 }
 

@@ -195,6 +195,8 @@ struct DrawItem {
     float fade = 1.0f;                       // the game's draw fade (draw_fade_begin 0..0xFF / 255): PC alpha, arcade colour scale
     uint16_t flat = 0xFFFF;                  // flash: every polygon untextured in this polygon palette entry (DrawModel::flat)
     int8_t ramp = -1;                        // 4P: the drawn colours through Renderer::rampStops[ramp] (players 3 / 4's shot spark)
+    float bloodHue = -1.0f;                  // cosmods: Rainbow Blood's creature colour (game/cosmods.h creatureBloodHue): -1 none,
+                                             // 0..1 the hue of its wounds and blood texels, 2 the cycling per-item hue
     bool sideOnly = false;                   // endfloor: drawn only outside the centred 4:3 picture (widescreen's side strips)
 };
 

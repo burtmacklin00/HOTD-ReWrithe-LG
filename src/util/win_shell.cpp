@@ -16,9 +16,14 @@
 #include "util/pe_icon.h"
 #include "util/png.h"
 
+#include <cerrno>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -288,15 +293,150 @@ int runHidden(const std::string& exe, const std::string& args, int seconds) {
 #endif
 
 #ifndef _WIN32
-ShortcutResult createShortcutTo(const std::string&, const std::string&, const std::string&, const std::string&, std::string&,
-                                std::string& msg) {
-    msg = "Windows only";
+// linux (2026-11-03): the setup's install on Linux / macOS. Linux: "<linkFolder>/<name>.desktop" (a desktop entry, as
+// createShortcut's), its icon the PNG iconFile when there is one; macOS: none yet (the package's .app is the shortcut)
+ShortcutResult createShortcutTo(const std::string& linkFolder, const std::string& name, const std::string& target,
+                                const std::string& iconFile, std::string& made, std::string& msg) {
+#ifdef __APPLE__
+    (void)linkFolder, (void)name, (void)target, (void)iconFile, (void)made;
+    msg = "shortcuts: not supported on macOS yet (drag the app to the Dock)";
     return ShortcutResult::Failed;
+#else
+    std::error_code ec;
+    const fs::path dir(linkFolder), exe(target), p = dir / (name + ".desktop");
+    fs::create_directories(dir, ec);
+    const bool icon = iconFile.size() > 4 && iconFile.compare(iconFile.size() - 4, 4, ".png") == 0 && fs::exists(iconFile, ec);
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);
+    f << "[Desktop Entry]\nType=Application\nName=The House of the Dead: ReWrithe\nComment=The House of the Dead: ReWrithe\n"
+      << "Exec=" << execQuote(exe.string()) << "\nPath=" << exe.parent_path().string() << "\n"
+      << (icon ? "Icon=" + iconFile + "\n" : std::string()) << "Terminal=false\nCategories=Game;ActionGame;\n";
+    f.close();
+    if (!f) { msg = "could not create the shortcut in " + linkFolder; return ShortcutResult::Failed; }
+    fs::permissions(p, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec, fs::perm_options::add, ec);
+    made = p.string();
+    msg = "Shortcut created: " + made;
+    return ShortcutResult::Created;
+#endif
 }
-std::string desktopFolder() { return {}; }
-std::string startMenuFolder() { return {}; }
-bool launch(const std::string&, const std::string&, const std::string&) { return false; }
-int runHidden(const std::string& exe, const std::string& args, int) { return std::system(("\"" + exe + "\" " + args).c_str()); }
+// Linux: the freedesktop Desktop and applications menu folders; macOS: none (no desktop entries there)
+std::string desktopFolder() {
+#ifdef __APPLE__
+    return {};
+#else
+    return desktopDir().string();
+#endif
+}
+std::string startMenuFolder() {
+#ifdef __APPLE__
+    return {};
+#else
+    return (dataHome() / "applications").string();
+#endif
+}
+
+namespace {
+// a Windows-style command line ("quoted parts" keep their spaces) -> its arguments
+std::vector<std::string> splitArgs(const std::string& s) {
+    std::vector<std::string> out;
+    std::string cur;
+    bool quoted = false, any = false;
+    for (const char c : s) {
+        if (c == '"') { quoted = !quoted; any = true; continue; }
+        if (!quoted && (c == ' ' || c == '\t')) {
+            if (any) out.push_back(cur), cur.clear(), any = false;
+            continue;
+        }
+        cur += c;
+        any = true;
+    }
+    if (any) out.push_back(cur);
+    return out;
+}
+// argv for execv (the strings stay owned by `keep`; made before fork: nothing is allocated in the child)
+std::vector<char*> argvOf(std::vector<std::string>& keep) {
+    std::vector<char*> v;
+    for (std::string& a : keep) v.push_back(a.data());
+    v.push_back(nullptr);
+    return v;
+}
+}  // namespace
+
+std::string findProgram(const std::string& name) {
+    std::error_code ec;
+    if (name.find('/') != std::string::npos) return access(name.c_str(), X_OK) == 0 ? name : std::string();
+    const char* path = std::getenv("PATH");
+    std::string p = path && *path ? path : "/usr/local/bin:/usr/bin:/bin";
+    for (size_t a = 0; a <= p.size();) {
+        size_t b = p.find(':', a);
+        if (b == std::string::npos) b = p.size();
+        const std::string dir = p.substr(a, b - a);
+        a = b + 1;
+        if (dir.empty()) continue;
+        const std::string f = dir + "/" + name;
+        if (fs::is_regular_file(f, ec) && access(f.c_str(), X_OK) == 0) return f;
+    }
+    return {};
+}
+
+// a detached child (double fork: no zombie; its own session, so it outlives this process)
+bool launch(const std::string& exe, const std::string& args, const std::string& workDir) {
+    const std::string path = findProgram(exe);
+    if (path.empty()) return false;
+    std::vector<std::string> keep = splitArgs(args);
+    keep.insert(keep.begin(), path);
+    std::vector<char*> argv = argvOf(keep);
+    const pid_t pid = fork();
+    if (pid < 0) return false;
+    if (pid == 0) {
+        setsid();
+        if (fork() != 0) _exit(0);
+        if (!workDir.empty() && chdir(workDir.c_str()) != 0) _exit(127);
+        execv(path.c_str(), argv.data());
+        _exit(127);
+    }
+    int st = 0;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    return WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+
+// no window here anyway: stdin / stdout / stderr to /dev/null; killed (its process group) after `seconds`
+int runHidden(const std::string& exe, const std::string& args, int seconds) {
+    const std::string path = findProgram(exe);
+    if (path.empty()) return -1;
+    std::vector<std::string> keep = splitArgs(args);
+    keep.insert(keep.begin(), path);
+    std::vector<char*> argv = argvOf(keep);
+    const pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        setpgid(0, 0);
+        const int nul = open("/dev/null", O_RDWR);
+        if (nul >= 0) { dup2(nul, 0); dup2(nul, 1); dup2(nul, 2); }
+        execv(path.c_str(), argv.data());
+        _exit(127);
+    }
+    setpgid(pid, pid);
+    int st = 0;
+    for (int ms = 0;; ms += 20) {
+        const pid_t r = waitpid(pid, &st, WNOHANG);
+        if (r == pid) break;
+        if (r < 0 && errno != EINTR) return -1;
+        if (ms >= seconds * 1000) {
+            kill(-pid, SIGKILL);
+            while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+            return -1;
+        }
+        usleep(20000);
+    }
+    if (!WIFEXITED(st)) return -1;
+    return WEXITSTATUS(st) == 127 ? -1 : WEXITSTATUS(st);
+}
+#else
+std::string findProgram(const std::string& name) {
+    wchar_t buf[MAX_PATH * 2];
+    const DWORD n = SearchPathW(nullptr, wide(name).c_str(), L".exe", DWORD(sizeof(buf) / sizeof(buf[0])), buf, nullptr);
+    return n && n < sizeof(buf) / sizeof(buf[0]) ? narrow(std::wstring(buf, n)) : std::string();
+}
 #endif
 
 void dialogFrame(void* hwnd, bool on)

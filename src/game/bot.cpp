@@ -24,18 +24,18 @@ constexpr int kPlaying = 5, kOut = 4, kWaiting = 9;
 constexpr uint64_t kSoftLockFrames = 3600;   // 60 s of game time without any progress
 
 // on the arcade screen (the light gun's reach): the camera-space centre projected with the focal length 496
-bool onScreen(Runtime& rt, uint32_t obj, float& x, float& y)
+bool onScreen(Runtime& rt, uint32_t obj, float& x, float& y, float hw = 248.0f)
 {
     const float cx = rt.mem.f32(obj + 0x38), cy = rt.mem.f32(obj + 0x3C), z = rt.mem.f32(obj + 0x40);
     if (!(z > 1.0f))
         return false;
     x = cx * 496.0f / z;
     y = cy * 496.0f / z;
-    return std::abs(x) <= 248.0f && std::abs(y) <= 192.0f;
+    return std::abs(x) <= hw && std::abs(y) <= 192.0f;
 }
 // a part node's hit sphere centre (+0x5C, camera space) projected; walks the part tree (+0x34 children, +0x24 their
 // array, +0x38 the part id) as body_find_part does
-void weakParts(Runtime& rt, uint32_t part, const uint32_t* ids, size_t n, std::vector<std::pair<float, float>>& out)
+void weakParts(Runtime& rt, uint32_t part, const uint32_t* ids, size_t n, std::vector<std::pair<float, float>>& out, float hw)
 {
     if (!rt.mem.mapped(part))
         return;
@@ -44,13 +44,13 @@ void weakParts(Runtime& rt, uint32_t part, const uint32_t* ids, size_t n, std::v
         const float cx = rt.mem.f32(part + 0x5C), cy = rt.mem.f32(part + 0x60), z = rt.mem.f32(part + 0x64);
         if (z > 1.0f) {
             const float x = cx * 496.0f / z, y = cy * 496.0f / z;
-            if (std::abs(x) <= 248.0f && std::abs(y) <= 192.0f)
+            if (std::abs(x) <= hw && std::abs(y) <= 192.0f)
                 out.push_back({x, y});
         }
     }
     const uint32_t k = rt.mem.u32(part + 0x34);
     for (uint32_t i = 0; i < k && i < 64; ++i)
-        weakParts(rt, rt.mem.u32(rt.mem.u32(part + 0x24) + 4 * i), ids, n, out);
+        weakParts(rt, rt.mem.u32(rt.mem.u32(part + 0x24) + 4 * i), ids, n, out, hw);
 }
 // the screen distance from (sx, sy) to the edge of the nearest hit sphere of an object (< 0: inside), as the shot test
 // sees it: the body parts' spheres (+0x5C camera space, +0x74 radius) when it tests them one by one (+0x6C bit 0),
@@ -91,7 +91,7 @@ float sphereGap(Runtime& rt, uint32_t obj, float sx, float sy)
 // centre mostly sparks. Bots firing every 30-45 frames at the centre hit a weak part ~3 times in 100 shots (their
 // fixed rhythm against his animation) and never killed him (the event's WAIT_ENNUM for ever); MAME's player took him
 // 600 -> 410 in ~600 frames
-bool aimPoint(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y)
+bool aimPoint(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y, float hw)
 {
     if (rt.mem.u32(obj) == 0x71010) {   // magician_frame
         static const uint32_t ids[] = {4, 6, 11, 13};
@@ -99,14 +99,14 @@ bool aimPoint(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y)
         const uint32_t root = rt.mem.u32(obj + 0xC8);
         if (rt.mem.mapped(root))
             for (uint32_t k = 0; k < rt.mem.u32(root + 0x34) && k < 64; ++k)
-                weakParts(rt, rt.mem.u32(rt.mem.u32(root + 0x24) + 4 * k), ids, 4, pts);
+                weakParts(rt, rt.mem.u32(rt.mem.u32(root + 0x24) + 4 * k), ids, 4, pts, hw);
         if (!pts.empty()) {
             x = pts[pick % pts.size()].first;
             y = pts[pick % pts.size()].second;
             return true;
         }
     }
-    return onScreen(rt, obj, x, y);
+    return onScreen(rt, obj, x, y, hw);
 }
 
 Bot::Bot(uint64_t seed, int players) : players_(players), rng_(seed * 0x9E3779B97F4A7C15ull + 12345)
@@ -207,7 +207,7 @@ void Bot::teammates(uint8_t mask, const int level[4])
     for (int p = 0; p < 4; ++p) {
         if (!((mask >> p) & 1))
             continue;
-        level_[p] = std::clamp(level[p], 1, 3);   // (the play: teamPlay, by kTeamLevel)
+        level_[p] = std::clamp(level[p], 1, 4);   // (the play: teamPlay, by kTeamLevel)
         profile[p].continueChance = 1.0f;
     }
 }
@@ -216,7 +216,7 @@ uint64_t Bot::teamSeed(uint8_t mask, const int level[4])
 {
     uint64_t s = 0x484F5444ull << 16 | mask;   // "HOTD"
     for (int p = 0; p < 4; ++p)
-        s = s * 31 + uint64_t(std::clamp(level[p], 0, 3));
+        s = s * 31 + uint64_t(std::clamp(level[p], 0, 4));
     return s;
 }
 
@@ -254,17 +254,21 @@ struct TeamLevel {
     int emptyMin, emptyMax;    // frames from the last round to the reload
     float lateReload;          // chance the reload comes late (+30..90 frames)
     int lull;                  // frames without a threat before a partly empty gun is reloaded
+    float follow;              // how much of a moving spot's move the hand follows each frame (team: 0.85 before)
 };
 // 1 easy: slow, often off; 2 normal: a fair partner (about a decent player's pace, not a carry); 3 hard: quick and
-// sure, not inhuman (a human's flick: ~15-20 units a frame)
-constexpr TeamLevel kTeamLevel[4] = {
+// sure, not inhuman (a human's flick: ~15-20 units a frame). team (2026-11-03; trailer comments: "Hard should really be
+// hard"): hard quicker and surer (reaction 15 -> 11 frames, shake 2.5 -> 1.6, settle 6 -> 3.5, the hand on a moving
+// spot), 4 expert: a very good player (reaction ~8 frames, a 24-unit flick, shake 1.0, no lapses)
+constexpr TeamLevel kTeamLevel[5] = {
     {},
-    {32, 0.35f, 0.25f, 7.0f, 0.12f, 0.26f, 0.11f, 8, 16, 14.0f, 0.75f, 5.0f, 0.045f, 1, 3, 12, 18, 34, 64, 0.20f, 24, 48, 0.40f, 90},
-    {23, 0.30f, 0.15f, 10.0f, 0.16f, 0.19f, 0.08f, 6, 12, 10.0f, 0.65f, 3.5f, 0.035f, 2, 3, 9, 14, 20, 40, 0.12f, 14, 28, 0.25f, 60},
-    {15, 0.25f, 0.07f, 14.0f, 0.22f, 0.12f, 0.05f, 4, 9, 6.0f, 0.55f, 2.5f, 0.020f, 2, 4, 7, 10, 10, 22, 0.05f, 8, 16, 0.10f, 35},
+    {32, 0.35f, 0.25f, 7.0f, 0.12f, 0.26f, 0.11f, 8, 16, 14.0f, 0.75f, 5.0f, 0.045f, 1, 3, 12, 18, 34, 64, 0.20f, 24, 48, 0.40f, 90, 0.85f},
+    {23, 0.30f, 0.15f, 10.0f, 0.16f, 0.19f, 0.08f, 6, 12, 10.0f, 0.65f, 3.5f, 0.035f, 2, 3, 9, 14, 20, 40, 0.12f, 14, 28, 0.25f, 60, 0.85f},
+    {11, 0.22f, 0.04f, 18.0f, 0.28f, 0.10f, 0.04f, 3, 7, 3.5f, 0.42f, 1.6f, 0.015f, 2, 4, 6, 9, 8, 16, 0.03f, 6, 12, 0.05f, 30, 0.95f},
+    {8, 0.18f, 0.0f, 24.0f, 0.35f, 0.07f, 0.03f, 2, 5, 2.0f, 0.30f, 1.0f, 0.008f, 3, 5, 5, 7, 4, 10, 0.0f, 4, 8, 0.0f, 25, 1.0f},
 };
 // a part's hit sphere on the gun's screen (centre and radius in screen units); false: not drawn / off the screen
-bool partScreen(Runtime& rt, uint32_t part, float& x, float& y, float& r)
+bool partScreen(Runtime& rt, uint32_t part, float& x, float& y, float& r, float hw = 248.0f)
 {
     if (!rt.mem.mapped(part) || rt.mem.u32(part) == 0 || (rt.mem.u32(part + 0x3C) & 0x80000000u))
         return false;
@@ -274,7 +278,7 @@ bool partScreen(Runtime& rt, uint32_t part, float& x, float& y, float& r)
     x = rt.mem.f32(part + 0x5C) * 496.0f / z;
     y = rt.mem.f32(part + 0x60) * 496.0f / z;
     r = rad * 496.0f / z;
-    return std::abs(x) <= 248.0f && std::abs(y) <= 192.0f;
+    return std::abs(x) <= hw && std::abs(y) <= 192.0f;
 }
 void listParts(Runtime& rt, uint32_t part, std::vector<uint32_t>& out, int depth)
 {
@@ -319,6 +323,31 @@ bool hasAny(const std::string& n, std::initializer_list<const char*> words)
     return false;
 }
 } // namespace
+
+bool partAim(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y)
+{
+    const uint32_t root = rt.mem.u32(obj + 0xC8);
+    if (!rt.mem.mapped(root))
+        return false;
+    std::vector<uint32_t> parts;
+    listParts(rt, root, parts, 0);
+    std::vector<std::pair<float, float>> spots;   // the parts on the screen that take damage, the biggest first
+    std::vector<float> size;
+    for (uint32_t part : parts) {
+        float px, py, r;
+        if (part == root || !partScreen(rt, part, px, py, r) || partDamage(rt, obj, part) <= 0)
+            continue;
+        size_t at = 0;
+        while (at < size.size() && size[at] >= r) ++at;
+        size.insert(size.begin() + std::ptrdiff_t(at), r);
+        spots.insert(spots.begin() + std::ptrdiff_t(at), {px, py});
+    }
+    if (spots.empty())
+        return false;
+    x = spots[pick % spots.size()].first;
+    y = spots[pick % spots.size()].second;
+    return true;
+}
 
 Bot::Kind Bot::kindOf(Runtime& rt, uint32_t obj)
 {
@@ -403,6 +432,84 @@ void Bot::trackFrame(Runtime& rt, uint64_t f)
         for (auto it = hostTrack_.begin(); it != hostTrack_.end();)
             it = f - it->second.f > 120 ? hostTrack_.erase(it) : std::next(it);
     }
+    if (team_)
+        tallyFrame(rt, f);
+}
+
+// (team 2026-11-03) what a shot thing is for the kill counts: 0 a bat, 1 a small creature (the leeches / worms /
+// slugs / spiders / Murrers / frogs / rats), 2 a thrown thing, 3 another enemy, 4 a boss (the Chariot's hit box too)
+int Bot::category(Runtime& rt, uint32_t obj)
+{
+    const Kind k = kindOf(rt, obj);
+    const uint32_t r = rt.mem.u32(obj);
+    if (k == kProjectile)
+        return 2;
+    if (k == kBoss || r == 0x97D20 || r == 0x97FE0 || r == 0x993A0)
+        return 4;
+    const std::string n = rt.routineName(r);
+    if (hasAny(n, {" bat_"}))
+        return 0;
+    if (hasAny(n, {"ebitb", "ebita", "taran", "slug", "spitter", "molb", "leech", "worm", "frog", "_rat", "kind141", "kind142"}))
+        return 1;
+    return 3;
+}
+
+// the kill counts: a CPU seat's hit (Game::stat_hits went up, stat_last_hit the object) marks the object; a marked
+// object that goes down (hit points used up, a dying routine) or leaves the shootable list within 60 frames was
+// killed by it. A boss's hit points lost within 2 frames of a CPU hit on a boss count as its damage
+void Bot::tallyFrame(Runtime& rt, uint64_t f)
+{
+    for (int p = 0; p < 4; ++p) {
+        const uint32_t h = rt.stat_hits[p];
+        if (((team_ >> p) & 1) && h != prevHits_[p] && rt.stat_last_hit[p] && rt.mem.mapped(rt.stat_last_hit[p])) {
+            HitMark& m = hitMark_[rt.stat_last_hit[p]];
+            m.f = f;
+            m.cat = category(rt, rt.stat_last_hit[p]);
+            if (static const bool tr = std::getenv("HOTD_TRACE_BOT") != nullptr; tr)
+                std::printf("BOT f %llu P%d hit %s\n", (unsigned long long)f, p + 1, rt.routineName(rt.mem.u32(rt.stat_last_hit[p])).c_str());
+            if (m.cat == 4) {
+                ++tally.bossHits;
+                lastBossHit_ = f;
+            }
+        }
+        prevHits_[p] = h;
+    }
+    for (auto it = hitMark_.begin(); it != hitMark_.end();) {
+        const uint32_t obj = it->first;
+        const HitMark& m = it->second;
+        bool gone = std::find(rt.shootable.begin(), rt.shootable.end(), obj) == rt.shootable.end();
+        if (!gone && m.cat != 4) {
+            const int hp = rt.mem.at<int16_t>(obj + 0x70), hpMax = rt.mem.at<int16_t>(obj + 0x72);
+            gone = (hpMax > 0 && hp <= 0) || kindOf(rt, obj) == kDead;
+        }
+        if (gone && m.cat != 4 && f - m.f <= 60) {
+            uint32_t* c[4] = {&tally.bats, &tally.small, &tally.projectiles, &tally.enemies};
+            ++*c[m.cat];
+            if (static const bool tr = std::getenv("HOTD_TRACE_BOT") != nullptr; tr)
+                std::printf("BOT f %llu kill %s cat %d (hit at %llu)\n", (unsigned long long)f, rt.routineName(rt.mem.u32(obj)).c_str(), m.cat,
+                            (unsigned long long)m.f);
+        }
+        it = gone || f - m.f > 60 ? hitMark_.erase(it) : std::next(it);
+    }
+    for (uint32_t obj : rt.shootable) {
+        if (category(rt, obj) != 4)
+            continue;
+        const uint32_t owner = rt.mem.u32(obj) == 0x993A0 ? rt.mem.u32(obj + 0x18) : obj;   // (the hit box: its Chariot)
+        if (!rt.mem.mapped(owner) || rt.mem.at<int16_t>(owner + 0x72) <= 0)
+            continue;
+        const int hp = rt.mem.at<int16_t>(owner + 0x70);
+        auto it = bossHp_.find(owner);
+        if (it != bossHp_.end() && hp < it->second && f - lastBossHit_ <= 2)
+            tally.bossDamage += it->second - hp;
+        bossHp_[owner] = hp;
+    }
+    for (uint32_t obj : rt.shootable)   // Tally::seen: new in the shootable list (not there last frame)
+        if (std::find(prevShootable_.begin(), prevShootable_.end(), obj) == prevShootable_.end()) {
+            const int c = category(rt, obj);
+            if (c < 4 && !(c == 3 && kindOf(rt, obj) != kEnemy))
+                ++tally.seen[c];
+        }
+    prevShootable_ = rt.shootable;
 }
 
 // a hostage's sphere gap at (x, y) now and where its motion on the screen takes it in the next 10 frames (cpu3: "plus a
@@ -434,6 +541,15 @@ bool Bot::blocked(Runtime& rt, uint32_t target, float x, float y)
     return false;
 }
 
+bool Bot::hostageCovers(Runtime& rt, uint32_t target, float x, float y)
+{
+    const float tz = rt.mem.f32(target + 0x40);
+    for (uint32_t obj : rt.shootable)
+        if (obj != target && kindOf(rt, obj) == kHostage && rt.mem.f32(obj + 0x40) < tz + 4.0f && hostageGap(rt, obj, x, y) < 6.0f)
+            return true;
+    return false;
+}
+
 void Bot::printAudit(Runtime& rt) const
 {
     static const char* kn[] = {"enemy", "projectile", "boss", "hostage", "decoy", "dead", "scenery"};
@@ -452,19 +568,19 @@ float Bot::threat(Runtime& rt, uint32_t obj, bool& damageable, float& x, float& 
     if (k == kHostage || k == kDecoyKind || k == kDead || k == kScenery)
         return 0;
     const float z = rt.mem.f32(obj + 0x40);
-    if (!aimPoint(rt, obj, 0, x, y)) {
+    if (!aimPoint(rt, obj, 0, x, y, halfW_)) {
         // cpu3 (user 2026-10-27: "when they are not visible they know the general location but won't shoot until they
         // are reasonably open and visible"): a creature just off the screen (up to a screen's width / height beyond the
         // edge, in front of the camera) is known: the sight waits at the edge nearest it, no shots (damageable false)
         if (!vis || k == kProjectile || !(z > 1.0f) || z > 130.0f)
             return 0;
         const float ox = rt.mem.f32(obj + 0x38) * 496.0f / z, oy = rt.mem.f32(obj + 0x3C) * 496.0f / z;
-        if (std::abs(ox) > 496.0f || std::abs(oy) > 384.0f)
+        if (std::abs(ox) > 2.0f * halfW_ || std::abs(oy) > 384.0f)
             return 0;
         const int hp = rt.mem.at<int16_t>(obj + 0x70), hpMax = rt.mem.at<int16_t>(obj + 0x72);
         if (hpMax > 0 && hp <= 0)
             return 0;
-        x = std::clamp(ox, -230.0f, 230.0f);
+        x = std::clamp(ox, -(halfW_ - 18.0f), halfW_ - 18.0f);
         y = std::clamp(oy, -175.0f, 175.0f);
         *vis = false;
         return std::max(60.0f, 600.0f - 3.5f * z);
@@ -476,7 +592,12 @@ float Bot::threat(Runtime& rt, uint32_t obj, bool& damageable, float& x, float& 
         damageable = true;
         return z < 40.0f ? 1250.0f : std::max(200.0f, 950.0f - 3.0f * z);
     }
-    damageable = stopped;
+    // team (2026-11-03; trailer comments: "they don't shoot the bats"): a creature without a body (the bats, kinds
+    // 66-68) runs its own hit check (bat_hit_check: the shot flag, at any time), not enemy_part_hits' (the camera at a
+    // stop): a teammate shoots it while the camera moves too. It takes no attack position either: it is in the fight
+    // once near (below). (Teammates only: The Typing of the Dead 0's classes stay as they were)
+    const bool ownHits = team_ && rt.mem.u32(obj + 0xC8) == 0;
+    damageable = stopped || (ownHits && k == kEnemy);
     if (k == kBoss)
         return 700.0f + (z < 40.0f ? 300.0f : 0.0f);
     const int hp = rt.mem.at<int16_t>(obj + 0x70), hpMax = rt.mem.at<int16_t>(obj + 0x72);
@@ -484,7 +605,7 @@ float Bot::threat(Runtime& rt, uint32_t obj, bool& damageable, float& x, float& 
     // fights on at -30): one still shootable 2.5 s later is alive after all (a body takes up to ~2 s to go down)
     if (hpMax > 0 && hp <= 0 && (t == track_.end() || t->second.down == 0 || t->second.f - t->second.down < 150))
         return 0;
-    const bool engaged = rt.mem.at<int8_t>(obj + 0x2E7) >= 0;   // took an attack position
+    const bool engaged = rt.mem.at<int8_t>(obj + 0x2E7) >= 0 || (ownHits && z < 200.0f);   // took an attack position
     if (z > 260.0f || (!engaged && z > 130.0f))   // far off in the background / not yet in the fight
         return 0;
     float s = std::max(60.0f, 1000.0f - 3.5f * z);
@@ -500,7 +621,7 @@ float Bot::threat(Runtime& rt, uint32_t obj, bool& damageable, float& x, float& 
 void Bot::teamPlay(Runtime& rt, int p, uint64_t f)
 {
     P& s = pl_[p];
-    const TeamLevel& L = kTeamLevel[std::clamp(level_[p], 1, 3)];
+    const TeamLevel& L = kTeamLevel[std::clamp(level_[p], 1, 4)];
     const Player& pl = rt.mem.at<Player>(rt.player_rec(p));
     Runtime::GunInput& g = rt.gun[p];
     trackFrame(rt, f);
@@ -667,7 +788,7 @@ void Bot::teamPlay(Runtime& rt, int p, uint64_t f)
         // moving part and never came to rest on it: the sewer slugs (enemy_main type 46, crawling) were aimed at for
         // ever and never shot (Chapter 1 event 11 waited for ever)
         if (spotOk && s.followObj == t->obj && s.followPart == s.spotPart) {
-            float mx = (spotX - s.followX) * 0.85f, my = (spotY - s.followY) * 0.85f;
+            float mx = (spotX - s.followX) * L.follow, my = (spotY - s.followY) * L.follow;
             const float ml = std::sqrt(mx * mx + my * my);
             if (ml > L.speed)
                 mx *= L.speed / ml, my *= L.speed / ml;
@@ -677,7 +798,7 @@ void Bot::teamPlay(Runtime& rt, int p, uint64_t f)
         s.followPart = s.spotPart, s.followX = spotX, s.followY = spotY;
     } else
         s.followObj = 0;
-    tx = std::clamp(tx, -246.0f, 246.0f);
+    tx = std::clamp(tx, -(halfW_ - 2.0f), halfW_ - 2.0f);
     ty = std::clamp(ty, -190.0f, 190.0f);
     {
         float dx = (tx - s.aimX) * (t ? L.ease : 0.03f), dy = (ty - s.aimY) * (t ? L.ease : 0.03f);
@@ -737,7 +858,7 @@ void Bot::teamPlay(Runtime& rt, int p, uint64_t f)
         return;
     // open and in view (cpu3): the spot inside the screen (a part clamped at the edge is mostly off it) and no decoy /
     // prop in front of it
-    if (std::abs(spotX) > 238.0f || std::abs(spotY) > 182.0f || blocked(rt, t->obj, s.aimX, s.aimY)) {
+    if (std::abs(spotX) > halfW_ - 10.0f || std::abs(spotY) > 182.0f || blocked(rt, t->obj, s.aimX, s.aimY)) {
         ++heldHidden;
         if (rnd() < 0.05f)
             s.spotU = 1e9f;
@@ -769,7 +890,7 @@ void Bot::teamPlay(Runtime& rt, int p, uint64_t f)
     const float sx = s.aimX + std::clamp(gauss(L.tremor), -2.5f * L.tremor, 2.5f * L.tremor);
     const float sy = s.aimY + std::clamp(gauss(L.tremor), -2.5f * L.tremor, 2.5f * L.tremor);
     g.onScreen = g.trigger = true;
-    g.x = std::clamp(sx, -247.0f, 247.0f);
+    g.x = std::clamp(sx, -(halfW_ - 1.0f), halfW_ - 1.0f);
     g.y = std::clamp(sy, -191.0f, 191.0f);
     ++shots;
     ++audit_[rt.mem.u32(t->obj)].shots;
@@ -812,15 +933,15 @@ bool Bot::spotPoint(Runtime& rt, int p, uint32_t obj, float& x, float& y, float&
     if (s.spotU > 1e8f)
         return false;
     if (s.spotPart) {
-        if (rt.mem.u32(s.spotPart + 0x40) != obj || !partScreen(rt, s.spotPart, x, y, r))
+        if (rt.mem.u32(s.spotPart + 0x40) != obj || !partScreen(rt, s.spotPart, x, y, r, halfW_))
             return false;
     } else {
-        if (!aimPoint(rt, obj, 0, x, y))
+        if (!aimPoint(rt, obj, 0, x, y, halfW_))
             return false;
         const float z = rt.mem.f32(obj + 0x40);
         r = std::clamp(rt.mem.f32(obj + 0x90) * 496.0f / std::max(1.0f, z) * 0.6f, 3.0f, 40.0f);
     }
-    x = std::clamp(x + s.spotU * r, -247.0f, 247.0f);
+    x = std::clamp(x + s.spotU * r, -(halfW_ - 1.0f), halfW_ - 1.0f);
     y = std::clamp(y + s.spotV * r, -191.0f, 191.0f);
     return true;
 }
@@ -832,7 +953,7 @@ bool Bot::spotPoint(Runtime& rt, int p, uint32_t obj, float& x, float& y, float&
 bool Bot::pickSpot(Runtime& rt, int p, uint32_t obj, bool boss, const std::vector<uint32_t>& hostages)
 {
     P& s = pl_[p];
-    const TeamLevel& L = kTeamLevel[std::clamp(level_[p], 1, 3)];
+    const TeamLevel& L = kTeamLevel[std::clamp(level_[p], 1, 4)];
     const float spread = boss ? 0.6f * L.spot : L.spot;
     s.spotU = std::clamp(gauss(spread), -1.1f, 1.1f);
     s.spotV = std::clamp(gauss(spread), -1.1f, 1.1f);
@@ -848,7 +969,7 @@ bool Bot::pickSpot(Runtime& rt, int p, uint32_t obj, bool boss, const std::vecto
     int maxDmg = 0;
     for (uint32_t part : parts) {
         float x, y, r;
-        if (!partScreen(rt, part, x, y, r))
+        if (!partScreen(rt, part, x, y, r, halfW_))
             continue;
         bool nearH = false;
         for (uint32_t h : hostages)
@@ -861,7 +982,7 @@ bool Bot::pickSpot(Runtime& rt, int p, uint32_t obj, bool boss, const std::vecto
     }
     if (cs.empty()) {   // no parts (or all near a hostage): the centre, unless a hostage is there
         float x, y;
-        if (!aimPoint(rt, obj, 0, x, y))
+        if (!aimPoint(rt, obj, 0, x, y, halfW_))
             return false;
         for (uint32_t h : hostages)
             if (hostageGap(rt, h, x, y) < 18.0f)

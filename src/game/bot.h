@@ -5,6 +5,7 @@
 
 #include "game/runtime.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <random>
@@ -39,14 +40,42 @@ public:
     // shots at nothing, the gap between shots: a weak player fires slowly and misses)
     void setSkill(int p, float s);
     // computer teammates (local play, user 2026-10-20): the bot plays only the seats in `mask` (bit p), at `level` 1 easy /
-    // 2 normal / 3 hard, as a partner: it joins at once, always continues, never leaves or skips a cut-scene, never
-    // shoots hostages, picks targets by threat (teamPlay); the human seats' guns are not touched
+    // 2 normal / 3 hard / 4 expert (team 2026-11-03), as a partner: it joins at once, always continues, never leaves or
+    // skips a cut-scene, never shoots hostages, picks targets by threat (teamPlay); the human seats' guns are not touched
     void teammates(uint8_t mask, const int level[4]);
     uint8_t teamMask() const { return team_; }
+    // (team 2026-11-03) the game area's half width in arcade units (4:3 248, widescreen up to the window's): the
+    // teammates shoot what the player sees, the widescreen sides too. The PC that plays the seat sets it (online its
+    // input goes through the lockstep, so the other PCs' screens do not matter)
+    void setHalfW(float w) { halfW_ = std::clamp(w, 128.0f, 1000.0f); }
+    // headless measuring (the TEAM line's KILLS part): the CPU seats' kills by kind (a CPU hit, then the thing went down
+    // or away within 60 frames), the hit points the bosses lost while a CPU seat hit them
+    struct Tally { uint32_t bats = 0, small = 0, projectiles = 0, enemies = 0, bossHits = 0; int bossDamage = 0;
+                   uint32_t seen[4] = {};   // how many of each (bats, small creatures, thrown things, others) appeared (new in the shootable list)
+    };
+    Tally tally;
     // online (docs/netplay.md "CPU teammates"): seat p's input for frame f without touching the game: the gun in `out`,
     // true = its start button. The PC that owns the seat asks once per input frame and sends it like a player's input
     // (rollback re-runs frames with what was sent, never asks again), so every PC runs the same frames
     bool seatInput(Runtime& rt, int p, uint64_t f, Runtime::GunInput& out);
+    // The Typing of the Dead 0 (game/typing.h): the target classes and threats for its prompts (the bot itself never
+    // plays then). targetKind: 0 enemy, 1 projectile, 2 boss, 3 hostage, 4 decoy, 5 dead, 6 scenery. targetThreat:
+    // threat() after the frame's tracking (f: the game frame). hostageCovers: a hostage / person nearer than the
+    // target within a few units of the point (a shot there could hit them)
+    int targetKind(Runtime& rt, uint32_t obj) { return int(kindOf(rt, obj)); }
+    float targetThreat(Runtime& rt, uint64_t f, uint32_t obj, bool& damageable, float& x, float& y)
+    {
+        trackFrame(rt, f);
+        return threat(rt, obj, damageable, x, y);
+    }
+    bool hostageCovers(Runtime& rt, uint32_t target, float x, float y);
+    // (The Typing of the Dead 0, totd2: the word's length by threat) how fast the object comes toward the camera, units
+    // a frame, from the tracking of targetThreat (0: not tracked yet)
+    float approach(uint32_t obj) const
+    {
+        const auto it = track_.find(obj);
+        return it == track_.end() ? 0.0f : it->second.dz;
+    }
     // the teammates' seed: from the game's own settings (the seats and levels), never the clock, so runs repeat
     static uint64_t teamSeed(uint8_t mask, const int level[4]);
     // a teammate's crosshair (arcade screen units, centre 0 / 0, y up) for the HUD
@@ -112,6 +141,17 @@ private:
     bool blocked(Runtime& rt, uint32_t target, float x, float y);  // a decoy / prop in front of the target there
     void trackFrame(Runtime& rt, uint64_t f);
     std::map<uint32_t, Kind> kind_;
+    float halfW_ = 248.0f;
+    // the kill counts (Tally): per object the frame of a CPU seat's last hit on it and what it is (0 bat, 1 small
+    // creature, 2 projectile, 3 other enemy, 4 boss), the seats' hit counts last frame, the bosses' hit points
+    struct HitMark { uint64_t f = 0; int cat = 3; int hp = 0; };
+    std::map<uint32_t, HitMark> hitMark_;
+    uint32_t prevHits_[4] = {};
+    std::map<uint32_t, int> bossHp_;
+    std::vector<uint32_t> prevShootable_;   // (Tally::seen: the shootable objects of the last frame)
+    uint64_t lastBossHit_ = 0;
+    int category(Runtime& rt, uint32_t obj);
+    void tallyFrame(Runtime& rt, uint64_t f);
     struct Track { uint32_t routine = 0; float z = 0, dz = 0; uint64_t f = 0, down = 0; };   // down: hit points <= 0 since (0 = not)
     std::map<uint32_t, Track> track_;   // per object: its depth and how fast it comes closer (units / frame)
     uint64_t trackAt_ = ~0ull;
@@ -146,7 +186,10 @@ struct Watchdog {
 // the point a player aims at on an object (arcade screen units, centre 0 / 0): its centre, or for bosses whose damage
 // is taken by some parts only (the Magician: parts 4 / 6 / 11 / 13) one of those parts' hit spheres (part +0x5C, camera
 // space, as the shot test reads it), chosen by `pick`. False when nothing of it is on screen. Testing (bots, --autofire)
-bool aimPoint(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y);
+bool aimPoint(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y, float hw = 248.0f);
+// The Typing of the Dead 0 (game/typing.h): a body part of the object that takes damage, on the screen (the biggest
+// hit spheres first, `pick` going round them); false: none (no part tree, or none on the screen)
+bool partAim(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y);
 
 void installCrashHandler(const uint64_t* frameCounter);   // a crash prints "ROBUST: result=crash" and exits 3
 

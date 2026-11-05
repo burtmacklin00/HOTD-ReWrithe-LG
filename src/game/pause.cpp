@@ -48,9 +48,18 @@ void Pause::exit()
         onExit();
 }
 
+// ours (#5): the game over's Retry Chapter / Exit (no sound held: the game over has ended)
+void Pause::openGameOver()
+{
+    paused_ = over_ = true;
+    selection_ = 0;
+}
+
 // ---- 0x4185BC, message 0xF ----
 void Pause::focus(bool active)
 {
+    if (over_)
+        return;   // (#5: the game over's menu stays until a choice)
     if (!active)
         enter();   // the same lines as 0x41ACA8 (inline in 0x4185BC)
     else
@@ -75,30 +84,50 @@ void Pause::frame(const Runtime& rt, const PauseInput& in)
         return;
     }
     // the mouse's vertical motion picks the item directly: up past 15 Continue, down past 15 Exit
+    const int last = itemCount() - 1;   // (1; #5 with Retry Chapter: 2)
     if (in.mouseDy < -15)
         selection_ = 0;
     else if (in.mouseDy > 15)
-        selection_ = 1;
+        selection_ = last;
     // ours: the pointer on an item selects it (when it moved, so the arrow keys still work with the pointer at rest),
     // and a click on an item chooses that item
-    if (in.hover >= 0 && (in.pointerMoved || in.activate))
+    if (in.hover >= 0 && in.hover <= last && (in.pointerMoved || in.activate))
         selection_ = in.hover;
     if (in.down) {
-        if (++selection_ > 1)
+        if (++selection_ > last)
             selection_ = 0;
     } else if (in.up) {
         if (--selection_ < 0)
-            selection_ = 1;
+            selection_ = last;
     } else if (in.activate) {
-        if (selection_ != 0) {
-            if (selection_ == 1)
+        if (itemAt(selection_) == kRetry) {   // (#5)
+            const bool held = !over_;
+            paused_ = over_ = false;
+            selection_ = 0;
+            if (held && onSound)
+                onSound(false);
+            if (onRetry)
+                onRetry();
+            return;
+        }
+        if (itemAt(selection_) == kSettings) {   // (fxux: the pause stays; the host opens the Options pages)
+            if (onCue)   // relfix2 (user 2026-11-03: Settings made no sound): Continue's confirm (0x10C)
+                onCue(0x10C);
+            if (onSettings)
+                onSettings();
+            return;
+        }
+        if (itemAt(selection_) != kContinue) {
+            if (itemAt(selection_) == kExit) {
+                over_ = false;
                 exit();
+            }
             return;   // (0x41B04C with the selection unchanged: no cue)
         }
         if (onCue)
             onCue(0x10C);
         leave();
-    } else if (in.toggle) {
+    } else if (in.toggle && !over_) {
         leave();   // Escape / P again: the pause ends (no cue)
     }
     if (selection_ != was && onCue)   // (also after Escape / P with Exit selected, as the original)

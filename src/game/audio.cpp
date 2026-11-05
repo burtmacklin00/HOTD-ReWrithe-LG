@@ -431,8 +431,12 @@ bool Audio::loadCueTable(const std::string& exePath, std::string& err)
     return true;
 }
 
-// GAMESNDS.RBH: BODY 0 = the sample entries (40 bytes each), BODY 1 = the bank's 8-bit data (and, at its end, the
-// area the PC loads O_ files into)
+// GAMESNDS.RBH: BODY 0 = the sample entries (40 bytes each), BODY 1 = {u32 load offset 0, u16 1, u16 1} (the O_ files'
+// 8-byte header) + the bank's 8-bit data (and, at its end, the area the PC loads O_ files into). An entry's offset counts
+// from after that header: THOTD's buffer setup (0x57BFC0) copies from BODY + 8 + offset - the load offset. Issue #3:
+// read from the header on, every bank sample started 8 bytes early (its last 8 bytes cut) with those bytes, mostly 0x00
+// (= -1.0), in front: a click at each start and, on the loops played from 0 (the chainsaw 57, the electric 60 / 61 / 63),
+// at every round
 bool Audio::loadBank(const std::string& path, std::string& err)
 {
     std::vector<uint8_t> d;
@@ -441,13 +445,25 @@ bool Audio::loadBank(const std::string& path, std::string& err)
         return false;
     }
     const auto bodies = rbhBodies(d);
-    if (bodies.size() < 2 || bodies[0].second % sizeof(SampleInfo) != 0) {
+    if (bodies.size() < 2 || bodies[0].second % sizeof(SampleInfo) != 0 || bodies[1].second < 8) {
         err = path + ": not the sound bank layout";
         return false;
     }
     samples_.resize(bodies[0].second / sizeof(SampleInfo));
     std::memcpy(samples_.data(), &d[bodies[0].first], bodies[0].second);
-    bank_.assign(d.begin() + std::ptrdiff_t(bodies[1].first), d.begin() + std::ptrdiff_t(bodies[1].first + bodies[1].second));
+    // relfix2 (user 2026-11-03: the SMG silent in Survival): playExtra's sounds are samples appended past the bank's;
+    // every game start loads the bank again (init), which dropped them while extras_ kept their old numbers (the
+    // second game on: play() refused them, nothing sounded). Made again from the new bank on their next use
+    std::lock_guard<std::recursive_mutex> g(lock_);
+    auto drop = [&](Voice& v) {   // (a voice of a dropped sound: its data goes)
+        for (const auto& [name, e] : extras_)
+            if (v.data && !e.data.empty() && v.data == e.data.data())
+                v = Voice{};
+    };
+    for (Voice& v : voices_) drop(v);
+    for (Voice& v : tails_) drop(v);
+    extras_.clear();
+    bank_.assign(d.begin() + std::ptrdiff_t(bodies[1].first + 8), d.begin() + std::ptrdiff_t(bodies[1].first + bodies[1].second));
     return true;
 }
 
@@ -483,6 +499,95 @@ bool Audio::isMusicCode(uint32_t arcadeCode) const
         return false;
     const Cue& c = cues_[size_t(n)];
     return c.type == 3 || (c.type == 5 && c.value == 1);
+}
+
+bool Audio::isMusicStart(uint32_t arcadeCode) const
+{
+    const int n = pcCueOf(arcadeCode);
+    return n >= 0 && n < int(cues_.size()) && cues_[size_t(n)].type == 3 && cues_[size_t(n)].value != -1;
+}
+
+namespace {
+// a RIFF WAV file's PCM (format 1, 8 / 16-bit, 1 / 2 channels) as 8-bit unsigned mono; false: not one
+bool readWav8(const std::string& path, std::vector<uint8_t>& out, uint32_t& rate)
+{
+    std::ifstream f(path, std::ios::binary);
+    if (!f)
+        return false;
+    std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    auto u16 = [&](size_t o) { return uint32_t(d[o] | d[o + 1] << 8); };
+    auto u32 = [&](size_t o) { return uint32_t(d[o] | d[o + 1] << 8 | d[o + 2] << 16 | uint32_t(d[o + 3]) << 24); };
+    if (d.size() < 12 || std::memcmp(d.data(), "RIFF", 4) != 0 || std::memcmp(d.data() + 8, "WAVE", 4) != 0)
+        return false;
+    uint32_t fmt = 0, channels = 0, bits = 0;
+    rate = 0;
+    for (size_t o = 12; o + 8 <= d.size();) {
+        const uint32_t len = u32(o + 4);
+        const size_t body = o + 8;
+        if (body + len > d.size())
+            break;
+        if (std::memcmp(d.data() + o, "fmt ", 4) == 0 && len >= 16) {
+            fmt = u16(body), channels = u16(body + 2), rate = u32(body + 4), bits = u16(body + 14);
+        } else if (std::memcmp(d.data() + o, "data", 4) == 0 && fmt == 1 && (channels == 1 || channels == 2) &&
+                   (bits == 8 || bits == 16) && rate > 0) {
+            const size_t frame = channels * (bits / 8), n = len / frame;
+            out.resize(n);
+            for (size_t i = 0; i < n; ++i) {
+                int sum = 0;
+                for (uint32_t c = 0; c < channels; ++c) {
+                    const size_t at = body + i * frame + c * (bits / 8);
+                    sum += bits == 8 ? int(d[at]) - 128 : int(int16_t(u16(at))) / 256;
+                }
+                out[i] = uint8_t(std::clamp(sum / int(channels), -128, 127) + 128);
+            }
+            return n > 0;
+        }
+        o = body + len + (len & 1);
+    }
+    return false;
+}
+} // namespace
+
+bool Audio::playExtra(const std::string& dir, const std::string& name, int cue, float pitch, float clip, float volume)
+{
+    auto it = extras_.find(name);
+    if (it == extras_.end()) {
+        Extra e;
+        uint32_t rate = 0;
+        SampleInfo s{};
+        s.bits = 8, s.unk = -1, s.source = 3;
+        if (readWav8(dir + "/" + name + ".wav", e.data, rate)) {
+            e.file = true;
+            s.rate = rate;
+            note("survival: " + dir + "/" + name + ".wav");
+        } else if (cue >= 0 && cue < int(cues_.size()) && cues_[size_t(cue)].type == 1) {
+            const int k = cues_[size_t(cue)].value & 0xFFFF;
+            if (k >= 0 && k < int(samples_.size()) && samples_[size_t(k)].source == 1 &&
+                samples_[size_t(k)].offset + samples_[size_t(k)].length <= bank_.size()) {
+                const SampleInfo& from = samples_[size_t(k)];
+                const uint32_t n = std::max<uint32_t>(1, uint32_t(double(from.length) * std::clamp(clip, 0.05f, 1.0f)));
+                e.data.assign(bank_.begin() + from.offset, bank_.begin() + from.offset + n);
+                s.rate = uint32_t(double(from.rate ? from.rate : 11025) * std::clamp(pitch, 0.25f, 4.0f));
+                volume *= from.volume / 255.0f;
+            }
+        }
+        if (!e.data.empty()) {
+            s.length = uint32_t(e.data.size());
+            s.volume = uint16_t(std::clamp(volume, 0.0f, 1.0f) * 255.0f);
+            e.sample = int(samples_.size());
+            samples_.push_back(s);
+        }
+        it = extras_.emplace(name, std::move(e)).first;
+    }
+    if (it->second.sample < 0)
+        return false;
+    return play(it->second.sample, it->second.data.data(), uint32_t(it->second.data.size()));
+}
+
+std::string Audio::extraSource(const std::string& name) const
+{
+    const auto it = extras_.find(name);
+    return it == extras_.end() || it->second.sample < 0 ? std::string() : it->second.file ? "file" : "stand-in";
 }
 
 std::string Audio::describe(int n) const

@@ -114,7 +114,7 @@ std::string fileStamp(const fs::path& p)
     if (ec)
         return "";
     const auto t = fs::last_write_time(p, ec).time_since_epoch().count();
-    return std::to_string(size) + " " + std::to_string(t);
+    return std::to_string(size) + " " + std::to_string((long long)t);   // (quest: libc++'s file clock counts in __int128)
 }
 
 // the files of `where` (a file, or a folder searched up to 6 levels deep; pchotfix: was 4, which missed the PC game

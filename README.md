@@ -90,7 +90,7 @@ arcade version's more detailed models and textures or the PC's.
 
 ## Quick start (players)
 
-1. Download the release zip (`hotd-rewrithe-v1.1.0-win64.zip`, GitHub Releases) and unzip it anywhere.
+1. Download the release zip (`hotd-rewrithe-v1.2.0-win64.zip`, GitHub Releases) and unzip it anywhere.
 2. Double-click `HOTDReWritheSetup.bat`. The setup window opens:
    - **Install to**: the folder for the game (default `C:\Games\HOTD ReWrithe`; anywhere you like, but not Program Files).
    - **Game files**: drop your **Arcade ROMs** (MAME's `hotd` set, **Revision A** only) and your **1998 PC game** on
@@ -123,11 +123,66 @@ System requirements (Windows): Windows 10 / 11, 64-bit; graphics with **OpenGL 3
 **DirectX 10.1-class GPU** (Intel HD 2000 / 3000 and newer, Radeon HD 3000+, GeForce GT 200+): Options > Video >
 Renderer, Auto picks DirectX (ANGLE) by itself where OpenGL 3.3 is missing ([docs/renderer_backends.md](docs/renderer_backends.md)).
 
-Linux / Steam Deck: the `linux-x86_64.tar.gz` works the same way (`./hotd.sh`). macOS: the `macos-universal.zip`
-(unsigned, see [the release notes](docs/release/notes_v1.0.0.md)). Online play step by step:
+Linux / Steam Deck: the `linux-x86_64.tar.gz` works the same way (`./hotd-setup.sh`). macOS: the `macos-universal.zip`
+(unsigned). Step by step for both: [Linux, Steam Deck and macOS](#linux-steam-deck-and-macos) just below. Online play step by step:
 [ONLINE HOWTO](docs/online_howto.md) (also `ONLINE HOWTO.txt` in the package). Mods: [docs/modding.md](docs/modding.md).
 
 Details below: the menu, Boss Mode, PC Mode, the Gallery, the Jukebox, secrets, controllers and light guns, online co-op, mods, Sonic Mode, 4 players, game speed, the CRT filter.
+
+## Linux, Steam Deck and macOS
+
+You need the same two things as on Windows: your own arcade ROM zip (MAME's `hotd` set, Revision A) and your own
+1998 PC game (its folder, a `.zip` of it or a CD image). No game data comes with the download.
+
+**Linux Mint, Ubuntu and other desktop Linux** (64-bit x86 with glibc 2.31 or newer and OpenGL 3.3: Linux Mint 20 /
+21 / 22, Ubuntu 20.04 / 22.04 / 24.04 and newer, Debian 11+, current Fedora, Arch ...):
+
+1. Download `hotd-rewrithe-v<version>-linux-x86_64.tar.gz` from the GitHub Releases page.
+2. Unpack it: right-click it in the file manager -> **Extract Here**, or in a terminal
+   `tar -xzf hotd-rewrithe-v*-linux-x86_64.tar.gz`. You get a folder `HOTD ReWrithe Linux`.
+3. Open the folder and start **`hotd-setup.sh`**: Linux Mint (Nemo) asks what to do, choose **Run**; Ubuntu (Files)
+   needs a right-click -> **Run as a Program**. Or in a terminal: `cd "HOTD ReWrithe Linux" && ./hotd-setup.sh`.
+4. The setup window is the same as on Windows: drop or pick your ROM zip and your PC game, then **Install** (a copy in
+   `~/Games/HOTD ReWrithe` or a folder you choose, with a desktop icon and an applications menu entry under Games) or
+   **Play from here**. Uninstall: `bin/hotd --uninstall` in the installed folder (your settings are kept).
+5. Portable instead: put the files in `data/arcade`, `data/pc` and `data/music` of the folder and start `hotd.sh`.
+
+Nothing else needs installing (the game brings its own SDL; sound through PipeWire / PulseAudio / ALSA). On GNOME the
+desktop icon may first need a right-click -> **Allow Launching**. A `.7z` / `.rar` of the PC game needs `bsdtar`
+(`sudo apt install libarchive-tools`) or 7-Zip; a zip, a folder or a CD image need nothing. Linux does not update
+itself: the game tells you when a new version is out and opens the download page.
+
+**Steam Deck (SteamOS)**:
+
+1. Switch to Desktop Mode (Steam button -> Power -> Switch to Desktop).
+2. Download the Linux `.tar.gz` (as above) and extract it, e.g. into `~/Games`. Run `hotd-setup.sh` (Dolphin: click
+   it, choose **Execute**) and Install, or put your files in the folder's `data/arcade`, `data/pc`, `data/music` (Game
+   Mode has no file picker: the game finds them there by itself).
+3. Add it to Steam: tick **Add to Steam** in the setup (Steam must be closed for that: right-click Steam in the task
+   bar -> Exit first), or by hand: Steam -> Games -> **Add a Non-Steam Game to My Library** -> Browse -> set "File
+   type" to **All files** -> pick `hotd.sh` (or `bin/hotd` of the installed copy) -> **Add Selected Programs**.
+4. Back to Game Mode (the desktop's "Return to Gaming Mode" icon): the game is under Library -> **Non-Steam**. It runs
+   fullscreen at 1280 x 800.
+
+Controls on the Deck: Steam gives the game an Xbox-style pad: a stick aims, **R2** shoots, **L2** reloads, **Start**
+(the menu button) pauses / joins, **A** / **B** confirm / go back in the menus and the setup. The touch screen is a
+light gun (tap = a shot where you touch; turn on Options -> Auto Reload, a touch cannot shoot off the screen). The
+trackpads move the mouse cursor. Gyro aim: pick a Steam Input layout that hands the gyro to the game as a motion
+sensor ("Gamepad with Gyro"), then a gyro aim style on the pad's page in Options -> Controls (not tried on a Deck yet).
+
+**macOS** (11 Big Sur or newer, Apple Silicon and Intel):
+
+1. Download `hotd-rewrithe-v<version>-macos-universal.zip` and unzip it (double-click). Move the `HOTD ReWrithe macOS`
+   folder where you want it; keep it together.
+2. The download is not signed by Apple, so clear its download flag once: open Terminal, type
+   `xattr -dr com.apple.quarantine ` (with the space at the end), drag the `HOTD ReWrithe macOS` folder into the
+   window, press Return.
+3. Right-click (Control-click) **HOTD ReWrithe.app** -> **Open** -> **Open**. On macOS 15 Sequoia and newer:
+   double-click it, then System Settings -> Privacy & Security -> **Open Anyway**. After that a double-click starts it.
+4. Your files go in `data/arcade`, `data/pc`, `data/music`, or double-click `hotd-setup.command` to check and copy them
+   in. (`HOW TO OPEN.txt` in the folder repeats these steps.)
+
+macOS is the least tested system: please report what works and what does not (Issues, with `settings/hotd.log`).
 
 ## Features
 
@@ -343,13 +398,24 @@ the game's world (the Chapter 1 bridge, a Chapter 2 mansion corridor), the game'
 blue, white. It opens on Thomas Rogan (Players). The motion and the slow turn are off at first. Keys: Q / E entry, Tab /
 Shift+Tab (or 1-6) category, drag or arrows turn, right / middle drag or Shift+arrows pan, wheel or + / - zoom, Space
 play / hold the motion, M next motion, **T hide the page** (full screen; T / Esc back), I info panel, O slow turn, L
-light, R / Home reset, S arcade / PC, B background, K layout, C cut-scenes, Esc back. Pad: LB / RB entry, L3 category,
+light, R / Home reset, S arcade / PC, B background, K layout, C cut-scenes, Esc back. **Blood** (the Gallery's own
+settings, taken from Options and Mods each time it opens and never saved: the game keeps its own): G / Shift+G Blood
+Color (Red, Green, Blue, Purple, Yellow, Custom with its red / green / blue; the arcade has no yellow, so its models
+take the custom recolour in yellow), N Rainbow Blood (its Colours, Speed and Creature Blood on the Remake page), J
+Blood Particles (a hit's blood burst on a part given a damage step, the drips from a cut part). **Damage** (the game's
+own damage and part-loss models, from its tables: the models a shot part takes, the damage routines that cut off the
+head and arms, the head's blow-off step): per body part (Head, Right Arm, Left Arm, Body, Legs) Whole, Damage 1, 2 ...
+and Off where the game can shoot it away; Z the part, X its next state (Shift+X back), Shift+Z all whole. A body step
+the game ties to a part loss takes those parts with it (the zombies' last chest damage: the head and both arms).
+Entries without damage models (the players, the people, the bosses, Baba) say so. Pad: LB / RB entry, L3 category,
 right stick turn, left stick pan, LT / RT zoom, X play / hold, Y next motion, View background, Start hide the page,
 R3 reset, B back. In the **Remake menu style** the Gallery is laid out like the Resident Evil 2 / 3 / 4 remakes'
 galleries (layout and feel only, drawn by this project): the model large on a dark, softly lit stage with a faint floor
 reflection, the categories and the entries' list in a slim column on the left, the entry's "file" on the right (the
 name in large caps, a red rule, its category, the description, Appears / Type / Hit points rows, the boss's
-weak-point card, the viewer's settings: Motion, Model, Light, Background, Layout - click a row to change it), the
+weak-point card, the settings in three panels, H or a click on their names between them: **Viewer** (Motion, Model,
+Light, Background, Layout), **Blood** (Blood Color, Custom Red / Green / Blue, Rainbow Blood, Rainbow Colours, Rainbow
+Speed, Creature Blood, Blood Particles) and **Damage** (each body part's state, All Parts) - click a row to change it), the
 controls as key caps along the bottom (click Light, Play, Next Motion, Hide UI, Background, Back). A new entry
 fades and slides in. Its Cut-scenes page uses the same look. **Layout** (K): in the Remake style Remake (default) ->
 portraits -> the Classic page; in the Classic style Classic (default) or **portraits** (after The House of the Dead: Remake's gallery: a grid
@@ -591,7 +657,7 @@ report what you find ([Reporting problems](docs/release/notes_v1.0.0.md#reportin
 
 The program is not code-signed, so Windows SmartScreen may show "Windows protected your PC / unknown publisher":
 click **More info**, then **Run anyway**. To check a download, compare its hash with the SHA-256 values published in the
-release notes (the hashes of the package files are printed by `tools\package_hashes.ps1`): `Get-FileHash .\hotd-rewrithe-v1.1.0-win64.zip -Algorithm SHA256` (PowerShell).
+release notes (the hashes of the package files are printed by `tools\package_hashes.ps1`): `Get-FileHash .\hotd-rewrithe-v1.2.0-win64.zip -Algorithm SHA256` (PowerShell).
 
 ## Icon and desktop shortcut
 
@@ -620,6 +686,17 @@ grille, slight curve), Consumer TV, Sharp Scanlines, Custom (**CRT Settings**: s
 bloom, brightness; crosshairs crisp over the filter (default) or in it; F12 screenshots filtered or plain). The scanlines
 follow the game's own lines (arcade 384, PC 480) at any window size; aiming goes through the curvature. `launcher.ini`
 `crt=off|arcade|tv|sharp|custom`, `crt.scan= crt.mask= crt.masktype= crt.curve= crt.bloom= crt.bright=`; `--crt <preset>`.
+
+## Gamma
+
+Options -> Video -> **Game Gamma** and **Menu Gamma**: 0.60 - 2.00 in 0.05 steps (a bar: drag it, or Left / Right), 1.00 (default) = the
+picture as before. Above 1 the dark and middle tones get brighter while black stays black and white stays white (a
+gamma curve, not a brightness lift), for players who find the game too dark (the cabinets were brighter than MAME's
+picture: docs/formats.md, "Why the picture is darker than the cabinets"). It applies to the whole picture: arcade and
+PC models, the HUD, VR, F12 screenshots and `--render`. Game Gamma is the play; Menu Gamma the menus, the Gallery and
+the other screens outside the play (so Menu Gamma changes while you move its bar; Game Gamma shows in the game, and in
+the pause menu's settings). `launcher.ini` `gamma=1.00` (Game Gamma, as before) and `menugamma=1.00`; `--gamma
+<0.6-2.0>`, `--menu-gamma <0.6-2.0>`.
 
 ## Crosshairs
 

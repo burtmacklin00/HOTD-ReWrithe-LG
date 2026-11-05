@@ -17,6 +17,10 @@ void Runtime::sprite_init()
     mem.set32(0x51F560, counter);
     mem.set32(0x51E8A0, p0);
     mem.set32(0x51E8A8, p1);
+    // bugs1 (#34): the cut-scene bars are layer 2 sprites in the original (letterbox_task), gone with the 2D RAMs here,
+    // and the chapter's letterbox task with the heap: the ending (the farewell, the staff roll, the ranking) has none
+    // (MAME fullgame_us snaps 0723 -> 0724: the blue sky with bars, Rogan's scene without). The HUD's bars stayed up
+    letterbox = 0;
 }
 
 // game_ending_start 0x35160 (the port's), logged

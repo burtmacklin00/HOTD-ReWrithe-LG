@@ -134,6 +134,8 @@ also headless. The mixer is our own: an SDL3 audio stream at 44.1 kHz stereo, 16
 entry's volume; no panning; a sample re-sent within 1/15 s restarts its voice; a soft limiter.
 Arcade codes without a PC cue are logged once and listed by the headless report; `HOTD_SOUND_TABLE=1` adds every code
 with its calls and PC cue, `HOTD_TRACE_SOUND=1` prints each cue with its frame.
+`--board-wav <out.wav> <arcade zip> <code@seconds,...> <seconds>` (sound tests) plays arcade codes (hex) on the sound
+board alone, headless, at the given times into a WAV at the game's board gain (e.g. the chainsaw: `A01355@0.25,A01356@8`).
 
 The cue map: the arcade program ROM holds the list of every sound code at 0xA8CDC (261 words: 0, 0xA00002, the music
 0xA01000.., the effects, the voices ..0xA01475; the sound test's order) and the PC cue table keeps that order: list

@@ -5,6 +5,32 @@ one day. Windows behaviour is unchanged (all checks give the same numbers).
 
 ## Where it stands
 
+- **Release-ready Linux package, CI without a release (worker "linux2", second round, 2026-11-03):** main (with
+  OpenXR, Typing of the Dead 0, Survival / Horde, 13 languages, cosmetic mods) built in the **Steam Runtime 3 "sniper"
+  SDK** (podman in WSL; Debian 11, glibc 2.31, gcc-14 + its static libstdc++, SDL 3.2.10 from source,
+  `HOTD_EXPERIMENTAL_MODES=OFF`, `HOTD_SURVIVAL_MODE=ON`). One fix: `game/cosmods.h` lacked `<cstdint>` (GCC). With the built SDL 3.2.10:
+  `--input-test` 2277 checks, 0 failed (Wayland); Chapter 1 16350 (arcade and PC models); Chapter 4's ending 34967.
+  The package (`tools/make_linux_package.sh` in the same SDK, as the CI): **needs GLIBC_2.29 at most** (runs on glibc
+  2.31+: SteamOS 3, Ubuntu 20.04+, Mint 20+, Debian 11+); unpacked into a fresh folder its `hotd.sh` plays Chapter 1 to
+  16350 both in WSL (glibc 2.43) and inside the sniper container itself (glibc 2.31); `--setup-test` installs 773
+  files + 29 ROMs + 193 PC files + 12 tracks + 2 `.desktop` entries in a sandbox, the installed copy runs,
+  `--uninstall --yes` removes it; `--survival` is refused. A **clang 21 + libc++** build (the macOS compiler family
+  and C++ library, in WSL) compiles with no errors and gives the same Chapter 1 (16350) and Chapter 4 (34967) and
+  `hotd_nettest` ALL PASSED. CI: section "CI without a release". Note: with Ubuntu 26.04's **system SDL 3.4.2** the
+  input test fails 52 checks (the Remake menu's dropdown at width 640, the pad / light gun input task frames 565-610);
+  the packages bundle 3.2.10 (rpath `$ORIGIN`), so this only matters for a later SDL upgrade.
+- **Android / Meta Quest 3 (worker "quest", 2026-11-03):** a standalone VR APK (arm64-v8a, OpenGL ES 3, OpenXR) built
+  with the NDK, no Gradle (`tools/make_quest_apk.ps1`); not run on a headset yet. Android-only changes: `crash_log.cpp`
+  (no execinfo before API 33: the unwinder), `files_check.cpp` (libc++'s file clock), `util/android_app.*` (the start-up),
+  the ES context in `render/gl_backend.cpp`. docs/quest.md.
+- **v1.1.0 (worker "linux", 2026-11-03):** builds on Linux again (two GCC fixes) with the setup2 installer, the update
+  notice and the .7z / .rar unpacking made portable (the inventory's last rows). WSL, package-style build (SDL 3.2.10
+  from source: its `libSDL3.so.0` needs only glibc; libstdc++ linked in): `--input-test` 2277 checks, 0 failed (with
+  `SDL_VIDEODRIVER=wayland`: under WSLg's XWayland a hidden window misses about 12 window-size checks; Windows 2277 /
+  0), Chapter 1 ended at 16350 (arcade and PC models; Windows 16350), Chapter 4's ending at 34967 (Windows 34967),
+  `hotd_nettest` all passed. The package's `hotd.sh` plays Chapter 1 to 16350 with its own SDL; `--setup-test`
+  installs a copy with its two `.desktop` entries and `--uninstall --yes` removes them.
+
 - **The game runs on Linux** (worker "linux2", WSL Ubuntu 26.04, GCC 15.2, cmake 4.2.3 + Ninja, the system's SDL
   3.4.2): `hotd`, `hotd_viewer`, `hotd_nettest`, `hotd_proof` build and run. Headless on Linux, the same numbers as
   Windows:
@@ -52,6 +78,12 @@ one day. Windows behaviour is unchanged (all checks give the same numbers).
 | file dialogs (setup "Folder... / Zip...") | `SDL_ShowOpenFolderDialog` | works on Linux desktops through xdg-desktop-portal or zenity; **not in the Steam Deck's Game Mode**: there the files go in the package's `data/` folders (the game finds them itself) | nothing to do | none |
 | `tools/*.ps1`, `*.bat` (HOTDReWritheSetup.bat, `make_portable*.ps1`, `netplay*_test.ps1`, `package_hashes.ps1`, ...) | PowerShell | the developer tools stay Windows-only; a Linux package needs a `make_linux_package.sh` and `hotd.sh` launch script (section "SteamOS package") | **`tools/make_linux_package.sh` done (linux2)**; the netplay test scripts stay PowerShell | none |
 | `HOTDLauncher.exe` / HOTDReWritheSetup.bat busy checks (Get-Process) | PowerShell | the game itself needs none on Linux | n/a | none |
+| `src/util/update_check.cpp` (v1.1.0 auto-updater) | WinHTTP download, BCrypt SHA-256, hand-over to `hotd_launch.exe --update` | **the check runs on Linux / macOS through the system's `curl`** (GitHub's API, a constant address); the Update page shows the version and notes with **Download page** only (`util::kSelfUpdate` false: no self-install) | **done (linux, v1.1.x)** | a self-update for the tarball: later, if wanted |
+| `src/game/installer.cpp` (setup2) | Apps & features (registry), `.lnk` shortcuts, `bin\hotd.exe` | **a folder install** (`~/Games/HOTD ReWrithe` by default) with `.desktop` entries (Desktop + `~/.local/share/applications`, icon = THOTD.EXE's icon as `hotd-rewrithe.png` in the install), `bin/hotd`; uninstall removes them (`--uninstall`); no registry. macOS: the shortcut boxes are greyed out | **done (linux)** | macOS: an .app per install |
+| `src/game/launcher.cpp` (setup .7z / .rar) | Windows' own `tar.exe` (libarchive) | macOS: `/usr/bin/tar` (bsdtar); Linux: `bsdtar` (libarchive-tools), else `7zz` / `7z` / `7za`; none: a clear line ("install bsdtar or 7-Zip, or unpack it yourself") | **done (linux)** | none |
+| `src/util/win_shell.cpp` `launch` / `runHidden` | `CreateProcessW` | POSIX `fork` + `execv` (no shell; Windows-style quoted arguments split), detached / with a time limit; `findProgram` (PATH) | **done (linux)** | none |
+| `src/util/game_exe.cpp`, `src/launch/launch_main.cpp` (`hotd_launch`) | the game exe stub with the PC icon, the updater | not needed: the `.desktop` entry has the icon; `hotd_launch` is built on Windows only | n/a | none |
+| `src/util/disc_image.cpp`, `util/file64.h` (CD images, `\\?\` long paths) | `_wfopen`, long paths | `fopen` / `fseeko` (no length limit on Linux / macOS) | compiles and runs (the file64 layer) | none |
 
 ## Cross-play: the game logic gives the same results on Linux
 
@@ -117,6 +149,12 @@ macOS `arc4random_buf`). Passed: `hotd_nettest` (Windows and Linux, with the kno
   exits): on a Deck, switch to Desktop Mode, exit Steam, press Add to Steam, start Game Mode again. Adding it by hand
   in Desktop Mode (Steam -> Add a Non-Steam Game) works too.
 - **Fullscreen:** the game starts borderless fullscreen (Gamescope gives it the whole screen).
+- **The setup window with a pad** (linux, 2026-11-03): A / Start = Enter (the files known: straight to the check and
+  the menu), B / Back = Esc, d-pad Up / Down scroll the Update / What's New text; the rest is the touch screen or the
+  trackpad (the mouse). The Update notice offers the download page (no self-update on Linux).
+- **Adding it as a non-Steam game:** Desktop Mode -> Steam -> Games -> Add a Non-Steam Game to My Library -> Browse
+  -> the package's `hotd.sh` (File type: All files) or `bin/hotd` -> Add Selected Programs; back in Game Mode it is
+  under Non-Steam. Or the game's own Options -> System -> Add to Steam with Steam closed (artwork included).
 
 ### SteamOS package (`tools/make_linux_package.sh`, linux2)
 
@@ -136,10 +174,17 @@ HOTD ReWrithe Linux/
 (not the system's), no build paths in the binaries; prints the newest glibc the binaries need. Tested in WSL: the
 package's `hotd.sh` loaded its own SDL and played Chapter 1 to 16695.
 
-- The WSL build uses Ubuntu 26.04's SDL 3.4.2 and needs **glibc 2.43**: fine for a current desktop distribution, too
-  new for SteamOS 3 (an older glibc) and older distributions. A release for the Deck must be built in the
-  **Steam Runtime "sniper" SDK** (Debian 11, glibc 2.31) with SDL 3.2.10 built from source (needs that download:
-  "What needs your approval").
+- **Minimum: glibc 2.31** (the package needs GLIBC_2.29 symbols at most; tested on 2.31 and 2.43). Built in the
+  **Steam Runtime 3 "sniper" SDK** (Debian 11, glibc 2.31; the CI's Linux job and, locally,
+  `podman run ... registry.gitlab.steamos.cloud/steamrt/sniper/sdk` with the newest `g++-N` it has: gcc-14 since
+  2026; it no longer ships gcc-12) with SDL 3.2.10 built from source. So it runs on SteamOS 3, Ubuntu 20.04 / 22.04 /
+  24.04, Linux Mint 20 / 21 / 22, Debian 11+, current Fedora and Arch. A build made directly on a newer distribution
+  (WSL's Ubuntu 26.04) needs that distribution's glibc (2.43): never release one.
+- The script takes the build's own `_deps/sdl3-build/libSDL3.so.0` (HOTD_FETCH_SDL3) before what `ldd` finds: on a
+  machine with a system libSDL3 (e.g. 3.4 from the distribution) ldd would pick that one and the package would carry
+  the wrong SDL.
+- The exe's RUNPATH is `$ORIGIN:<build>/_deps/sdl3-build` (CMake's build rpath; `$ORIGIN` first, the second entry does
+  not exist on a player's machine): harmless.
 - SDL's own Linux backends (X11, Wayland, PipeWire / PulseAudio / ALSA, evdev, HIDAPI for pads) load at run time;
   the bundled SDL avoids SteamOS's varying system version.
 - OpenGL 3.3: SteamOS's Mesa (RADV / radeonsi) supports it.
@@ -147,10 +192,42 @@ package's `hotd.sh` loaded its own SDL and played Chapter 1 to 16695.
 ## macOS (supplementary)
 
 - Compiles in principle (the POSIX paths are shared with Linux; `_NSGetExecutablePath`, `libproc` for Steam, rpath
-  `@loader_path`; random bytes from `arc4random_buf`); not compiled yet (needs a Mac or a cross toolchain).
-- OpenGL on macOS stops at 4.1 core (deprecated but working): our renderer needs 3.3 core: fine.
-- Missing: an `.app` bundle (Info.plist, `.icns`), code signing / notarisation for other people's Macs, the desktop
-  shortcut (says "not supported").
+  `@loader_path`; random bytes from `arc4random_buf`). No Objective-C / Objective-C++ of our own (SDL has its own):
+  plain C++20 with Apple clang and libc++. Checked without a Mac (linux2, 2026-11-03): clang 21 + libc++ in WSL build
+  the game with no errors and give the Linux / Windows numbers; the first real compile is the CI's macOS job
+  (`macos-latest`, universal arm64 + x86_64, deployment target 11.0). Not run on a Mac yet.
+- OpenGL on macOS stops at 4.1 core (deprecated but working): our renderer asks for 3.3 core, which SDL's Cocoa backend
+  turns into a forward-compatible core profile: should be fine (to see on a Mac).
+- The CI package: `bin/hotd` + `libSDL3.0.dylib` (ad-hoc signed), `hotd.command`, `hotd-setup.command`, a small
+  `HOTD ReWrithe.app` whose launcher starts `../bin/hotd`, `HOW TO OPEN.txt`. Unsigned (no Developer ID): a downloaded
+  copy is quarantined and the .app would run from a random read-only copy (App Translocation) without its `bin/`; the
+  launcher then shows an alert with the fix (`xattr -dr com.apple.quarantine <folder>`), README "Linux, Steam Deck and
+  macOS" has the steps (right-click > Open; macOS 15+: Privacy & Security > Open Anyway).
+- Missing: an `.icns` icon, code signing / notarisation, the desktop shortcut (says "not supported"), self-update.
+
+## Experimental modes
+
+The user (2026-11-03): **The Typing of the Dead 0 and Horde Mode stay out of the public releases until they are
+polished. Survival Mode ships, labelled "Very Experimental / Proof of Concept"** (its More Modes item carries that line,
+its help line starts with it, and a one-line notice shows for 6 s when a Survival game starts). Two CMake options:
+
+- **`HOTD_EXPERIMENTAL_MODES`** (default **ON**: every development build, `build\Release` and the private portable):
+  The Typing of the Dead 0 and Horde Mode (and Survival with them).
+- **`HOTD_SURVIVAL_MODE`** (default **ON**): Survival Mode in a build with the experimental modes OFF (the release
+  packages). OFF as well: Survival is left out as the other two are.
+
+| | ON (development) | OFF + `HOTD_SURVIVAL_MODE=ON` (every release package) |
+|---|---|---|
+| More Modes | Typing of the Dead 0, Survival, Survival Arena, Horde, Horde Size | Chapter Select, Co-op, Sonic Mode, Survival (labelled), Survival Arena |
+| High Scores | the Typing of the Dead 0 tables, Survival, Horde | Survival |
+| Command line | `--totd*`, `--typing`, `--survival*`, `--horde*` (Survival's old names too) | `--survival*` works; `--totd*`, `--typing`, `--horde*` refused: "`<option>`: The Typing of the Dead 0 and Horde Mode are not in this version ..." on stdout, exit 2 |
+
+Everything else is the same (the modes' code is still compiled, only unreachable: `kExperimentalModes` /
+`kSurvivalMode` in `src/main.cpp` leave their menu callbacks null, their tables out and refuse their options). Built
+OFF (Survival ON) by: `tools\make_portable_hotd.ps1 -Release` (its own `build-release`), `.github/workflows/release.yml`
+(Windows, Linux, macOS; the tests check that `--totd` is refused), `tools/make_linux_package.sh` (stops on a build
+folder configured ON unless `--experimental`), `tools\make_quest_apk.ps1` (`-Experimental` for a testing APK). The
+release checklist: [release/build_release.md](release/build_release.md) section 0.
 
 ## What needs your approval (downloads / installs)
 
@@ -158,10 +235,9 @@ Done (approved 2026-10-20): WSL got `build-essential cmake ninja-build libsdl3-d
 4.0.3 was downloaded from monocypher.org (SHA-512 and BLAKE2b checked against the site) and is committed in
 `src/third_party/monocypher/`. Still open:
 
-1. **For a SteamOS release package:** the Steam Runtime sniper SDK (a container image from Valve,
-   `registry.gitlab.steamos.cloud`) to build a binary that runs on every SteamOS, and SDL 3.2.10's build dependencies
-   inside it.
-2. A Mac (or a macOS cross toolchain) for the macOS build.
+1. Done: the Steam Runtime sniper SDK image is in WSL's podman (used by linux2); clang 21 + libc++ from Ubuntu's
+   archive in WSL (linux2, 2026-11-03: the macOS-like compile check).
+2. A Mac for running the macOS build (the CI's runner compiles and packages it).
 3. Optional, for the Windows-host direction of the WSL cross-play test: a Windows Firewall rule for the test exe
    (or WSL's mirrored networking). Two real PCs need neither.
 
@@ -170,6 +246,7 @@ Done (approved 2026-10-20): WSL got `build-essential cmake ninja-build libsdl3-d
 ```
 D=<main checkout>/private/deps
 cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DHOTD_ARCADE_SOUND=ON \
+      -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON \
       -DHOTD_DR_LIBS_DIR=$D/dr_libs -DHOTD_MUSASHI_DIR=$D/musashi -DHOTD_SCSP_DIR=$D/mame_scsp -DHOTD_STB_DIR=$D/stb
 cmake --build build-linux
 HOTD_PREF_DIR=<a test folder> ./build-linux/hotd --root <checkout> --arcade <hotd.zip> --pc <PC folder> \
@@ -180,3 +257,35 @@ HOTD_PREF_DIR=<a test folder> ./build-linux/hotd --root <checkout> --arcade <hot
 Headless runs need no display; `--render` and window runs in WSL use WSLg (Windows 11). A fresh `HOTD_PREF_DIR`
 needs `--root`, `--arcade` and `--pc` (else the input test waits in the launcher). Cross-play test: host in WSL with
 `--host <port> --code X --players 2`, join from Windows with `--join <WSL's eth0 address>:<port> --code X`.
+
+Release-style build in the sniper SDK (as the CI; podman in WSL, the sources mounted read-only where possible):
+```
+podman run --rm -v "$PWD:/work/src" -v "$D:/work/deps:ro" -v "$HOME/hotd-sniper:/work/build" -w /work/src \
+  registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest bash -c '
+  cmake -S . -B /work/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
+    -DHOTD_FETCH_SDL3=ON -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON -DHOTD_ARCADE_SOUND=ON -DHOTD_STB_DIR=/work/deps/stb \
+    -DHOTD_DR_LIBS_DIR=/work/deps/dr_libs -DHOTD_MUSASHI_DIR=/work/deps/musashi -DHOTD_SCSP_DIR=/work/deps/mame_scsp &&
+  cmake --build /work/build --target hotd hotd_viewer hotd_nettest &&
+  tools/make_linux_package.sh -b /work/build -o "/work/build/pkg/HOTD ReWrithe Linux" --no-build'
+```
+Tests of that build on the WSL host: `LD_LIBRARY_PATH=$HOME/hotd-sniper/_deps/sdl3-build` (the built SDL 3.2.10;
+without it the loader takes the system's libSDL3, see "Where it stands").
+
+## CI without a release
+
+`.github/workflows/release.yml` builds and packages Windows, Linux / SteamOS and macOS on GitHub's machines and uploads
+the packages as **artifacts** of the run; it never makes a GitHub Release. It runs:
+- on a version tag (`v*`): the release builds;
+- **by hand**: GitHub -> the repository -> **Actions** -> **release** (left) -> **Run workflow** (right) -> Branch:
+  `main` (or any) -> "Which packages to build": `all`, `linux-macos`, `linux`, `macos` or `windows` -> **Run workflow**;
+- on a **push to a branch named `ci`** (all three): in GitHub Desktop: Branch -> New branch `ci` from main -> Publish
+  branch (later: switch to `ci`, Branch -> Update from main, Push origin).
+
+A newer run on the same branch cancels the older one. When it is done (Linux ~10 min, macOS ~15 min, Windows ~25 min):
+open the run -> **Summary** -> **Artifacts** at the bottom: `linux-x86_64` (the `.tar.gz` + `SHA256SUMS-linux.txt`),
+`macos-universal` (the `.zip` + `SHA256SUMS-macos.txt`), `windows-x64`. GitHub wraps each in a `.zip` (unzip once);
+artifacts are kept 90 days. A red job: click it, the failing step shows the compiler / test output.
+
+Every job builds with `-DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON` and checks that `--totd` is refused. The Linux job also
+unpacks its own tarball into a fresh folder and runs `--version` / `--mods-test` from it with only the bundled SDL; the
+macOS job checks the `@rpath` SDL and runs the packaged exe and the .app's launcher.

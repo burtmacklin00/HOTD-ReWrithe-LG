@@ -180,6 +180,8 @@ template <class P> void Game<P>::enemy_ai(uint32_t obj)
     auto freePlayer = [&](bool& found) -> uint8_t {
         found = false;
         uint8_t who = 0xFF;
+        if (gAttackHold && gAttackHold(obj))   // (ours: The Typing of the Dead 0's window, game.h; null in the arcade)
+            return who;
         if (mem.at<uint16_t>(G::players_in_game) == 1) {
             if (mem.at<uint8_t>(G::player_targeted + uint32_t(int32_t(mem.at<int8_t>(G::solo_player_is_p2)))) == 0) {
                 who = mem.at<uint8_t>(G::solo_player_is_p2);

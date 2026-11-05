@@ -70,11 +70,11 @@ constexpr int kInputPlayers = 4;   // players 3 / 4: the experimental 4P mode on
 struct GunState {
     float x = 0, y = 0;
     bool trigger = false, reload = false;
-    bool held = false;   // Light Gun Edition: the trigger is held down (Machine Gun mode's automatic fire)
     bool weaponNext = false;   // Light Gun Edition: Arsenal Mode: the middle button pressed (the next weapon)
     // edgereload: last placed by a touch / pen (an absolute pointer, put on the picture directly): the window's
     // outermost pixel is a shot there, not the confined mouse's "pushed against the edge" reload
     bool pointer = false;
+    bool held = false;   // Survival Mode's SMG: the mouse button / fire key is down now (Runtime::GunInput::held)
 };
 
 class Pads {

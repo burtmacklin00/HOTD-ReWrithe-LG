@@ -39,7 +39,7 @@ template <class P> void Game<P>::player_char_models_set()
         mem.at<Player>(G::players, p).body.a = body;
         body_init(body, type, p == 0 ? 0x1CE : 0x1D2);
         Obj& o = mem.at<Obj>(body);
-        mem.set32(G::player_bodies + uint32_t(int32_t(o.slot)) * 4, 0);
+        mem.set32(body_slot_addr(int32_t(o.slot)), 0);   // (G::player_bodies + slot x 4; Survival: 16.. its own)
         o.slot = int8_t(14 + p);
         mem.set32(0x51F478 + p * 4, body);
         if (mem.at<int16_t>(pb::skin_types + uint32_t(int32_t(o.type)) * 2) != -1)

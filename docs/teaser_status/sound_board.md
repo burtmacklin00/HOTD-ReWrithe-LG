@@ -213,3 +213,27 @@ different routes, so only the attract was compared. "Sound: auto" is unchanged.
 | Default, first loop | 84 of 84 | 72 | 12 | 0 / 0 |
 
 Without the FBI screen, every later loop runs 361 frames ahead of MAME.
+
+## Arcade FM (GitHub #26, 2026-11-03, worker claude/audio)
+
+The report: Chapter 2 / 3, the boss and the Magician songs' FM parts sound wrong on the arcade sound, as in MAME. Our
+board is MAME's SCSP (mame0289) unchanged, so it sounds like MAME by design. Measured headless (`--board-wav`, one
+song alone; the reference: the PC CD's tracks, which have the same pitch, ratio 1.000 by long-term spectrum):
+
+- **The FM instrument.** The songs' FM voice is one slot (sample 0x028C0: a 64-sample 16-bit looped wave, LEA 0x3F)
+  with MDL 0xD and MDXSL = MDYSL = 0, i.e. it modulates itself with its own output from the stack (feedback FM), TL
+  0x44, AR 26 / D1R 5 / D2R 4 / RR 18 / DL 2, KRS 0, octave -3 (a bass around 110 Hz). No song uses MDL 1-4.
+- **Ruled out:** MAME's FM stack is s16 and holds 2x the slot output, but it never overflows in any of the 15 songs
+  (60 s each). The driver rewrites DL / RR (slot word 5) on sounding slots and MAME then drops the key-rate scaling of
+  RR; recomputing it with the scaling (and on word 4) changes no song audibly (envelope correlation 1.0000). Reading
+  the feedback one sample later / earlier, or a modulation depth x2 / x0.5, does not bring the songs measurably closer
+  to the CD (the CD's own mix differs everywhere by ~7 dB per third-octave band, so it cannot settle the FM details).
+- **Tempo:** every song runs 3.2-3.5 % faster than the CD's (time-scale fit of the onset envelopes: Chapter 1 1.0325,
+  Chapter 2 1.0345, boss 1.0320, Chapter 3 1.0315, Magician 1.0325; the loops 102.41 s vs 105.93 s for Chapter 2). The
+  driver's tempo timer is timer B (TACTL 3, value 0xC6: 57 x 8 samples in MAME). One more count (the hardware
+  counting to the overflow, 256 - value) would be 1.75 %; the rest could be the 68000's interrupt latency (wait states
+  on sound RAM, not emulated) before it reloads the timer. Not changed: the CD may not be a recording of the board.
+- **Not settled without a hardware recording** (the issue's YouTube links were not fetched): the attack shape (MAME
+  starts each attack at 0x17F of 0x3FF on a linear scale, the chip counts its attenuation down), the feedback's stack
+  delay (MAME: MDXSL 0 = the slot's own output 2 samples before), the modulation scale (MAME assumes 1024 samples per
+  cycle; this wave has 64) and the key-rate scaling formula (MAME: octave + 2 KRS + FNS bit 9).

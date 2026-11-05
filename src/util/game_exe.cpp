@@ -72,7 +72,7 @@ bool makeGameExe(const std::string& packageRoot, const std::string& pcDir, std::
 #else
     (void)packageRoot;
     (void)pcDir;
-    msg = "Windows only";
+    msg = "none here (Windows only; the shortcuts start bin/hotd)";
     return false;
 #endif
 }

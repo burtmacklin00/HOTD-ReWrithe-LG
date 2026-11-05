@@ -31,6 +31,7 @@ constexpr GLenum TRIANGLES = 0x0004, TRIANGLE_STRIP = 0x0005;
 constexpr GLenum SRC_ALPHA = 0x0302, ONE_MINUS_SRC_ALPHA = 0x0303, ONE = 1, DST_COLOR = 0x0306;
 constexpr GLenum DEPTH_TEST = 0x0B71, CULL_FACE = 0x0B44, BLEND = 0x0BE2, DEPTH_CLAMP = 0x864F;
 constexpr GLenum SCISSOR_TEST = 0x0C11;
+constexpr GLenum STENCIL_TEST = 0x0B90, FUNC_ADD = 0x8006;   // menublocks: the Remake menu's 2D passes set them
 constexpr GLenum LEQUAL = 0x0203, LESS = 0x0201, EQUAL = 0x0202;
 constexpr GLenum UNSIGNED_BYTE = 0x1401, UNSIGNED_SHORT = 0x1403, FLOAT = 0x1406, UNSIGNED_INT = 0x1405;
 constexpr GLenum TEXTURE_BUFFER = 0x8C2A, RGBA32F = 0x8814;   // Draw Depth "Arcade Sort": the polygons' sort keys
@@ -64,6 +65,11 @@ constexpr GLenum DEBUG_OUTPUT = 0x92E0, DEBUG_OUTPUT_SYNCHRONOUS = 0x8242, DONT_
     X(void, DepthFunc, (GLenum func))     X(void, DepthMask, (GLboolean flag)) \
     X(void, DepthRange, (double n, double f)) \
     X(void, ColorMask, (GLboolean r, GLboolean g, GLboolean b, GLboolean a)) \
+    X(void, BlendEquation, (GLenum mode)) \
+    X(void, BindSampler, (GLuint unit, GLuint sampler)) \
+    X(GLboolean, IsProgram, (GLuint program)) \
+    X(GLboolean, IsTexture, (GLuint texture)) \
+    X(GLboolean, IsVertexArray, (GLuint array)) \
     X(GLenum, GetError, (void)) \
     X(void, Finish, (void)) \
     X(const GLubyte*, GetString, (GLenum name)) \

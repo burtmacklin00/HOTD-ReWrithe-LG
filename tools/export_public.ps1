@@ -18,7 +18,9 @@ if ((Test-Path -LiteralPath $outFull) -and (Get-ChildItem -LiteralPath $outFull 
 }
 New-Item -ItemType Directory -Force $outFull | Out-Null
 
-$exclude = @("TODO-NEXT-SESSION.md", "docs/history.md", "docs/session-history.md", "Run Viewer.bat")
+$exclude = @("TODO-NEXT-SESSION.md", "docs/history.md", "docs/session-history.md", "Run Viewer.bat",
+              "docs/typing.md", "docs/horde.md")   # (the unreleased modes: not shown in the public repo, the user 2026-11-03)
+$excludeDirs = @("data/typing", "data/horde")
 $sha = (git -C $repo rev-parse --short $Rev).Trim()
 
 # 1. the committed tree (git archive: only tracked files, never private\ or build folders)
@@ -32,14 +34,18 @@ foreach ($f in $exclude) {
     $p = Join-Path $outFull $f
     if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
 }
+foreach ($d in $excludeDirs) {
+    $p = Join-Path $outFull $d
+    if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force }
+}
 
 # 2. checks
 $problems = @()
 $files = Get-ChildItem -LiteralPath $outFull -Recurse -File
 $badExt = '\.(zip|7z|rar|exe|dll|bin|rom|rbh|vmc|ogg|wav|png|jpg|bmp|iso|chd)$'
 # relprep: our own / third-party shipped files with their licences in NOTICE.md (the prompt icons CC0, the wordmark ours,
-# the Noto fonts OFL: the two CJK fonts are ~4.7 MB each); everything else of these types is still a problem
-$allowed = '^data[\\/](ui[\\/]prompts[\\/](xelu|kenney)[\\/].*\.png|ui[\\/]rewrithe_wordmark\.png|fonts[\\/]NotoSans[A-Za-z]+-Bold\.(otf|ttf))$'
+# the Noto fonts OFL: the CJK fonts are ~4.7 MB each, SC 8.5 MB); everything else of these types is still a problem
+$allowed = '^data[\\/](ui[\\/]prompts[\\/](xelu|kenney)[\\/].*\.png|ui[\\/]rewrithe_wordmark\.png|fonts[\\/]NotoSans[A-Za-z]*-Bold\.(otf|ttf))$'
 foreach ($f in $files) {
     $rel = $f.FullName.Substring($outFull.Length + 1)
     if ($rel -match '^private[\\/]') { $problems += "private file: $rel" }

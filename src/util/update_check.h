@@ -5,7 +5,8 @@
 // then hands over to bin\hotd_launch.exe --update (src/launch/launch_main.cpp): it waits for this hotd.exe to exit,
 // unpacks the zip over the install (settings\ and the player's data\arcade, pc, music, steam are kept) and starts the
 // game again. Nothing outside the install folder is written. Options > System > Check for Updates turns it off.
-// Windows only (WinHTTP, BCrypt); elsewhere nothing happens.
+// The update itself is Windows only (WinHTTP, BCrypt). linux (2026-11-03): on Linux / macOS the check runs through
+// the system's curl and the Update page shows the version, its notes and the download page (no self-install).
 //
 // Testing: HOTD_UPDATE_URL=<a local .json file> is read instead of GitHub's API (also in automated runs); its
 // browser_download_url values may be local file paths (copied instead of downloaded).
@@ -20,6 +21,9 @@
 namespace hotd::util {
 
 constexpr const char* kReleasesPage = "https://github.com/burtmacklin00/HOTD-ReWrithe-LG/releases/latest";
+// the game can download and install its own update (Windows); elsewhere the Update page offers the download page.
+// Light Gun Edition: off (its update packs are installed by hand; the check itself is off by default too)
+constexpr bool kSelfUpdate = false;
 
 // starts the request in the background (once; later calls do nothing)
 void updateCheckStart(const char* currentVersion);

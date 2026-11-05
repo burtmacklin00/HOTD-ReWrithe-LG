@@ -83,10 +83,14 @@ const std::vector<GalleryEntry>& galleryEntries()
          "Type B-1. Hit points 90 to 100", "A wrapped creature of the lower floors."},
         {"t57", "Bourbon", kGalCreatures, 57, 0, "MO_z_kag", "Chapter 1 (variants in Chapter 3)",
          "Type B-2. Hit points 150 (a few have 120)", "A heavier relative of Kageo."},
-        {"t3", "Ebitan", kGalCreatures, 3, 0, "MO_z_ebi MO_ebit", "Chapters 1-3", "Type B-3. Hit points 140",
+        {"t3", "Ebitan A", kGalCreatures, 3, 0, "MO_z_ebi MO_ebit", "Chapters 1-3", "Type B-3. Hit points 140",
          "A crawling creature that springs up close."},
-        {"t4", "Ebitan (hanging)", kGalCreatures, 4, 1, "MO_ebitb", "Chapters 1, 2", "Type B-4",
+        // bugs2 (GitHub #4): the official names are Ebitan A / B / C (B: the hanging one); Ebitan C is type 46
+        // (BO_pdolob), drawn in Chapter 1's waterway (event 11: HOTD_TRACE_TYPE_ROWS, area 1)
+        {"t4", "Ebitan B", kGalCreatures, 4, 1, "MO_ebitb", "Chapters 1, 2", "Type B-4",
          "Hangs from ceilings and drops down."},
+        {"t46", "Ebitan C", kGalCreatures, 46, 0, "", "Chapter 1 (the waterway)", "Developer name BO_pdolob",
+         "The third Ebitan, met only in the mansion's underground waterway."},
         {"t30", "Samson", kGalCreatures, 30, 1, "MO_z_chn", "Chapters 1, 2", "Type C-1. Hit points 250 (a few have 150)",
          "Swings a chainsaw."},
         {"t33", "Bentley", kGalCreatures, 33, 1, "MO_z_ben", "Chapter 2 (variants in Chapters 3, 4)", "Type C-2. Hit points 200",
@@ -118,10 +122,26 @@ const std::vector<GalleryEntry>& galleryEntries()
          "A Chapter 3 creature; this is the variant the game draws (BO_taalub)."},
         {"t38", "Kage", kGalCreatures, 38, 1, "", "Chapter 2", "Developer name (no official one known)",
          "A monkey-like body. Not matched to an official name yet."},
-        {"t68", "Kageta", kGalCreatures, 68, 2, "", "Chapters 3, 4", "Developer name (no official one known)",
-         "Not matched yet. A guess: Parlor (E-4) of the official list."},
+        // bugs2 (#4): Parlor (E-4) = BO_kage2 ("kageta"): Chapters 3 / 4 and its own dagger-of-light models
+        // (kagetabeem), as the official list describes him (Drake's moves, endless laser daggers, a bite)
+        {"t68", "Parlor", kGalCreatures, 68, 2, "", "Chapters 3, 4", "Type E-4. Developer name BO_kage2",
+         "Moves like Drake, but tougher; throws daggers of light without end and may bite."},
         {"t41", "Neopetit", kGalCreatures, 41, 2, "", "Chapters 1-3", "Developer name (no official one known)",
          "One of the small background creatures (three kinds)."},
+        // bugs2 (#4): the other two background creatures (kind 96, BO_neopetit2 / 3), drawn in Chapter 1 (traced)
+        {"t42", "Neopetit 2", kGalCreatures, 42, 0, "", "Chapters 1-3", "Developer name BO_neopetit2",
+         "The second of the small background creatures."},
+        {"t43", "Neopetit 3", kGalCreatures, 43, 0, "", "Chapters 1-3", "Developer name BO_neopetit3",
+         "The third of the small background creatures."},
+        // bugs2 (#4): two creatures that are no skeleton type: Devilon (F-4) = the bats (kinds 66-68, wing frames 0x54..0x67;
+        // traced in Chapter 2, area 6), Name (G-2) = the slugs of Chapter 1's waterway (kind 141 crawls: models 0x971..,
+        // kind 142 spits: 0x99E..; traced at Chapter 1 event 11, area 1)
+        {"devilon", "Devilon", kGalCreatures, -1, 1, "", "Chapters 1, 2, 4", "Type F-4. Motion shows its wing frames",
+         "Bats that fly at the player in groups and die when they hit; a swarm comes with the Hangedman.", "54 57 5A 5D 60 63",
+         6, "5:66 7:81 9:28 11:61 13:12"},
+        {"name", "Name", kGalCreatures, -1, 0, "", "Chapter 1 (the waterway)", "Type G-2. Motion shows its crawl and spit",
+         "A slug that crawls along the walls and spits at the player or bites.", "971 97C 987 99E 9A8 9B2", 1,
+         "5:39 7:81 9:50 11:6"},
         // ---- Bosses ----
         {"t35", "The Chariot", kGalBosses, 35, 0, "MO_b1_", "Chapters 1, 4", "Type 27. Hit points 480",
          "Chapter 1 boss: an armoured giant with a halberd. He comes back in Chapter 4 (480 hit points again)."},
@@ -154,6 +174,12 @@ const std::vector<GalleryEntry>& galleryEntries()
          "A mounted deer head on the wall.", "13A7 13A8", 6, "5:39 7:81 9:28 11:56", false, 180},
         {"tank", "Aquarium", kGalItems, -1, 1, "", "Chapter 2", "Four damage steps (Motion shows them)",
          "A fish tank that shatters.", "13AD 13AE 13AF 13B0", 6, "5:39 7:81 9:28 11:56"},
+        // bugs2 (GitHub #4: "this fish is actually in the aquarium in Chapter 2"): back with the items; only its shine
+        // (the unused environment mapping) is cut
+        {"fish", "Human-faced fish", kGalItems, -1, 1, "", "Chapter 2 (in the aquarium)",
+         "The only object reserved for the unused environment mapping (cut: it is drawn plainly)",
+         "One of the fish with human faces swimming in the aquarium. The arcade has code to make it look wet and shiny, never used.",
+         "1352", 6, "5:39 7:81 9:28 11:56"},
         // ---- Cut content (arcade only: the PC files have no meshes for them; docs/cut_content.md) ----
         // (clay: their textures are in area sheets the game never draws them with; gallery_cut.cpp has where (cutrestore),
         // U shows them untextured in one light colour of Chapter 1's palette; the leech's colours are a guess)
@@ -175,11 +201,6 @@ const std::vector<GalleryEntry>& galleryEntries()
          "A cut creature; models only. Shown with the plain zombie's stance and walks (a guess).", "", 0, "", true},
         {"t75", "Hiru", kGalCut, 75, 0, "MO_hiru", "Never (cut)", "Developer name BO_hiru_b. Six motions of its own",
          "A cut leech: a segmented body with its own motions; never spawned. Its colours are a guess."},
-        // (galfix2, user: "Humanfaced fish should be in cut content not items": its cut part is the shine)
-        {"fish", "Human-faced fish", kGalCut, -1, 1, "", "Chapter 2 (drawn plainly; the shine is cut)",
-         "The only object reserved for the unused environment mapping",
-         "One of the fish with human faces. The arcade has code to make it look wet and shiny, never used.", "1352", 6,
-         "5:39 7:81 9:28 11:56"},
         {"head", "The Hermit's second head", kGalCut, -1, 2, "", "Never (cut)", "Model boss31_kao (0x1AC6), in no skeleton",
          "A second head for the Hermit next to the one the game uses; maybe a fly-eyed head (a guess).", "1AC6", 11,
          "5:53 9:81 11:11 17:98 19:83 21:23 23:17 29:23"},
@@ -227,7 +248,10 @@ GalleryLook galleryLook(int type)
         // gallery2
         {84, {9, "7:81 9:34 11:38"}},                {83, {9, "5:39 7:81 9:105 11:92 15:52"}},
         {38, {7, "5:39 7:81 9:28 11:28 13:60 19:59"}},
-        {68, {9, "7:90 9:102 11:38"}},               {41, {8, "5:39 7:81 9:28 11:6 13:60"}},
+        {68, {9, "7:90 9:102 11:38"}},
+        {42, {3, "5:119 7:81 9:28 11:37 19:70 21:100"}},   // bugs2: traced (Chapter 1, the sewer route's run)
+        {43, {1, "5:4 7:81 9:28 11:76"}},
+        {46, {1, "5:66 7:81 9:50 11:56"}},                 // bugs2: Ebitan C, Chapter 1 event 11               {41, {8, "5:39 7:81 9:28 11:6 13:60"}},
         {19, {7, "5:39 7:81 9:28 13:37 19:118"}},    {20, {6, "5:39 7:81 9:28 11:56"}},
         {21, {1, "7:81 9:28"}},
         {23, {7, "5:39 7:81 9:28 11:28 13:24 17:20 19:71 29:87"}},
@@ -300,6 +324,146 @@ static int entryChapter(const GalleryEntry& e)
 int galleryBackgroundCount() { return kBackdropCount; }
 const char* galleryBackgroundName(int b) { return kBackdrops[std::clamp(b, 0, kBackdropCount - 1)].name; }
 
+// ---- gallery blood / gallery dismemberment: the game's tables (arcade program ROM; the PC's are the same data) ----
+namespace {
+
+constexpr uint32_t kPartRoles = 0x1184E0;            // 31 x 8 bytes a type: byte 3 the part class, byte 4 sever
+constexpr uint32_t kPartReplacement = 0x11DFF0;      // 0x200 a type, 0x20 a class: the model of each damage step
+constexpr uint32_t kPartDamageCallbacks = 0xC66A0;   // the per-type damage routine (part_damage_callback)
+constexpr uint32_t kBlowOffStep = 0x135940;          // byte a type: the head's step that knocks it off (part_blow_off)
+constexpr uint32_t kGgsetLists = 0xC5A40;            // GGSET n -> 4 lists (by blood colour) of 4 colour row entries
+constexpr uint32_t kBloodTable = 0xAB110;            // the blood colour's RGB555 by blood_color (entry 1023)
+constexpr uint32_t kRainbowTable = 0xAB120;          // palette_animation's 90-colour rainbow (the Chapter 4 screens)
+constexpr uint32_t kBurstFirst = 7, kBurstLast = 0x23;     // blood_burst: one a frame
+constexpr uint32_t kDripFirst = 0x46B, kDripLast = 0x4A3;  // blood_drip: one a frame, scale 0.4
+constexpr uint32_t kKeepModel = 0x7B0;               // part_hit: a step model that keeps the part's model
+constexpr uint32_t kNoModel = 1;                     // PN_spaceB: nothing drawn
+
+uint32_t romU32(const std::vector<uint8_t>& m, uint32_t a)
+{
+    return a + 4 <= m.size() ? uint32_t(m[a]) | uint32_t(m[a + 1]) << 8 | uint32_t(m[a + 2]) << 16 | uint32_t(m[a + 3]) << 24 : 0;
+}
+uint16_t romU16(const std::vector<uint8_t>& m, uint32_t a) { return a + 2 <= m.size() ? uint16_t(m[a] | m[a + 1] << 8) : 0; }
+
+// the body part of a part class (part_class_lost_bit 0x1359A0: classes 2 / 4 / 6 lose bit 1, 3 / 5 / 7 bit 2; the
+// right / left shoulders are classes 2 / 3, the chest and hips 8 / 9, the legs 10-15); -1 none (the root, the hands'
+// metal, the class-17 parts)
+int partOfClass(int cls)
+{
+    if (cls == 1) return kPartHead;
+    if (cls == 2 || cls == 4 || cls == 6) return kPartRightArm;
+    if (cls == 3 || cls == 5 || cls == 7) return kPartLeftArm;
+    if (cls == 8 || cls == 9) return kPartBody;
+    if (cls >= 10 && cls <= 15) return kPartLegs;
+    return -1;
+}
+
+// The per-type damage routines (port/damage_types.cpp, table 0xC66A0): at these step models of a part, its children at
+// these joints (bit mask) are cut off; `first`: its first child (type 0's); `once`: only the first child at the joint
+struct CutRule {
+    uint32_t routine;
+    std::vector<uint32_t> models;
+    unsigned joints;
+    bool first = false, once = false;
+};
+constexpr unsigned kJ2 = 1u << 2, kJ3 = 1u << 3, kJ6 = 1u << 6;
+const std::vector<CutRule>& cutRules()
+{
+    static const std::vector<CutRule> kRules = {
+        {0x68F20, {0x78F, 0x460, 0x5BA, 0x16EB, 0x139D, 0x1940}, kJ2 | kJ3 | kJ6},   // zom (part_damage_head_off)
+        {0x69010, {kKeepModel}, kJ2 | kJ3 | kJ6},                                    // zonbiman
+        {0x690C0, {0x13C6, 0x1135, 0x553, 0x125C, 0x12B7, 0x175A, 0x151E, 0x176D, 0x1955}, kJ2 | kJ3 | kJ6},   // debu
+        {0x691E0, {0x1338, 0x1145, 0x152A, 0x17DA}, kJ2 | kJ3 | kJ6},                // gilmoa
+        {0x692C0, {0x117B, 0xDF8, 0x1590, 0x183D}, kJ2 | kJ3 | kJ6},                 // haris
+        {0x693A0, {0x1607, 0x965, 0x1A45}, kJ2 | kJ3 | kJ6},                         // mummy
+        {0x69470, {0x15B0, 0x945, 0x19E7}, kJ2 | kJ3 | kJ6},                         // mummy2
+        {0x68E20, {0x580, 0x17F, 0xAAA, 0x1482}, kJ2 | kJ3 | kJ6},                   // semu
+        {0x68EC0, {0x732}, kJ3},                                                     // tetuman
+        {0x68B50, {0xC8E, 0xCC1, 0xCAA}, kJ2, false, true},                          // mon: the head
+        {0x68B50, {0xC8D, 0xCC0}, kJ3 | kJ6},                                        //      both arms
+        {0x68B50, {0xCA8}, kJ6, false, true},
+        {0x68B50, {0xCA9}, kJ3, false, true},
+        {0x689E0, {0x881, 0x84F, 0x86C, 0xB8A, 0x88C, 0xB9F, 0x87B, 0x845, 0x863, 0xB7F, 0x886, 0xB99}, 0, true},   // dkiller
+    };
+    return kRules;
+}
+constexpr uint32_t kDkiller = 0x689E0;
+// type 0's routine: its head's placeholder step (model 1) gives the head's parent this model, by type
+uint32_t dkillerParentModel(int type)
+{
+    switch (type) {
+    case 0x50: return 0x88C;
+    case 0x4F: return 0x881;
+    case 0x28: return 0xB8A;
+    case 0: return 0x84F;
+    case 8: return 0x86C;
+    case 0x51: return 0xB9F;
+    default: return 0;
+    }
+}
+
+// every damage model of a type (the stage loads them with its parts)
+std::vector<uint32_t> damageModelIds(const std::vector<uint8_t>& rom, int type)
+{
+    std::vector<uint32_t> ids;
+    if (type < 0 || type >= 94) return ids;
+    for (uint32_t c = 0; c < 16; ++c)
+        for (uint32_t s = 0; s < 8; ++s)
+            if (const uint32_t m = romU32(rom, kPartReplacement + uint32_t(type) * 0x200 + c * 0x20 + s * 4); m > kNoModel && m < 0x2000)
+                ids.push_back(m);
+    if (const uint32_t m = dkillerParentModel(type)) ids.push_back(m);
+    return ids;
+}
+
+// GameView's custom Blood Color recolour of the blood rows (view.cpp tintBloodRows), for the Gallery's own colour: per
+// brightness the row's grey kept, the colour above it the custom colour's
+void tintRows(std::vector<uint8_t>& xlat, const std::set<int>& rows, int rgb)
+{
+    if (rgb < 0 || xlat.size() < 256 * 96) return;
+    const float t[3] = {float(rgb >> 16 & 0xFF) / 255.0f, float(rgb >> 8 & 0xFF) / 255.0f, float(rgb & 0xFF) / 255.0f};
+    const float top = std::max({t[0], t[1], t[2], 1e-3f});
+    for (int row : rows) {
+        if (row < 0 || row >= 32) continue;
+        for (int i = 0; i < 256; ++i) {
+            uint8_t* c[3] = {&xlat[size_t(row * 256 + i)], &xlat[size_t((32 + row) * 256 + i)], &xlat[size_t((64 + row) * 256 + i)]};
+            const float lo = float(std::min({*c[0], *c[1], *c[2]})), hi = float(std::max({*c[0], *c[1], *c[2]}));
+            for (int k = 0; k < 3; ++k) *c[k] = uint8_t(std::clamp((lo + (hi - lo) * t[k] / top) * top + 0.5f, 0.0f, 255.0f));
+        }
+    }
+}
+
+// the arcade has no yellow (blood table 0xAB110: red, green, blue, purple): the Gallery draws the arcade models' yellow
+// with the custom recolour in this colour (the PC's B_YELLO.VMC pages on the PC models)
+constexpr int kArcadeYellow = 0xF0D000;
+
+} // namespace
+
+const char* galleryBloodColorName(int c)
+{
+    static const char* const kNames[6] = {"Red", "Green", "Blue", "Purple", "Yellow", "Custom"};
+    return kNames[std::clamp(c, 0, 5)];
+}
+const char* galleryRainbowSpeedName(float s)
+{
+    return s <= 0.0f ? "Still" : s < 0.15f ? "Slow" : s < 0.3f ? "Normal" : "Fast";
+}
+float galleryRainbowSpeedStep(float s, int dir)
+{
+    static const float kSpeeds[4] = {0.0f, 0.1f, 0.2f, 60.0f / 135.0f};   // (cosmods.cpp rainbowBloodConfigure's)
+    int i = s <= 0.0f ? 0 : s < 0.15f ? 1 : s < 0.3f ? 2 : 3;
+    return kSpeeds[((i + dir) % 4 + 4) % 4];
+}
+const char* galleryCreatureBloodName(int c)
+{
+    static const char* const kNames[3] = {"Own Colour Each", "Rainbow Cycle", "Off"};
+    return kNames[std::clamp(c, 0, 2)];
+}
+const char* galleryPartName(int p)
+{
+    static const char* const kNames[kGalleryParts] = {"Head", "Right Arm", "Left Arm", "Body", "Legs"};
+    return p >= 0 && p < kGalleryParts ? kNames[p] : "";
+}
+
 bool Gallery::open(const Paths& p, std::string& err)
 {
     close();
@@ -311,7 +475,8 @@ bool Gallery::open(const Paths& p, std::string& err)
     arcade_ = std::make_unique<ArcadeSource>(ArcadeConfig{p.regions, p.dumps, p.texsets, true, false});
     if (!arcade_->available()) arcade_.reset();
     if (!p.pc.empty()) {
-        pc_ = std::make_unique<PcSource>(PcConfig{p.pc, p.blood});
+        pcBlood_ = bloodSet_ ? pcBloodWanted() : p.blood;   // (gallery blood: the Gallery's own colour)
+        pc_ = std::make_unique<PcSource>(PcConfig{p.pc, pcBlood_});
         if (!pc_->available()) pc_.reset();
     }
     if (!arcade_ && !pc_) {
@@ -367,6 +532,8 @@ void Gallery::close()
     if (backProgram_) gl::DeleteProgram(backProgram_);
     if (backVao_) gl::DeleteVertexArrays(1, &backVao_);
     backProgram_ = backVao_ = 0;
+    bloodEntry_ = 0;
+    fx_.clear();
     arcade_.reset();
     pc_.reset();
     open_ = false;
@@ -388,6 +555,8 @@ const StageData* Gallery::stage(Source s, int chapter)
                 if (n.model) ids.push_back(n.model);
             // the models body_part_draw_hook draws in a part's place or with it (wings, veins, eyes, the gun, the coat)
             for (uint32_t id : partDrawExtraModels(e.type)) ids.push_back(id);
+            // gallery dismemberment: its damage models (part_replacement; the PC files have the same IDs)
+            for (uint32_t id : damageModelIds(anim_.maincpu(), e.type)) ids.push_back(id);
             // the generated skin (the bellies: skin_draw, arcade only; the PC draws its parts as they are)
             ArcadeSource::Skin sk;
             if (s == Source::Arcade && arcade_->skinInfo(e.type, sk, 0)) skins.push_back({kSkinKey + uint32_t(e.type), e.type, 0});
@@ -406,6 +575,9 @@ const StageData* Gallery::stage(Source s, int chapter)
     for (const Backdrop& b : kBackdrops)   // the skies of this chapter
         if (b.chapter == chapter)
             for (uint32_t id : b.ids) ids.push_back(id);
+    // gallery blood: the blood burst's and the drip's frames (blood_burst 0x44EF0: 7..0x23; blood_drip 0x44E70: 0x46B..0x4A3)
+    for (uint32_t id = kBurstFirst; id <= kBurstLast; ++id) ids.push_back(id);
+    for (uint32_t id = kDripFirst; id <= kDripLast; ++id) ids.push_back(id);
     src->requestModels(chapter, ids);
     if (s == Source::Arcade) arcade_->requestSkins(chapter, skins);
     const uint64_t t0 = SDL_GetTicks();
@@ -435,6 +607,7 @@ void Gallery::select(int i)
     index_ = ((i % n) + n) % n;
     lastInCategory_[size_t(category())] = index_;
     pick();
+    damageInit();   // (gallery dismemberment: the type's tables, every part whole; not in pick: the portraits pick others)
     resetView();
     settle();   // a new entry: its first view at once
     if (reStage) {   // regallery: on the stage it fades in, coming a little from the right (0.25 s)
@@ -538,6 +711,8 @@ static const std::vector<int>& seenMotions(int type)
         {36, "3 6 7 9 10 11 12 13 14 18 20 21"},
         {37, "98 99 118 120 128 129 131 132 133 135 137 404 410 416 426 436 437 440 443 445 448"},
         {38, "414 416 440 445 448"}, {41, "483 497 519 560 561 563 564 565 566 567 644 646 647 648"},
+        {42, "483 563 564 566 567 644 646 648"}, {43, "483 563 564 567 644 646 648"},   // bugs2 (traced: Chapter 1)
+        {46, "497 519 563 564"},
         {47, "497 498 502 504 505 560 562 563 564 630 631 632 633 634"}, {48, "454 455"},
         {50, "22 23 25 26 27 29 31 33 35"},
         {53, "471 473 474 483 504 519 560 561 563 564 565 592 597 617 618 619 620 621 637 638 639 649"},
@@ -1222,18 +1397,34 @@ void Gallery::draw(int ww, int wh, int x, int y, int w, int h, float lift, const
     int areaSet = -1;
     for (size_t i = 0; i < sd->textureSets.size(); ++i)
         if (arcade && look.area > 0 && sd->textureSets[i].romArea == look.area) areaSet = int(i);
+    bloodRowMask_ = 0;
     if (arcade && areaSet >= 0) {
         std::string& applied = xlatRows_[{chapter, areaSet}];
-        const std::string want = look.rows ? look.rows : "";
+        // gallery blood: the look's blood rows in the blood colour (GGSET's lists), the custom colour (and the arcade's
+        // yellow) recoloured over them as GameView does
+        std::set<int> bloodRows;
+        const bool recolour = bloodSet_;   // (the portraits too: the same translation, not rebuilt between them)
+        const std::string rows = recolour ? lookRows(look.rows, bloodRows) : std::string(look.rows ? look.rows : "");
+        // polish (user 2026-11-03: in the Gallery the bosses did not cycle, Harris's pale pink wound stripes stayed
+        // pink): Rainbow Blood's per-pixel recolour of these rows (renderer uBloodRows), as GameView passes the game's
+        // GGSET rows. Without it only the red-pixel fallback (woundTint) ran: the people / bosses (hue 4: no fallback)
+        // kept their red, the pale shades of an enemy's blood rows missed the red test
+        for (int row : bloodRows)
+            if (row >= 0 && row < 32) bloodRowMask_ |= 1u << row;
+        const int tint = !recolour || blood_.rainbow.on ? -1 : blood_.color == 5 ? blood_.rgb : blood_.color == 4 ? kArcadeYellow : -1;
+        const std::string want = rows + (tint >= 0 ? "#" + std::to_string(tint) : std::string());
         if (applied != want) {   // color_row_set's rows into the set's colour translation, as GameView does
             std::vector<uint8_t> xlat;
-            arcade_->colorXlat(look.area, parseColorRows(look.rows), xlat);
+            arcade_->colorXlat(look.area, parseColorRows(rows.c_str()), xlat);
+            if (tint >= 0) tintRows(xlat, bloodRows, tint);
             renderer_.updateXlat(*sd, areaSet, xlat);
             applied = want;
         }
     }
     std::vector<uint32_t> models;
     std::vector<int> placedNode;   // placements_[i]'s skeleton node (-1: none)
+    std::vector<uint32_t> partModel;   // gallery dismemberment: each node's model now
+    std::vector<bool> partGone;        // (a cut part)
     auto posed = [&](int motion, int frame) {
         if (still)
             scratch_.clear();
@@ -1287,8 +1478,10 @@ void Gallery::draw(int ww, int wh, int x, int y, int w, int h, float lift, const
             place(uint32_t(motion), Xform{});
             return;
         }
+        // gallery dismemberment: the parts' damage models, the cut parts left out
+        damageModels(sk, partModel, partGone);
         for (size_t n = 0; n < sk.nodes.size() && n < scratch_.size(); ++n) {
-            if (!sk.nodes[n].model) continue;
+            if (!sk.nodes[n].model || partGone[n] || partModel[n] <= kNoModel) continue;
             // what body_part_draw_hook draws for this part (another model in its place, extras with its matrix)
             PartDrawState ps;
             ps.type = e.type;
@@ -1298,10 +1491,32 @@ void Gallery::draw(int ww, int wh, int x, int y, int w, int h, float lift, const
             ps.motion = motion;
             ps.frame = frame - 1;
             ps.tick = int(tick_);
-            ps.model = sk.nodes[n].model;
+            ps.model = partModel[n];
             ps.pcModels = !arcade;
             partDrawModels(ps, models);
             for (uint32_t id : models) place(id, scratch_[n], int(n));
+        }
+        // relfix (the v1.2.0 checklist: the Gallery never showed Big Head): the Mods page's Big Head as in play
+        // (cosmods.cpp bigHeadFrame): the topmost class-1 part and every part under it scaled about its joint. Not
+        // the PC Mode portraits (their own head framing)
+        if (!portraitOn_ && bigHeadTypeOn(e.type)) {
+            const float sc = bigHeadSettings().scale;
+            std::vector<int> headOf(sk.nodes.size(), -1);   // (parents come before their children)
+            for (size_t n = 0; n < sk.nodes.size(); ++n) {
+                const int p = sk.nodes[n].parent;
+                headOf[n] = p >= 0 && size_t(p) < n && headOf[size_t(p)] >= 0 ? headOf[size_t(p)]
+                            : anim_.partClass(e.type, sk.nodes[n].joint) == 1 ? int(n) : -1;
+            }
+            for (size_t i = 0; i < placements_.size(); ++i) {
+                const int n = placedNode[i];
+                const int h = n >= 0 && size_t(n) < headOf.size() ? headOf[size_t(n)] : -1;
+                if (h < 0 || size_t(h) >= scratch_.size()) continue;
+                float P[3] = {scratch_[size_t(h)].pos[0], scratch_[size_t(h)].pos[1], scratch_[size_t(h)].pos[2]};
+                P[0] -= scratch_[0].pos[0], P[2] -= scratch_[0].pos[2];   // (as place(): the ground travel out)
+                Placement& pl = placements_[i];
+                for (float& v : pl.rot) v *= sc;
+                for (int k = 0; k < 3; ++k) pl.pos[k] = P[k] + (pl.pos[k] - P[k]) * sc;
+            }
         }
         // the generated skin (skin_draw: the belly between the anchor parts of classes 8 / 9), arcade only
         ArcadeSource::Skin skin;
@@ -1347,6 +1562,7 @@ void Gallery::draw(int ww, int wh, int x, int y, int w, int h, float lift, const
         }
         // a few frames over the whole motion (jumps, raised arms); still models: the first step (the whole one)
         const int frames = still ? 1 : std::max(1, anim_.motionFrames(m));
+        noDamage_ = true;   // (gallery dismemberment: framed whole, the view stays as parts come and go)
         for (int fr = 1; fr <= frames; fr += std::max(1, frames / 8)) {
             posed(still ? motions_.front() : m, fr);
             for (size_t i = 0; i < placements_.size(); ++i) {
@@ -1369,6 +1585,7 @@ void Gallery::draw(int ww, int wh, int x, int y, int w, int h, float lift, const
             halfH_ = std::max(0.5f, (hi[1] - lo[1]) / 2);
             radius_ = std::max(0.5f, 0.5f * std::hypot(hi[0] - lo[0], hi[2] - lo[2]));   // across, any way it turns
         }
+        noDamage_ = false;
         framed_ = true;
     }
     posed(m, int(frame_));
@@ -1463,6 +1680,114 @@ void Gallery::draw(int ww, int wh, int x, int y, int w, int h, float lift, const
             for (DrawItem& di : items) di.light[0] = s * std::sin(a), di.light[1] = phd.lightUp, di.light[2] = s * std::cos(a);
         }
     }
+    // gallery blood: Rainbow Blood's creature colour on the parts (as GameView: an enemy's wounds and blood texels)
+    if (bloodSet_ && !still) {
+        const bool enemy = e.category == kGalCreatures || e.category == kGalCut;
+        const float own = 0.08f + 0.84f * float((uint32_t(e.type + 1) * 2654435761u) >> 16 & 0xFFFF) / 65536.0f;
+        float hue = -1.0f;
+        if (blood_.rainbow.on)   // (cosmods.h creatureBloodHue: 0..1 its own hue, 2 + cycling, 4 + its wounds as painted)
+            hue = !enemy || blood_.rainbow.creature == 2 ? 4.0f : blood_.rainbow.creature == 1 ? 2.0f + own : own;
+        else if (blood_.color == 5 && arcade && enemy)
+            hue = 0.0f;   // (the custom colour on the wounds' red: renderer mode 3)
+        for (DrawItem& di : items) di.bloodHue = hue;
+    }
+    // gallery blood: Blood Particles: a hit's blood burst on a part given a damage step (blood_burst: models 7..0x23 one
+    // a frame, drawn in camera space at the part), and the blood dripping from the cut joints (part_bleed: a blood_drip
+    // every 20 frames, models 0x46B..0x4A3 one a frame at scale 0.4; the game's bleeding ends after 100 frames, the
+    // Gallery keeps it going). Drawn from the arcade's models when the shown source lacks them
+    fxPlacements_.clear();
+    if (bloodSet_ && !thumbMode_ && !portraitOn_ && !still) {
+        auto nodePos = [&](int n, float out[3]) {
+            for (int k = 0; k < 3; ++k) out[k] = scratch_[size_t(n)].pos[k] - (k != 1 && !scratch_.empty() ? scratch_[0].pos[k] : 0.0f);
+        };
+        if (blood_.particles) {
+            std::vector<int> cuts;
+            for (size_t i = 0; i < partGone.size() && i < scratch_.size(); ++i)
+                if (partGone[i] && sk.nodes[i].parent >= 0 && !partGone[size_t(sk.nodes[i].parent)]) cuts.push_back(int(i));
+            if (cuts.empty() || nextDrip_ > tick_ + 20.0f) nextDrip_ = tick_;
+            if (!cuts.empty() && tick_ >= nextDrip_) {
+                for (int c : cuts) {
+                    Fx nf{1, tick_, {0, 0, 0}, c};
+                    nodePos(c, nf.pos);
+                    fx_.push_back(nf);
+                }
+                nextDrip_ = tick_ + 20.0f;
+            }
+        }
+        fx_.erase(std::remove_if(fx_.begin(), fx_.end(), [&](const Fx& x) {
+            const uint32_t last = x.kind == 0 ? kBurstLast - kBurstFirst : kDripLast - kDripFirst;
+            return tick_ - x.start > float(last) + 1.0f || tick_ < x.start || (x.kind == 0 && size_t(x.node) >= scratch_.size());
+        }), fx_.end());
+        const StageData* arcadeSd = hasSource(Source::Arcade) ? stage(Source::Arcade, chapter) : nullptr;
+        fxPlacements_.reserve(fx_.size());
+        for (const Fx& fx : fx_) {
+            const uint32_t id = (fx.kind == 0 ? kBurstFirst : kDripFirst) + uint32_t(tick_ - fx.start);
+            const StageData* from = nullptr;
+            for (const StageData* s : {sd, arcadeSd})
+                if (!from && s) {
+                    const auto it = s->models.find(id);
+                    if (it != s->models.end() && it->second.triangleCount() > 0) from = s;
+                }
+            if (!from) continue;
+            Placement pl;
+            pl.id = pl.modelKey = id;
+            if (fx.kind == 0) {   // the burst: the camera's axes (copro 0x21: drawn in camera space), at the part, a step nearer
+                float p[3];
+                nodePos(fx.node, p);
+                for (int i = 0; i < 3; ++i) {
+                    pl.pos[i] = p[i] - f[i] * 2.0f;
+                    pl.rot[i * 3] = r[i], pl.rot[i * 3 + 1] = u[i], pl.rot[i * 3 + 2] = -f[i];
+                }
+            } else {             // the drip: scale 0.4 in world axes
+                for (int i = 0; i < 3; ++i) pl.pos[i] = fx.pos[i];
+                for (int i = 0; i < 9; ++i) pl.rot[i] = i % 4 == 0 ? 0.4f : 0.0f;
+            }
+            fxPlacements_.push_back(pl);
+            DrawItem di;
+            di.stage = from;
+            di.model = &from->models.at(id);
+            di.placement = &fxPlacements_.back();
+            di.variant = di.model->preferredVariant;
+            if (di.variant < 0 && !di.model->validVariants.empty()) di.variant = di.model->validVariants.front();
+            if (di.variant < 0 && from->source == Source::Arcade && !from->textureSets.empty()) di.variant = 0;
+            items.push_back(di);
+        }
+    }
+    // gallery blood: the colours (the renderer's; GameView's in the game): Rainbow Blood, the custom colour on the
+    // wounds, and the arcade's blood entry 1023 (the bursts, the drips, the gore) in the blood colour
+    if (bloodSet_) {
+        const std::vector<uint8_t>& rom = anim_.maincpu();
+        const RainbowBloodSettings& rb = blood_.rainbow;
+        const int custom = rb.on ? -1 : blood_.color == 5 ? blood_.rgb : blood_.color == 4 ? kArcadeYellow : -1;
+        opt_.rainbow = rb.on ? (rb.together ? 2 : 1) : custom >= 0 && arcade ? 3 : 0;
+        opt_.rainbowPhase = rb.on ? float(std::fmod(double(tick_) * rb.speed / 60.0, 1.0)) : 0.0f;
+        opt_.rainbowGame = false;
+        opt_.bloodRowMask = rb.on && arcade ? bloodRowMask_ : 0;   // (polish: the look's blood rows cycle per pixel)
+        if (rb.on) {
+            opt_.rainbowGame = rom.size() >= kRainbowTable + 180;
+            for (int i = 0; i < 90 && opt_.rainbowGame; ++i) {
+                const uint16_t v = romU16(rom, kRainbowTable + 2u * uint32_t(i));
+                const int ch[3] = {v & 31, v >> 5 & 31, v >> 10 & 31};
+                opt_.rainbowGame = ch[0] == 31 || ch[1] == 31 || ch[2] == 31;
+                for (int c = 0; c < 3; ++c) opt_.rainbowTable[i][c] = float(ch[c]) / 31.0f;
+            }
+        }
+        if (custom >= 0)
+            for (int c = 0; c < 3; ++c) opt_.bloodRgb[c] = float(custom >> (16 - 8 * c) & 0xFF) / 255.0f;
+        // entry 1023: blood_color's table colour (0x801F red ...; the rainbow: red, recoloured), the custom colour
+        // as its RGB555 (R in the low bits)
+        const int c = rb.on || blood_.color >= 4 ? 0 : blood_.color;
+        uint16_t entry = uint16_t(romU16(rom, kBloodTable + 2u * uint32_t(c)) | 0x8000u);
+        if (custom >= 0)
+            entry = uint16_t(0x8000u | ((unsigned(custom) & 0xFF) >> 3) << 10 | ((unsigned(custom) >> 8 & 0xFF) >> 3) << 5 |
+                             ((unsigned(custom) >> 16 & 0xFF) >> 3));
+        if (entry != bloodEntry_) {
+            bloodEntry_ = entry;
+            std::vector<uint16_t> anim(1024, 0);
+            anim[1023] = entry;
+            renderer_.setPaletteAnimation(anim.data());
+        }
+    }
     // the background: a plain colour (the window's clear), or one of the game's skies around the camera (drawn first,
     // no depth writes, as the viewer and the game draw them), from the shown source when it has the sky model, else
     // the arcade's
@@ -1499,7 +1824,7 @@ void Gallery::draw(int ww, int wh, int x, int y, int w, int h, float lift, const
             const float floorY = center_[1] - halfH_;
             if (cam.pos[1] > floorY + 1.0f) {
                 mirror_ = placements_;
-                std::vector<DrawItem> refl = items;
+                std::vector<DrawItem> refl(items.begin(), items.begin() + std::ptrdiff_t(std::min(items.size(), placements_.size())));   // (the model, not its blood)
                 for (size_t i = 0; i < mirror_.size() && i < refl.size(); ++i) {
                     Placement& pl = mirror_[i];
                     pl.pos[1] = 2.0f * floorY - pl.pos[1];
@@ -1630,6 +1955,253 @@ std::string Gallery::motionLabel() const
     if (n.rfind("MO_", 0) == 0) n = n.substr(3);
     const MotionKind k = motionKind(n);
     return of + ":  " + (k == MotionKind::Other ? n : std::string(motionKindName(k)) + "  (" + n + ")");
+}
+
+// ---- gallery blood ----
+int Gallery::pcBloodWanted() const
+{
+    if (blood_.rainbow.on)   // (as GameView: the custom path in white, its blood texels marked for the renderer's colours)
+        return PcConfig::kBloodCustom | PcConfig::kBloodRainbow | 0xFFFFFF;
+    if (blood_.color == 5) return PcConfig::kBloodCustom | (blood_.rgb & 0xFFFFFF);
+    return std::clamp(blood_.color, 0, 4);
+}
+
+void Gallery::setBlood(const GalleryBlood& b)
+{
+    blood_ = b;
+    blood_.color = std::clamp(blood_.color, 0, 5);
+    blood_.rgb &= 0xFFFFFF;
+    blood_.rainbow.creature = std::clamp(blood_.rainbow.creature, 0, 2);
+    bloodSet_ = true;
+    if (!blood_.particles) fx_.clear();
+    if (!pc_ || pcBloodWanted() == pcBlood_) return;
+    // the PC pages are tinted at the load: the PC source again with the new colour, its stages loaded again on use
+    pcBlood_ = pcBloodWanted();
+    for (auto it = stages_.begin(); it != stages_.end();) {
+        if (it->first.first == int(Source::PC)) {
+            if (it->second) renderer_.release(*it->second);
+            it = stages_.erase(it);
+        } else
+            ++it;
+    }
+    for (auto it = failed_.begin(); it != failed_.end();) it = it->first == int(Source::PC) ? failed_.erase(it) : std::next(it);
+    for (auto it = thumbs_.begin(); it != thumbs_.end();) it = it->first.first == int(Source::PC) ? thumbs_.erase(it) : std::next(it);
+    pc_ = std::make_unique<PcSource>(PcConfig{paths_.pc, pcBlood_});
+    if (!pc_->available()) pc_.reset();
+    if (!pc_ && source_ == Source::PC && arcade_) source_ = Source::Arcade;
+}
+
+std::string Gallery::bloodLabel() const
+{
+    return blood_.rainbow.on ? "Rainbow" : galleryBloodColorName(blood_.color);   // (the custom colour: its #RRGGBB beside it)
+}
+
+// a look's colour rows ("row:entry ...", traced with red blood) in the blood colour: GGSET's lists give each blood row
+// entry per colour (the red, green, blue and purple lists differ only there: entry 81 -> 57 / 44 / 122); bloodRows: the
+// table rows that hold blood (the custom colour recolours them, as GameView does)
+std::string Gallery::lookRows(const char* rows, std::set<int>& bloodRows) const
+{
+    bloodRows.clear();
+    if (!rows || !*rows) return "";
+    if (bloodRowEntries_.empty()) {   // (once: every GGSET list's entries by colour)
+        const std::vector<uint8_t>& rom = anim_.maincpu();
+        auto& map = const_cast<std::map<int, std::array<int, 4>>&>(bloodRowEntries_);
+        for (uint32_t n = 0; n < 64; ++n) {
+            const uint32_t lists = romU32(rom, kGgsetLists + 4 * n);
+            if (lists == 0 || lists + 16 > rom.size()) break;
+            for (uint32_t r = 0; r < 4; ++r) {
+                std::array<int, 4> e{};
+                bool ok = true;
+                for (uint32_t c = 0; c < 4; ++c) {
+                    const uint32_t l = romU32(rom, lists + 4 * c);
+                    ok = ok && l + 8 <= rom.size();
+                    e[c] = ok ? int16_t(romU16(rom, l + 2 * r)) : -1;
+                }
+                if (ok && e[0] >= 0 && (e[1] != e[0] || e[2] != e[0] || e[3] != e[0])) map[e[0]] = e;
+            }
+        }
+        if (map.empty()) map[-1] = {};   // (no ROM lists: looked once)
+    }
+    // red for the rainbow (the renderer recolours the red) and the custom colours (recoloured from red, as the game's
+    // logic keeps red for them); the arcade's yellow: the custom recolour
+    const int c = blood_.rainbow.on || blood_.color >= 4 ? 0 : blood_.color;
+    std::ostringstream out;
+    for (const auto& [row, entry] : parseColorRows(rows)) {
+        int e = entry;
+        if (auto it = bloodRowEntries_.find(entry); it != bloodRowEntries_.end() && entry >= 0) {
+            e = it->second[size_t(c)];
+            bloodRows.insert(row);
+        }
+        out << row << ':' << e << ' ';
+    }
+    return out.str();
+}
+
+// ---- gallery dismemberment ----
+void Gallery::damageInit()
+{
+    dmg_ = DamageData{};
+    std::fill(std::begin(dmgStep_), std::end(dmgStep_), 0);
+    fx_.clear();
+    const GalleryEntry& e = entryNow();
+    if (e.type < 0 || e.type >= anim_.typeCount() || e.type >= 94) return;
+    const std::vector<uint8_t>& rom = anim_.maincpu();
+    const Skeleton& sk = anim_.skeleton(e.type);
+    const uint32_t t = uint32_t(e.type);
+    dmg_.routine = romU32(rom, kPartDamageCallbacks + 4 * t);
+    dmg_.blowOff = kBlowOffStep + t < rom.size() ? rom[kBlowOffStep + t] : 0;
+    for (int c = 0; c < 16; ++c)
+        for (int s = 0; s < 8; ++s) {
+            const uint32_t m = romU32(rom, kPartReplacement + t * 0x200 + uint32_t(c) * 0x20 + uint32_t(s) * 4);
+            if (m == 0) break;
+            dmg_.chain[c][s] = m;
+            dmg_.len[c] = s + 1;
+        }
+    // the parts this skeleton has, their steps; what the damage routines can cut off (joints 2 the head, 3 / 6 the
+    // right / left arm: part_damage_head_off and the rest)
+    unsigned cutJoints = 0;
+    bool firstChild = false;
+    for (const CutRule& r : cutRules())
+        if (r.routine == dmg_.routine) cutJoints |= r.joints, firstChild = firstChild || r.first;
+    for (const SkeletonNode& n : sk.nodes) {
+        if (!n.model) continue;
+        const int cls = anim_.partClass(e.type, n.joint), p = partOfClass(cls);
+        if (p < 0 || cls < 0 || cls >= 16) continue;
+        dmg_.steps[p] = std::max(dmg_.steps[p], dmg_.len[cls]);
+        dmg_.any = dmg_.any || dmg_.len[cls] > 0;
+    }
+    if (!dmg_.any) return;
+    // the head: knocked off at its blow-off step (part_hit -> part_blow_off), else cut by a routine
+    if (dmg_.blowOff > 0 && dmg_.steps[kPartHead] > 0 && dmg_.blowOff <= dmg_.steps[kPartHead] + 1) {
+        dmg_.steps[kPartHead] = dmg_.blowOff - 1;
+        dmg_.canGo[kPartHead] = true;
+    }
+    if (cutJoints & kJ2 || (firstChild && dmg_.steps[kPartHead] > 0)) dmg_.canGo[kPartHead] = true;
+    dmg_.canGo[kPartRightArm] = (cutJoints & kJ3) && dmg_.steps[kPartRightArm] >= 0;
+    dmg_.canGo[kPartLeftArm] = (cutJoints & kJ6) && dmg_.steps[kPartLeftArm] >= 0;
+    // (an arm without models of its own still goes: it needs a node)
+    for (int p : {kPartRightArm, kPartLeftArm}) {
+        bool has = false;
+        for (const SkeletonNode& n : sk.nodes) has = has || (n.model && partOfClass(anim_.partClass(e.type, n.joint)) == p);
+        dmg_.canGo[p] = dmg_.canGo[p] && has;
+    }
+    if (std::getenv("HOTD_GALLERY_DAMAGE_LOG")) {   // testing: the type's tables
+        std::fprintf(stderr, "gallery damage: type %d routine %X blow-off %d steps", e.type, dmg_.routine, dmg_.blowOff);
+        for (int p = 0; p < kGalleryParts; ++p) std::fprintf(stderr, " %s %d%s", galleryPartName(p), dmg_.steps[p], dmg_.canGo[p] ? "+off" : "");
+        std::fprintf(stderr, "\n");
+    }
+}
+
+int Gallery::damageSteps(int part) const { return part >= 0 && part < kGalleryParts ? dmg_.steps[part] : 0; }
+bool Gallery::partCanGo(int part) const { return part >= 0 && part < kGalleryParts && dmg_.canGo[part]; }
+
+void Gallery::stepDamage(int part, int dir)
+{
+    if (part < 0 || part >= kGalleryParts || !dmg_.any) return;
+    const int n = damageStates(part) + 1;
+    if (n <= 1) return;
+    dmgStep_[part] = ((dmgStep_[part] + dir) % n + n) % n;
+    // Blood Particles: a hit's blood burst on the part (part_hit -> blood_burst_spawn), not when it comes back whole
+    if (blood_.particles && dmgStep_[part] != 0) {
+        const GalleryEntry& e = entryNow();
+        const Skeleton& sk = anim_.skeleton(e.type);
+        for (size_t i = 0; i < sk.nodes.size(); ++i) {
+            const SkeletonNode& nd = sk.nodes[i];
+            if (!nd.model || partOfClass(anim_.partClass(e.type, nd.joint)) != part) continue;
+            const bool top = nd.parent < 0 || partOfClass(anim_.partClass(e.type, sk.nodes[size_t(nd.parent)].joint)) != part;
+            if (top) fx_.push_back({0, tick_, {0, 0, 0}, int(i)});
+        }
+    }
+}
+
+void Gallery::resetDamage()
+{
+    std::fill(std::begin(dmgStep_), std::end(dmgStep_), 0);
+    fx_.clear();
+}
+
+std::string Gallery::damageLabel(int part) const
+{
+    if (!dmg_.any || damageStates(part) == 0) return "-";
+    const int s = damage(part);
+    if (s == 0) return "Whole";
+    if (s > damageSteps(part)) return "Off";
+    return "Damage " + std::to_string(s);
+}
+
+std::string Gallery::damageNote() const
+{
+    const GalleryEntry& e = entryNow();
+    if (e.type < 0) return "A still model: M steps its damage";
+    if (!dmg_.any) return "No damage models for this one";
+    return "";
+}
+
+void Gallery::damageModels(const Skeleton& sk, std::vector<uint32_t>& model, std::vector<bool>& gone) const
+{
+    const size_t n = sk.nodes.size();
+    model.resize(n);
+    gone.assign(n, false);
+    for (size_t i = 0; i < n; ++i) model[i] = sk.nodes[i].model;
+    if (!dmg_.any || noDamage_ || thumbMode_ || portraitOn_) return;
+    const int type = entryNow().type;
+    std::vector<uint32_t> stepModel(n, 0);   // the step's own model (0x7B0 too: the routines test it)
+    std::vector<int> cls(n, -1);
+    for (size_t i = 0; i < n; ++i) {
+        if (!sk.nodes[i].model) continue;
+        cls[i] = anim_.partClass(type, sk.nodes[i].joint);
+        const int p = partOfClass(cls[i]);
+        if (p < 0 || cls[i] >= 16) continue;
+        const int s = std::min(dmgStep_[p], dmg_.len[cls[i]]);
+        for (int k = 0; k < s; ++k) {   // part_hit's steps in order (0x7B0: the part keeps its model)
+            const uint32_t m = dmg_.chain[cls[i]][k];
+            stepModel[i] = m;
+            if (m != kKeepModel) model[i] = m;
+        }
+    }
+    // the routines' cuts: the children at their joints (or the first child) of a part at one of their models
+    auto children = [&](size_t i, auto&& f) {
+        for (size_t c = i + 1; c < n; ++c)
+            if (sk.nodes[c].parent == int(i)) f(c);
+    };
+    auto applyRules = [&](size_t i, uint32_t m) {
+        for (const CutRule& r : cutRules()) {
+            if (r.routine != dmg_.routine || std::find(r.models.begin(), r.models.end(), m) == r.models.end()) continue;
+            bool firstDone = false;
+            unsigned onceDone = 0;
+            children(i, [&](size_t c) {
+                const int j = sk.nodes[c].joint;
+                if (r.first) {
+                    if (!firstDone) gone[c] = true;
+                    firstDone = true;
+                } else if (j >= 0 && j < 32 && (r.joints >> j & 1) && !(r.once && (onceDone >> j & 1))) {
+                    gone[c] = true;
+                    onceDone |= 1u << j;
+                }
+            });
+        }
+    };
+    for (size_t i = 0; i < n; ++i) {
+        if (!stepModel[i]) continue;
+        applyRules(i, stepModel[i]);
+        // type 0's head placeholder: its parent takes the type's damage model (and that model's cut)
+        if (dmg_.routine == kDkiller && stepModel[i] == kNoModel && sk.nodes[i].parent >= 0)
+            if (const uint32_t pm = dkillerParentModel(type)) {
+                model[size_t(sk.nodes[i].parent)] = pm;
+                applyRules(size_t(sk.nodes[i].parent), pm);
+            }
+    }
+    // a part "Off": the part from its top (its parent another part's): the head knocked off, an arm cut at the shoulder
+    for (int p = 0; p < kGalleryParts; ++p) {
+        if (!dmg_.canGo[p] || dmgStep_[p] <= dmg_.steps[p]) continue;
+        for (size_t i = 0; i < n; ++i) {
+            if (partOfClass(cls[i]) != p) continue;
+            const int up = sk.nodes[i].parent;
+            if (up < 0 || partOfClass(cls[size_t(up)]) != p) gone[i] = true;
+        }
+    }
+    for (size_t i = 0; i < n; ++i)   // (what hangs from a cut part goes with it; the nodes come after their parents)
+        if (sk.nodes[i].parent >= 0 && gone[size_t(sk.nodes[i].parent)]) gone[i] = true;
 }
 
 } // namespace hotd::game

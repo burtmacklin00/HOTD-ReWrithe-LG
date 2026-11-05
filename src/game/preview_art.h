@@ -23,7 +23,14 @@ constexpr int kPreviewBridgeFrame = 4320;
 constexpr int kPreviewBridgeFireUntil = 4200;  // (the --autofire player before it, from the frog on the fountain; none after)
 constexpr int kPreviewRenderW = 960, kPreviewRenderH = 540;  // rendered at
 constexpr int kPreviewPicW = 480, kPreviewPicH = 270;        // kept / shown at
-enum PreviewKind { kPreviewBlood = 0, kPreviewModels = 1 };  // which base (frame, cut, aim)
+// fxux (user 2026-11-03: "add a preview picture per setting, from real game pictures"): Video > Hit Marks' and
+// Transparency's pictures, from the same Chapter 1 run as the bridge's (the --autofire player, frames from the
+// chapter's start): kPreviewMarksFrame, player 1 just hit (the 2D marks over the zombie's face, drawn once per choice);
+// kPreviewTranspFrame, the blood pools on the bridge to the mansion (a second run, the --autofire player all the way) (the 3D drawn once per Transparency mode, the arcade
+// models only: the PC's have no see-through edges). Their cuts are 1:1 (marks) and 3x (pools) so the dots show
+constexpr int kPreviewMarksFrame = 1992;
+constexpr int kPreviewTranspFrame = 9066;
+enum PreviewKind { kPreviewBlood = 0, kPreviewModels = 1, kPreviewMarks = 2, kPreviewTransp = 3 };  // which base (frame, cut, aim)
 
 struct PreviewImg {
     std::vector<uint8_t> rgba;
@@ -33,6 +40,8 @@ struct PreviewImg {
 // the render (kPreviewRenderW x kPreviewRenderH RGB rows, top first) cut to the kind's zombie and researchers and
 // scaled to kPreviewPicW x kPreviewPicH RGBA
 PreviewImg previewCrop(const std::vector<uint8_t>& rgb, int w, int h, int kind);
+// fxux: the marks' / the pools' cut (kPreviewMarks / kPreviewTransp): kPreviewPicW x kPreviewPicH, nearest pixels
+PreviewImg previewCropFx(const std::vector<uint8_t>& rgb, int w, int h, int kind);
 // the blood colour of a Blood Color value (0-4 the presets as deep as the red; 5 custom: customRgb 0xRRGGBB)
 uint32_t previewBloodRgb(int blood, int customRgb);
 // the shot: a blood burst in rgb (0: none) and the sight (art.w 0: none) on the kind's zombie

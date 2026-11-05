@@ -4,6 +4,61 @@ All notable changes for players. The format follows [Keep a Changelog](https://k
 follow [Semantic Versioning](https://semver.org/). The game shows this version's section once after an update and in
 Options > System > What's New.
 
+## [1.2.0] - 2026-11-03
+
+### Added
+- Linux, Steam Deck (SteamOS) and macOS packages next to the Windows one. The Linux package runs on glibc 2.31 and
+  newer (SteamOS 3, Ubuntu 20.04+, Mint 20+); the macOS one is a universal app (Apple silicon and Intel, unsigned:
+  right-click > Open the first time). The install steps are in each package's README.
+- Survival Mode (More Modes > Survival), **Very Experimental / Proof of Concept**: endless rounds that keep getting
+  harder, points for hits and kills to spend between rounds (ammo, the SMG, a life, perks), reloading by hand, three
+  lives, its own high scores. Expect rough edges.
+- Two built-in mods (Options > Mods, off by default): Rainbow Blood (#8: all the blood, the wounds and the blood marks
+  cycle through the colours, with speed and style settings, optionally the HUD and crosshairs too) and Big Head (#10:
+  big heads on the creatures, the bosses and, by default, the people too; also in the Gallery).
+- Light guns: Options > Video > Show Crosshairs Off (or Off per player) to play without a crosshair, and Shot Flash
+  Size (Small / Arcade / Large; Arcade is the original size at any resolution). CPU teammates' shot flashes follow
+  Teammate Crosshair Flashes.
+- Settings during play: the pause menu opens the settings.
+- Options > Video > Game Gamma and Menu Gamma (#23): brighter (or darker) dark tones for the game and for the menus
+  separately; 1.00 is the original picture.
+- Options > Video > Transparency (Auto, Arcade Dots, Smooth, Smooth with Dark Edges) for blood splats and puddles, and
+  Hit Marks (Arcade Dots or Smooth, #35), with pictures in the menu that show the difference.
+- CPU teammates: computer players in the other seats (Easy, Normal, Hard, Expert) that shoot the creatures, the bats
+  and the bosses' weak points.
+- 16 languages: English plus Arabic, Chinese (Simplified), French, German, Hebrew, Indonesian, Italian, Japanese,
+  Korean, Polish, Portuguese (Brazil), Russian, Spanish, Turkish and Vietnamese (most are machine-translated:
+  corrections are welcome).
+- Lives (#30, #25): Starting Lives and Max Lives as two settings, up to 9 lives (more than 5: one torch and "x N").
+- A 1-player game in player 2's seat (#29), as the arcade's 2P start alone.
+- Chapter Retry (#5): retry the chapter from the pause menu and after a game over.
+- Separate stick, gyro, trackpad and mouse sensitivities (#36).
+- Gallery: the blood options (Blood Color, a custom colour, Rainbow Blood, Blood Particles) and each body part's
+  damage and part-loss models, on their own panels.
+
+### Changed
+- The menus' text stays where it belongs: long labels in More Modes fit their buttons (smaller or on wider buttons),
+  the classic menu's long lists no longer run into the help line, the Gallery's top hint wraps above the stage, its
+  Viewer / Blood / Damage tabs are bigger and easier to point at, and the bosses' weak-point picture no longer covers
+  the settings under it or cuts the description short.
+
+### Fixed
+- Gallery (#4): the creatures' names corrected and the missing ones added (Ebitan A / B / C, Neopetit 2 / 3, Parlor,
+  Devilon and others; the fish is an item). With Rainbow Blood the bosses now change colour too (the Chariot without
+  its armour, the Hermit), and the pale pink wound stripes (Harris's chest and arms) cycle with the rest.
+- The hit screen shake is drawn again (#35).
+- The ending (#34, #7): the cut-scene bars and the ranking card's black bands go away when the ending starts; the
+  staff roll is centred, and in widescreen only its right side is black.
+- The shot flash stayed glued to the screen with Smooth Motion (#22).
+- The mouse stayed locked in the middle of the window after a restart from the game over (#31).
+- Red specks in some arcade colours (#28).
+- PC models: the punch's hit mark is the PC's own splat, not claw marks (#9).
+- PC sound: the chainsaw and electric sounds popped (#3).
+- Setup: importing loose arcade ROM files (a folder or an unpacked archive) found only 4 of the 29 files.
+- Attract demo: fully uncensored as on the 1998 PC with Attract Gore (the default): the sewer researcher and the
+  blood pool in the prologue are back, and the prologue's hostage close-up uses the PC's camera. Off plays Revision A.
+- Gameplay > Edge Reload works in PC Mode too (#42), reloading to the character's full load.
+
 ## [1.1.0] - 2026-11-02
 
 ### Added

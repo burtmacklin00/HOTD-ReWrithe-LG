@@ -153,7 +153,16 @@ std::string fetchLatest()
             [&](const char* d, size_t n) { body.append(d, n); return body.size() < (2u << 20); }, nullptr, true);
     return body;
 #else
-    return {};
+    // linux (2026-11-03): the system's curl (on every desktop distribution, SteamOS and macOS; no TLS library of our
+    // own); the address is a constant (no player text reaches the shell). No curl: no check
+    std::string body;
+    if (FILE* p = popen("curl -fsSL --max-time 20 -H 'Accept: application/vnd.github+json' "
+                        "https://api.github.com/repos/TawhidI-602/The-House-of-the-Dead-ReWrithe/releases/latest 2>/dev/null", "r")) {
+        char buf[4096];
+        for (size_t n; (n = std::fread(buf, 1, sizeof buf, p)) > 0 && body.size() < (2u << 20);) body.append(buf, n);
+        if (pclose(p) != 0) body.clear();
+    }
+    return body;
 #endif
 }
 
@@ -214,7 +223,6 @@ long long versionNumber(const std::string& v)
 void updateCheckStart(const char* currentVersion)
 {
     if (gStarted.exchange(true)) return;
-#ifdef _WIN32
     std::string cur = currentVersion ? currentVersion : "";
     std::thread([cur]() {
         const std::string body = fetchLatest();
@@ -242,9 +250,6 @@ void updateCheckStart(const char* currentVersion)
             gNewer = true;
         }
     }).detach();
-#else
-    (void)currentVersion;
-#endif
 }
 
 bool updateAvailable(std::string& tag)

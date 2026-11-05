@@ -402,6 +402,19 @@ Results: the whole game with `--players 4 --autofire --lives-kept 1`: Chapters 1
     hash, 40000 frames; four PCs (`tools/netplay4_test.ps1`, host seats 3 / 4 CPU, the fourth PC joining late): ok.
     Crosshair renders (`--render --shot-at`, not in git): the CPU sights glide onto the bats / the barrel zombies and
     split over them.
+- **Everything shootable, a harder Hard and CPU Expert (worker "team", 2026-11-03; trailer comments: "they don't shoot
+  the bats or the worms, and not the Chariot's weak point").** game/bot.cpp:
+  - Creatures without a body (the bats, kinds 66-68) run their own hit check (`bat_hit_check`: the shot flag, any
+    time), not `enemy_part_hits`' camera stop: the teammates now shoot them while the camera moves, and count them in
+    the fight within 200 units (they take no attack position).
+  - The teammates shoot what the player sees: `Bot::setHalfW` (the window's game area each frame, `gameHalfW`; headless
+    the Aspect on a 16:9 screen), so the widescreen sides too (the clamps at +-246 went with it).
+  - Hard: reaction 15 -> 11 frames, a 18-unit flick, settle 6 -> 3.5, shake 2.5 -> 1.6, the hand following a moving
+    spot 95 % (was 85 %: the Chariot's small, moving hit box was trailed and missed). New level 4 Expert (Options >
+    Players "CPU Expert", `--seat-bot P:4`, launcher.ini `p2bot=4`): reaction 8, flick 24, shake 1.0, no lapses.
+  - `TEAM` line: `KILLS bats k/n small k/n projectiles k/n enemies k/n boss_hits h boss_damage d` (a kill: a CPU hit,
+    `Game::stat_last_hit`, then the thing down or gone within 60 frames; n: how many appeared; boss damage: the boss's
+    hit points lost within 2 frames of a CPU hit). 1 player idle + CPU P2, Chapters 1-4: STATUS of the worker.
 - **Not done:** 3P / 4P on the results and name-entry screens; four bodies in the cut-scenes (phase 6); online 4
   (phase 7). (The keyboard for players 3 / 4: section 12.)
 

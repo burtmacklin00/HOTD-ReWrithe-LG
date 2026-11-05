@@ -142,6 +142,9 @@ def _thumb(img, n=24):
 OVERRIDES = {**{a: 0x422 + a - 0xE4 for a in range(0xE4, 0x106)}, 0xA1: 0, 0xA2: 0, 0xA6: 0,
              # hangfix: the Magician's title line "Magician TYPE 0" (the thumbnails took the Hangedman's 0x50B)
              0xE2: 0x50D,
+             # bugs2 (#9): the hit marks 0x28..0x2D are the PC's 0x47E..0x483 in order (the PC's hit-notice table
+             # 0x5F2DEC = the arcade's 0xCA5FC entry for entry); the thumbnails took the claws 0x480 for the punch 0x2C
+             **{0x28 + k: 0x47E + k for k in range(6)},
              # the game-over route map 0x243.. (map parts 0x243-0x246, trail pieces 0x247-0x267): the PC's own set 0x63A..
              # (the PC route task 0x4B16D4 loads banks 0x63A / 0x63E where the arcade's 0x5CF50 loads 0x243 / 0x247; the
              # PC's route records 0x5EA064 / reveal records 0x5E9FE0 = the arcade's 0xC1810 / 0xC1790 with ids + 0x3F7)

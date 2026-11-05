@@ -20,7 +20,8 @@ namespace hotd::game {
 struct MenuCursorConfig {
     bool touchpad = true;   // launcher.ini touchcursor=
     int gyro = 1;           // 0 off, 1 while ZL / L2 / LT is held, 2 always (launcher.ini gyrocursor=)
-    int speed = 5;          // 1-10 (launcher.ini cursorspeed=)
+    int speed = 5;          // 1-10: the touchpad's (launcher.ini cursorspeed=)
+    int gyroSpeed = 5;      // 1-10: the gyro's (GitHub #36; launcher.ini gyrocursorspeed=, missing: cursorspeed=)
 };
 
 class MenuCursor {

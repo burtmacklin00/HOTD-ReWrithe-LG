@@ -88,6 +88,8 @@ template <class P> void Game<P>::player_hit(int player, int shake, int side)
         return;
     if (mem.at<uint16_t>(G::game_mode) == 3)
         return;
+    if (gHitHold && gHitHold(player))   // (ours: The Typing of the Dead 0's boss window, game.h; null in the arcade)
+        return;
     player_hit_take(player, shake, side);
     mem.at<int32_t>(invuln_at(player)) = 0x5A;
     player_hit_keep_life(player);

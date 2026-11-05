@@ -50,6 +50,26 @@ PreviewImg previewCrop(const std::vector<uint8_t>& rgb, int w, int h, int kind)
     return o;
 }
 
+PreviewImg previewCropFx(const std::vector<uint8_t>& rgb, int w, int h, int kind)
+{
+    // (render pixels of kPreviewRenderW x kPreviewRenderH; marks: 1:1 round the zombie's face, pools: 3x the bridge's)
+    struct Fx { int x, y, s; };
+    const Fx c = kind == kPreviewMarks ? Fx{250, 40, 1} : Fx{350, 262, 3};
+    PreviewImg o;
+    const int cw = kPreviewPicW / c.s, ch = kPreviewPicH / c.s;
+    if (w < c.x + cw || h < c.y + ch || rgb.size() < size_t(w) * size_t(h) * 3)
+        return o;
+    o.w = kPreviewPicW, o.h = kPreviewPicH;
+    o.rgba.assign(size_t(o.w) * size_t(o.h) * 4, 255);
+    for (int y = 0; y < o.h; ++y)
+        for (int x = 0; x < o.w; ++x) {
+            const uint8_t* p = &rgb[(size_t(c.y + y / c.s) * size_t(w) + size_t(c.x + x / c.s)) * 3];
+            uint8_t* d = &o.rgba[(size_t(y) * size_t(o.w) + size_t(x)) * 4];
+            d[0] = p[0], d[1] = p[1], d[2] = p[2];
+        }
+    return o;
+}
+
 uint32_t previewBloodRgb(int blood, int customRgb)
 {
     if (blood == 5) {   // (Frontend::bloodColour's custom: its brightest channel at the red's level)

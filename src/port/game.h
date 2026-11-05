@@ -18,6 +18,22 @@
 
 namespace hotd::port {
 
+// The Typing of the Dead 0 (ours, game/typing.h, user 2026-11-03: "a clear window before it hits"): asked by the
+// standard enemy's attack choice (enemy_ai states 5 / 6) and pick_target_player whether this creature's attack waits
+// (true: no free player for it this frame). Set only for the ticks of a Typing of the Dead 0 game; null everywhere
+// else (the arcade, PC Mode, the proofs: nothing changes). damage.cpp
+extern bool (*gAttackHold)(uint32_t obj);
+// and (player_hit) whether a hit on this player is held: in a boss fight a hit lands only once a sentence's window ran
+// out (TotD: the boss strikes when its sentence was not typed in time). Null outside those ticks
+extern bool (*gHitHold)(int player);
+// and (totd2, user 2026-11-03: "the grabbed researchers can't be saved") whether a creature that reached the researcher
+// it chases waits before its bite / strike (its prompt's rescue timer has not run out): the run-after routines'
+// arrival tests (enemy_actions.cpp). Null outside those ticks
+extern bool (*gPreyHold)(uint32_t obj);
+// Gameplay "Attract Gore" (default on): the attract's hit parts and blow-offs (damage.cpp) and the prologue's sewer
+// corpses (event.cpp evt_attract_restore) as the 1998 PC; off: Revision A exactly
+extern bool gAttractGore;
+
 template <class P> class Game {
 public:
     HOTD_LAYOUT_TYPES
@@ -118,6 +134,10 @@ public:
     // four: the event's opening section, its BGTB / GGCOL / the boss song) where the arcade's evt_chapter_start starts
     // a game at section 1; evt_chapter_start takes it once. Set by the runtime; false in the proofs
     bool startAtSection0 = false;
+    // Survival Mode (ours, game/survival.h): told of each object the spawn opcodes ENTB / ENTB3 / ENTBE made (its fields set,
+    // before it first runs). Nothing here: the runtime's Survival Mode captures the lead-in's creature spawns (their places
+    // become the arena's spawn points). A normal game and the proofs: no effect
+    virtual void evt_spawned(uint32_t task, uint32_t rec) { (void)task, (void)rec; }
     bool coop4_on() const
     {
         if constexpr (Seats<P>::max == 4)
@@ -572,8 +592,30 @@ public:
     // carchars (draws only): player_char_props_draw is about to draw seat `seat`'s car model; the runtime notes the
     // draw to put the seat's own character there after the frame (nothing in the game state)
     virtual void car_seat_mark(int seat) { (void)seat; }
-    // the gun's full load: 6, in PC Mode the seat's character's rounds (+0x24, low byte)
-    uint8_t pm_full_rounds(int p) const { return pm_on() ? uint8_t(pm_table(pm_seat_char(p)).rounds) : uint8_t(6); }
+    // the gun's full load: 6, in PC Mode the seat's character's rounds (+0x24, low byte); Survival Mode: the seat's
+    // magazine (survivalRounds: the handgun's or the SMG's, the Big Mag perk's)
+    uint8_t pm_full_rounds(int p) const
+    {
+        return survivalRounds[p & 3] ? uint8_t(survivalRounds[p & 3]) : pm_on() ? uint8_t(pm_table(pm_seat_char(p)).rounds) : uint8_t(6);
+    }
+    int survivalRounds[4] = {};   // Survival Mode (game/survival.h): each seat's magazine; 0 everywhere else (set by the runtime)
+    // Survival Mode (survival2, user 2026-11-03: points as in Call of Duty's Zombies): enemy_part_hits tells the runtime
+    // of each frame a creature was hit (the seats whose shots hit it: bits; its killer when the hits killed it, else -1;
+    // the seats that hit its head, part class 1: bits) and the game's own add_score does nothing (the score is
+    // Survival's points). survivalScoring false (every other game, the proofs): neither
+    bool survivalScoring = false;
+    uint32_t survivalHitSeats = 0;   // (part_hit: the seats whose shots hit a part of the creature this frame; read only by Survival)
+    virtual void survival_hits(uint32_t obj, uint32_t seats, int killer, uint32_t headSeats) { (void)obj, (void)seats, (void)killer, (void)headSeats; }
+    // Survival Mode: body slots past the original's (player_bodies 0x51F440, 16 words: the creatures' slots 0-13, the
+    // players' bodies 14 / 15; a body's slot +0x2E6 also picks its place in the three skin buffers, 0x348 bytes a slot):
+    // slots 16.. in a table of the runtime's (extraBodyTable, extraBodySlots words), used only when 0-13 are all taken.
+    // 0 everywhere else: the original's 14 (a 15th creature got no slot and shared slot 0's skin and table entry)
+    int extraBodySlots = 0;
+    uint32_t extraBodyTable = 0;
+    uint32_t body_slot_addr(int32_t slot) const
+    {
+        return extraBodySlots && slot >= 16 ? extraBodyTable + 4 * uint32_t(slot - 16) : G::player_bodies + 4 * uint32_t(slot);
+    }
     // the runtime's reload timer (pc_reload_time 0x5CE4DC[p] on the PC): the frame clock in ms at the last reload
     // (0 = none), for the arcade logic; the runtime advances pm_clock_ms (1000 / 60 ms a frame)
     uint32_t pm_reload_at[4] = {};
@@ -581,6 +623,8 @@ public:
     // (shot_hit_nearest; scene items not counted) and the hostages / researchers shot. Never read by the game (not in
     // the rollback snapshot or the desync hash)
     uint32_t stat_hits[4] = {}, stat_hostages[4] = {};
+    // (team 2026-11-03) the object the seat's last hit landed on (a body part's owner): the CPU teammates' kill counts
+    uint32_t stat_last_hit[4] = {};
     // PC Mode's continues (docs/pcmode.md row 8): THOTD.EXE pc_continues_init 0x4488E4 gives credits = the Continues
     // option (0xD5B1E0, 0-9; set by the runtime) + 1, one pool for both players (0xDA0B98 = 0: always slot 0 of
     // 0xD9F790); a start, a join and a continue each cost 1 (0xDA0B7C / 0xDA0B88; 0x448934 takes them, never below

@@ -133,15 +133,18 @@ template <class P> void Game<P>::PlStartInit(uint32_t task, int how)
             mem.set32(rec + 0x14, lives);
             uint32_t icon = join::kLivesIcons + uint32_t(p) * 10;
             uint32_t i = 0;
+            // GitHub #25 (Max Lives up to 9): the icons stop at the five places a player has (10 bytes), the rest of
+            // the lives are counted by the HUD (hud_lives_draw); 5 or less as the arcade
+            const uint32_t places = 5;
             if (lives != 0) {
                 do {
                     ++i;
                     mem.template at<uint8_t>(icon) = 1;
                     mem.template at<uint8_t>(icon + 1) = 0x2D;
                     icon += 2;
-                } while ((i & 0xFF) < lives);
+                } while ((i & 0xFF) < lives && i < places);
             }
-            for (; (i & 0xFF) < mem.template at<uint8_t>(G::max_lives);) {
+            for (; (i & 0xFF) < mem.template at<uint8_t>(G::max_lives) && i < places;) {
                 ++i;
                 mem.template at<uint8_t>(icon) = 0;
                 mem.template at<uint8_t>(icon + 1) = 0x2D;

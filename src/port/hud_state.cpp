@@ -9,6 +9,7 @@ namespace hotd::port {
 
 namespace hud_detail {
 constexpr uint32_t kTileRam = 0x1000000, kTorches = 0x51F5C0, kPopups = 0x51F480;
+constexpr int kTorchPlaces = 5;   // GitHub #25: a player's torch places (10 bytes at 0x51F5C0); Max Lives goes to 9
 } // namespace hud_detail
 
 // 0x94740 hud_lives_draw (player task): the torches; a lit one flickers (6 frames a step, 7 steps, each torch its own
@@ -22,9 +23,19 @@ template <class P> void Game<P>::hud_lives_draw(uint32_t task)
     } else {
         const int p = mem.template at<int8_t>(task + 0x20);
         const uint32_t pl = G::players + uint32_t(p) * 0xCC;
-        const int n = mem.template at<uint8_t>(G::max_lives);
+        // GitHub #25 (Max Lives up to 9): five torch places (10 bytes a player at 0x51F5C0); more than 5 lives: the
+        // first torch alone, the others' cells cleared (the HUD draws "x N" there, Hud::drawLivesCount); at 5 or less
+        // they come back lit (their base flashes in as a new one's). Max Lives 5 or less: as the arcade
+        const int n = std::min<int>(mem.template at<uint8_t>(G::max_lives), kTorchPlaces);
+        const bool count = int32_t(mem.u32(pl + 0xC)) > kTorchPlaces;
         for (int i = 0; i < n; ++i) {
             const uint32_t lit = kTorches + uint32_t(p) * 10 + uint32_t(i) * 2, burn = lit + 1;
+            if (count && i > 0) {
+                mem.template at<int8_t>(lit) = 0;
+                mem.template at<int8_t>(burn) = 42;
+                tilemap_clear_rect(kTileRam, p == 0 ? 6 + 4 * i : 0x34 - 4 * i, 0x2A, 4, 3);
+                continue;
+            }
             bool fresh = false;
             if (int32_t(mem.u32(pl + 0xC)) < i + 1) {
                 if (mem.template at<int8_t>(lit) != 0) {
@@ -137,7 +148,7 @@ template <class P> void Game<P>::hud_player_start_draw(uint32_t task)
         hud_start_prompt(p, 0, 0);
         const uint32_t row = 0xCA6D0 + uint32_t(p) * 12;
         sprite_draw_anim(kTileRam, 1, 0, int(mem.u32(row)), 0x2A, mem.u32(row + 8));
-        const int n = mem.template at<uint8_t>(G::max_lives);
+        const int n = std::min<int>(mem.template at<uint8_t>(G::max_lives), kTorchPlaces);   // (#25)
         for (int i = 0, x = 0; i < n; ++i, x += step) {
             const uint32_t lit = kTorches + uint32_t(p) * 10 + uint32_t(i) * 2;
             if (mem.template at<int8_t>(lit) != 0) {
@@ -241,7 +252,7 @@ template <class P> void Game<P>::hud_player_full_draw(uint32_t task)
         (void)task;
     } else {
         const int p = mem.template at<int8_t>(task + 0x20);
-        const int n = mem.template at<uint8_t>(G::max_lives);
+        const int n = std::min<int>(mem.template at<uint8_t>(G::max_lives), kTorchPlaces);   // (#25)
         if (p == 0) {
             sprite_draw(kTileRam, 2, 0x2A, 0xE);
             for (int i = 0; i < n; ++i) {

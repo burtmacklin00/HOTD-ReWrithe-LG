@@ -14,6 +14,9 @@ struct PcConfig {
     int blood = 0;            // blood colour 0 red (default) .. 3 purple (the launcher setting); -1: the install's TEXTURE.VMC;
                               // kBloodCustom | 0xRRGGBB (display, experimental): B_RED's blood texels tinted to that colour
     static constexpr int kBloodCustom = 0x1000000;
+    // cosmods: with kBloodCustom (white): the tinted blood texels get alpha kRainbowAlpha (render/renderer.h), the
+    // Rainbow Blood mod colours them in the renderer
+    static constexpr int kBloodRainbow = 0x2000000;
 };
 
 // display2: the given BIGGER.VMC pages as the PC game draws them with blood colour `blood` (PcConfig::blood): from

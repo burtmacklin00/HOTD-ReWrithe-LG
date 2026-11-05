@@ -406,20 +406,62 @@ static ModPack builtinRagdoll()
     return p;
 }
 
+// cosmods (GitHub #8 / #10, 2026-11-03): the built-in cosmetic mods' manifests (the same as data\mods\rainbow-blood
+// and data\mods\big-head\mod.ini; game/cosmods.h)
+static ModPack builtinCosmetic(const std::string& type)
+{
+    ModPack p;
+    p.author = "ReWrithe";
+    p.version = "1";
+    p.type = type;
+    p.defaultOn = false;
+    p.builtin = true;
+    p.targets = 3;
+    std::vector<std::pair<const char*, const char*>> settings;
+    if (type == "rainbowblood") {
+        p.id = "rainbow-blood";
+        p.name = "Rainbow Blood";
+        p.description = "The blood, the gore and the blood marks cycle through the colours of the rainbow (visual only)";
+        settings = {{"colours", "Colours | Each Splash | Each Splash, Together | Each Splash: every splash and wound its own colour; Together: all blood one colour at a time"},
+                    {"speed", "Speed | Normal | Still, Slow, Normal, Fast | How fast the colours change"},
+                    // (user 2026-11-03: each creature its own colour for its painted wounds, chosen when it appears)
+                    {"creature", "Creature Blood | Rainbow Cycle | Rainbow Cycle, Own Colour Each, Off | The wounds painted on each creature: cycling with the rest, its own colour for its whole life, or as the game paints them"},
+                    // rainbow2 (user 2026-11-03): the players' sights and / or HUD in the rainbow too
+                    {"hud", "HUD & Crosshair | Off | Off, Crosshair, HUD, Both | The players' crosshairs (each player its own phase) and / or HUD (bullets, 1P / 2P, torches, the score) in the rainbow too"}};
+    } else {
+        p.id = "big-head";
+        p.name = "Big Head";
+        p.description = "Big Head mode: the creatures' heads drawn big, the classic cheat (visual only: they are hit where the heads really are)";
+        settings = {{"size", "Head Size | 2x | 1.5x, 2x, 3x | How big the heads are"},
+                    {"who", "Heads | Everyone | Enemies, Everyone | Everyone: the people too (Rogan and G in the cut-scenes, Sophie, the researchers)"},
+                    {"bosses", "Bosses | On | On, Off | The bosses' heads too"}};
+    }
+    for (const auto& [k, v] : settings) {
+        ModSetting st;
+        if (parseModSetting(k, v, st)) p.settings.push_back(st);
+    }
+    return p;
+}
+
 std::vector<ModPack> findMods(const std::vector<std::string>& roots)
 {
     std::vector<ModPack> all = findModPacks(roots);
     // ragdoll2: a Ragdoll folder from an older version (its mod.ini without a newer setting, e.g. Dismemberment) gets
     // the built-in's missing settings after its own
+    // (cosmods: the same for Rainbow Blood / Big Head, e.g. Creature Blood)
     for (ModPack& p : all)
-        if (p.type == "ragdoll")
-            for (const ModSetting& b : builtinRagdoll().settings)
+        if (p.type == "ragdoll" || p.type == "rainbowblood" || p.type == "bighead")
+            for (const ModSetting& b : (p.type == "ragdoll" ? builtinRagdoll() : builtinCosmetic(p.type)).settings)
                 if (std::none_of(p.settings.begin(), p.settings.end(), [&](const ModSetting& q) { return q.key == b.key; }))
                     p.settings.push_back(b);
-    if (std::none_of(all.begin(), all.end(), [](const ModPack& p) { return p.type == "ragdoll"; })) {
-        all.push_back(builtinRagdoll());
+    bool added = false;
+    if (std::none_of(all.begin(), all.end(), [](const ModPack& p) { return p.type == "ragdoll"; }))
+        all.push_back(builtinRagdoll()), added = true;
+    for (const char* t : {"rainbowblood", "bighead"})   // cosmods
+        if (std::none_of(all.begin(), all.end(), [t](const ModPack& p) { return p.type == t; }))
+            all.push_back(builtinCosmetic(t)), added = true;
+    if (added)
         std::sort(all.begin(), all.end(), [](const ModPack& a, const ModPack& b) { return lower(a.id) < lower(b.id); });
-    }
     return all;
 }
 
@@ -474,8 +516,9 @@ std::vector<ModPack> findModPacks(const std::vector<std::string>& roots)
                         p.targets = m == "pc" ? 1 : m == "arcade" ? 2 : 3;
                     } else if (k == "type") {
                         p.type = lower(v);
-                        if (p.type != "textures" && p.type != "ragdoll")
-                            std::fprintf(stderr, "mods: %s: type = %s: textures or ragdoll (docs/modding.md)\n", p.id.c_str(), v.c_str());
+                        if (p.type != "textures" && p.type != "ragdoll" && p.type != "rainbowblood" && p.type != "bighead")
+                            std::fprintf(stderr, "mods: %s: type = %s: textures, ragdoll, rainbowblood or bighead (docs/modding.md)\n",
+                                         p.id.c_str(), v.c_str());
                     } else if (k == "default") {
                         const std::string m = lower(v);
                         p.defaultOn = !(m == "off" || m == "0" || m == "no");

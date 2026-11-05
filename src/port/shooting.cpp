@@ -265,6 +265,7 @@ template <class P> void Game<P>::shot_hit_nearest(int player)
     }
     if (((c.flags >> 4) & 1) == 0) {
         ++stat_hits[player & 3];   // (testing only)
+        stat_last_hit[player & 3] = ((c.flags >> 9) & 1) ? uint32_t(mem.at<BodyPart>(c.target.a).owner.a) : c.target.a;
         if (((c.flags >> 9) & 1) == 0) {
             Obj& o = mem.at<Obj>(c.target.a);
             o.flags = bit | o.flags | 0x100;

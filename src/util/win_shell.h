@@ -14,16 +14,19 @@ ShortcutResult createShortcut(const std::string& folder, bool startMenu, const s
                               std::string& msg);
 
 // setup2 (the installer): a shortcut "<linkFolder>/<name>.lnk" to `target` (working folder = target's folder, icon =
-// iconFile or the target). Windows only (elsewhere Failed). `made`: the .lnk's path
+// iconFile or the target). Linux: "<linkFolder>/<name>.desktop" (icon: iconFile when a .png); macOS: Failed. `made`: its path
 ShortcutResult createShortcutTo(const std::string& linkFolder, const std::string& name, const std::string& target,
                                 const std::string& iconFile, std::string& made, std::string& msg);
-// the user's Desktop and Start menu Programs folders (Windows; else "")
+// the user's Desktop and Start menu Programs folders (Linux: ~/Desktop and ~/.local/share/applications; macOS: "")
 std::string desktopFolder();
 std::string startMenuFolder();
 // starts a program (not waited for); args: the command line after the program's quoted name
 bool launch(const std::string& exe, const std::string& args, const std::string& workDir);
 // runs a program without a window and waits for it (at most `seconds`); its exit code, -1: not started / timed out
+// (Linux / macOS: args split as on Windows, "quoted parts" kept whole; no shell)
 int runHidden(const std::string& exe, const std::string& args, int seconds);
+// a program's full path: a path as it is when it runs, else the first one on PATH ("" when none)
+std::string findProgram(const std::string& name);
 
 // this program's own path (Windows: GetModuleFileName; Linux: /proc/self/exe; macOS: _NSGetExecutablePath)
 std::string selfExePath();

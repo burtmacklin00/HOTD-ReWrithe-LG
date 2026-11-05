@@ -56,7 +56,7 @@ void RuntimeState::save(game::Runtime& rt)
     pcCells_ = rt.pcCells, pcClip_ = rt.pcClip;
     pcTexts_ = rt.pcTexts;
     pcNameModels_ = rt.pcNameModels;
-    cellSide_ = rt.cellSide, cellText_ = rt.cellText;
+    cellSide_ = rt.cellSide, cellText_ = rt.cellText, cellHud_ = rt.cellHud;
     std::copy(rt.light, rt.light + 3, light_);
     focal_ = rt.focal;
     fade__ = rt.fade_;
@@ -123,7 +123,7 @@ void RuntimeState::restore(game::Runtime& rt) const
     rt.pcCells = pcCells_, rt.pcClip = pcClip_;
     rt.pcTexts = pcTexts_;
     rt.pcNameModels = pcNameModels_;
-    rt.cellSide = cellSide_, rt.cellText = cellText_;
+    rt.cellSide = cellSide_, rt.cellText = cellText_, rt.cellHud = cellHud_;
     std::copy(light_, light_ + 3, rt.light);
     rt.focal = focal_;
     rt.fade_ = fade__;

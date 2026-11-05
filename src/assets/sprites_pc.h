@@ -49,8 +49,22 @@ public:
     // pchotfix: sprite id has pieces and every one of their pages was read (false: not drawn, or only in part: another
     // version of SPR.RBH / BIGGER.VMC, or a damaged one)
     bool drawable(int id) const;
+    // rainbow2 (the Rainbow Blood mod, game/cosmods.h): the next draws' texels recoloured, rgb 0..1 (null: off). mode 1
+    // the red share of each texel (blood art: the hit marks; the grey under it kept), 2 each texel's brightest channel
+    // (the HUD: its shading kept)
+    void setTint(int mode, const float* rgb);
+    // and every sprite's blood texels (those that differ between the blood sets: the GAME OVER screen's blood) in rgb
+    // by their brightest channel (null: off); the texels are found on the first call after a load
+    void setBloodTexelTint(const float* rgb);
 
 private:
+    static void tintTexel(uint8_t* d, int mode, const float rgb[3]);
+    int tintMode_ = 0;
+    float tint_[3] = {}, bloodTex_[3] = {};
+    bool bloodTexOn_ = false, bloodMaskTried_ = false;
+    std::map<int, std::vector<uint8_t>> bloodMask_;   // page -> 256 x 256 bytes, 1 = a blood texel
+    std::string dir_;
+    std::vector<uint8_t> tbl_, pal_;
     struct Piece {
         int16_t x0, y0, x1, y1;
         uint8_t u, v;

@@ -71,7 +71,8 @@ int Frontend::glyph(uint8_t c, uint32_t flags)
     if (c >= 0x20 && c <= 0x7E)
         i = c - 0x20;
     else if (c >= 0xBF && c != 0xFF)
-        i = c - 0xBF;   // as the original (its accented glyphs follow '~' in each font)
+        i = 0x5F + (c - 0xBF);   // its accented glyphs follow '~' in each font (95 + 64 = 0x9F glyphs a font;
+                                 // before 2026-11-03 this was c - 0xBF, which drew ú as '[' and ó as 'T')
     else
         return 0;
     if ((flags & 0x20000) && (flags & 0x80000))
@@ -386,6 +387,9 @@ void Frontend::drawText(Widget& w)
     int tw, th;
     measureRaw(s, w.flags, tw, th);
     const render::TtfText* tf = lang::fontFor(s);
+    if (!tf && w.fitFont && w.fitW > 0 && tw > w.fitW)   // (polish: the PC font too wide: data/fonts' font, fitted)
+        if ((tf = lang::anyFont()) != nullptr)
+            tw = int(std::ceil(tf->width(s, classicEm(w.flags, th, tf))));
     float shrink = 1.0f;   // leftovers: a translation wider than its cell (fitW): smaller
     if (tf && w.ttfScale < 1.0f) {   // (sweep2: rows closer than the font's height)
         shrink = w.ttfScale;
@@ -618,9 +622,13 @@ void Frontend::drawHelp()
     // (uxpolish: one line higher than before when the controls line hintFor() sits under it)
     const bool hint = !hintFor().empty();
     int y = lines.size() > 1 ? (hint ? 0x1B8 : 0x1C4) : (hint ? 0x1C2 : 0x1CA);
+    // polish (the sweep: the classic Gallery's key lines at 430 / 441 were drawn over by a two-line help, German and
+    // Russian worst): on that page under them, the lines 2 closer
+    const bool galleryKeys = screen_ == 17 && style != kStyleRemake;
+    if (galleryKeys) y = 453;
     for (const std::string& s : lines) {
         drawSmallRaw(s, y, false);
-        y += th + 4;
+        y += th + (galleryKeys ? 2 : 4);
     }
 }
 
@@ -907,7 +915,10 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
     if (grp == 1) {
         items.push_back({-1, "More Modes", "", nullptr});
         items.back().heading = true;
-        items.push_back({-1, "Chapter Select", "Start at any chapter", [this]() { screenChapters(); }});
+        items.push_back({-1, "Chapter Select", "Start at any chapter", [this]() {
+                             hordeChapters = false;
+                             screenChapters();
+                         }});
         items.push_back({-1, "Co-op", "2 players, 4 players or online",
                          onCoop ? std::function<void()>([this]() { const auto f = onCoop; f(); }) : nullptr});
         if (sonicValue)
@@ -916,6 +927,33 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
                                  if (onSonic) onSonic();
                                  screenMainMenu();
                              }});
+        if (startTotd)   // The Typing of the Dead 0 (game/typing.h): the game played by typing
+            items.push_back({-1, "Typing of the Dead 0", "Type the words over the enemies to shoot them (keyboard)",
+                             [this]() { const auto f = startTotd; f(); }});
+        if (startSurvival && survivalArenaValue) {   // Survival Mode (game/survival.h): the game (players asked first), its arena
+            // (polish, user 2026-11-03: in the release, labelled Very Experimental / Proof of Concept: the item's tag line,
+            // its help line, a notice when it starts: main.cpp)
+            items.push_back({-1, "Survival", "Very Experimental / Proof of Concept: endless rounds, points to spend between them, cut creatures; own high scores", [this]() {
+                                 askPlayers("Survival - " + survivalArenaValue(), [this]() { const auto f = startSurvival; f(); },
+                                            [this]() { screenMainMenu(); });
+                             }});
+            items.back().tag = kSurvivalTag;
+            items.push_back({-1, "Survival Arena: " + survivalArenaValue(), "Where the waves come (click: next arena)", [this]() {
+                                 if (onSurvivalArena) onSurvivalArena();
+                                 screenMainMenu();
+                             }});
+        }
+        if (hordeSizeValue) {   // Horde Mode (game/horde.h): the arcade game, more creatures at once; Chapter Select first
+            items.push_back({-1, "Horde", "The arcade game with many more zombies at once; own high scores", [this]() {
+                                 hordeChapters = true;
+                                 screenChapters();
+                             }});
+            items.push_back({-1, "Horde Size: " + hordeSizeValue(), "How many more creatures: Low 2x, Normal 3x, High 4x (click: next)",
+                             [this]() {
+                                 if (onHordeSize) onHordeSize();
+                                 screenMainMenu();
+                             }});
+        }
         items.push_back({-1, "Back", "Back to the main menu (Escape)", group(0)});
     } else if (grp == 2) {
         items.push_back({-1, "Extras", "", nullptr});
@@ -944,7 +982,9 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
         const auto boss = mode(startBossMode, 2), pc = ask("PC Mode", mode(startPcMode, 1));
         items.push_back({2, "", pc ? "The PC version's own mode" : "PC Mode: coming (not ported yet)", pc});
         items.push_back({0x42, "", boss ? "Fight the bosses one by one" : "Boss Mode: coming (not ported yet)", boss});
-        items.push_back({-1, "More Modes", "Chapter Select, Co-op, Sonic Mode", group(1)});
+        // (Survival / Horde named only when their items are there: the release builds leave them out, main.cpp)
+        items.push_back({-1, "More Modes", std::string("Chapter Select, Co-op, Sonic Mode") + (startSurvival ? ", Survival" : "") +
+                                               (hordeSizeValue ? ", Horde" : ""), group(1)});
         items.push_back({-1, "Extras", "Gallery, Jukebox", group(2)});
         items.push_back({0x43, "", "The top 10 tables", mainMenuEnabled[3] ? std::function<void()>([this]() { screenRanking(); }) : nullptr});
         items.push_back({6, "", "Difficulty, lives, volumes and all settings",
@@ -972,6 +1012,7 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
 // ---- screen_main_menu 0x4210FC (screen 1) ----
 void Frontend::screenMainMenu()
 {
+    hordeChapters = false;   // (Horde Mode's Chapter Select only from its item: the plain one is the arcade's)
     if (style == kStyleRemake) {   // remakemenu: the same items, the Remake style's layout
         remakeMainMenu();
         return;
@@ -996,7 +1037,8 @@ void Frontend::screenMainMenu()
         ++mainCount;
     // eight items at most: 28 apart from 0xC8 (the PC: 32 from 0xD0); SKIDMARX: 19 apart, so Cheat / Edit Char Stats /
     // Creature Test fit under Quit (pc_cheats.md)
-    const int step = debugItems_ ? 19 : 28;
+    // polish (the sweep: More Modes' ten items ran Back into the help line at 448): more than eight, closer together
+    const int step = debugItems_ ? 19 : mainCount > 8 ? 24 : 28;
     int y = 0;
     for (size_t k = 0; k < mainCount; ++k) {
         Item& it = items[k];
@@ -1013,6 +1055,19 @@ void Frontend::screenMainMenu()
         }
         setRect(item, 0, y, 0, 24);
         item->help = it.help;
+        if (!it.tag.empty()) {   // polish: Survival's "Very Experimental / Proof of Concept" in the small font beside it
+            int lw = 0, lh = 0, tw = 0, th2 = 0;
+            measure(it.name(), 0x20000, lw, lh);
+            measure(it.tag, 0x800000, tw, th2);
+            const int tx = kWidth / 2 + lw / 2 + 8;
+            if (tx + tw <= kWidth - 4) {
+                Widget* t = widgetNew();
+                addChild(list, t);
+                setRect(t, lang::rtl() ? kWidth - tx - tw : tx, y + 8, tw, th2);
+                texts_.push_back(it.tag);
+                setText(t, texts_.back(), 0x800000);
+            }
+        }
         if (it.heading)   // menu2: a group's heading, yellow, not a button
             item->draw = &Frontend::drawTextLit;
         if (it.act)
@@ -1127,7 +1182,7 @@ void Frontend::askPlayers(const std::string& mode, std::function<void()> go, std
     playersGet(n, bot);
     n = std::clamp(n, 1, 4);
     for (int p = 1; p < 4; ++p) {
-        pickBot_[p] = std::clamp(bot[p], 0, 3);
+        pickBot_[p] = std::clamp(bot[p], 0, 4);
         if (pickBot_[p] > 0)
             pickLevel_[p] = pickBot_[p];
     }
@@ -1141,8 +1196,8 @@ void Frontend::askPlayers(const std::string& mode, std::function<void()> go, std
 
 std::string Frontend::pickSeatText(int p) const
 {
-    static const char* const kLevel[4] = {"Human", "CPU Easy", "CPU Normal", "CPU Hard"};
-    return "Player " + std::to_string(p + 1) + ": " + kLevel[std::clamp(pickBot_[p], 0, 3)];
+    static const char* const kLevel[5] = {"Human", "CPU Easy", "CPU Normal", "CPU Hard", "CPU Expert"};
+    return "Player " + std::to_string(p + 1) + ": " + kLevel[std::clamp(pickBot_[p], 0, 4)];
 }
 
 void Frontend::pickPlayers(int n, bool toStart)
@@ -1157,7 +1212,7 @@ void Frontend::pickSeat(int p)
 {
     if (p < 1 || p > 3)
         return;
-    pickBot_[p] = pickBot_[p] > 0 ? 0 : std::clamp(pickLevel_[p], 1, 3);
+    pickBot_[p] = pickBot_[p] > 0 ? 0 : std::clamp(pickLevel_[p], 1, 4);
     walking_ = false;
     screenPlayers();
 }
@@ -1683,7 +1738,19 @@ void Frontend::screenGallery()
     }
     text(g.pad ? "LB/RB: entry  L3: category  sticks: turn, pan  LT/RT: zoom  X: motion  Start: hide UI"
                : "Q/E: entry  Tab: category  drag: turn  right drag: pan  wheel: zoom  Space: motion  T: hide UI",
-         0, 434, 0, 12, 0x800020);
+         0, 430, 0, 12, 0x800020);   // (polish: 4 higher, and the next one: the help line under them, not over them)
+    // gallery blood / gallery dismemberment: the Gallery's own blood settings and the body parts' damage (keys), their
+    // state over the window's top left
+    if (!g.pad)
+        text("G: blood colour  N: rainbow  J: particles  Z: body part  X: its damage  Shift+Z: all whole", 0, 441, 0, 12, 0x800020);
+    {
+        std::string s = T("Blood:") + " " + T(g.blood) + g.bloodHex() + (g.particles ? std::string() : " " + T("(no particles)")) + "   ";
+        if (!g.damageNote.empty())
+            s += T(g.damageNote);
+        else if (size_t(g.damagePart) < g.partNames.size() && size_t(g.damagePart) < g.partStates.size())
+            s += T(g.partNames[size_t(g.damagePart)]) + ": " + T(g.partStates[size_t(g.damagePart)]);
+        text(s, r[0] + 4, r[1] + 3, r[2] - 8, 12, 0x800000)->raw = true;   // (inside the window, over the model's backdrop)
+    }
     // the 3D window (added last: drawn first, under the texts)
     Widget* hole = widgetNew();
     addChild(root, hole);
@@ -1764,12 +1831,27 @@ void Frontend::screenScenes()
         galleryColumn(root, cats, int(cats.size()));
     }
     const int half = (int(s.rows.size()) + 1) / 2;
+    // polish (the sweep: "2-21 The Hangedman's defeat" ran off the screen's right edge, the PC font cannot be made
+    // smaller): the second column starts right after the first column's longest row (not at the page's middle), as far
+    // left as the page's middle less 40
+    int col2 = pw / 2;
+    {
+        int longest = 0;
+        for (int i = 0; i < half && i < int(s.rows.size()); ++i) {
+            int tw = 0, th = 0;
+            measure("> " + s.rows[size_t(i)], 0x20000, tw, th);
+            longest = std::max(longest, tw);
+        }
+        col2 = std::clamp(longest + 14, pw / 2 - 40, pw / 2);
+    }
     for (int i = 0; i < int(s.rows.size()); ++i) {
         const int col = i / std::max(half, 1), row = i % std::max(half, 1);
         const bool sel = i == s.selected;
-        Widget* w = text((sel ? "> " : "  ") + s.rows[size_t(i)], x0 + col * (pw / 2), 0x46 + row * 23, pw / 2, 22,
+        const int cx = col ? col2 : 0, cw = col ? pw - col2 : col2;
+        Widget* w = text((sel ? "> " : "  ") + s.rows[size_t(i)], x0 + cx, 0x46 + row * 23, cw, 22,
                          0x20000 | (sel ? kTextYellow : 0));
-        w->fitW = pw / 2 - 8;   // (sweep2: a long translation kept off the next column)
+        w->fitW = cw - 8;   // (sweep2: a long translation kept off the next column)
+        w->fitFont = true;   // (polish: English too: "2-21 The Hangedman's defeat" smaller, not off the screen)
         if (lang::rtl())
             w->ttfScale = 0.8f;   // (sweep2: the Arabic font's rows overlapped)
         w->help = sel ? "The chosen scene: Play shows it" : "Choose this scene";
@@ -1943,7 +2025,7 @@ void Frontend::screenChapters()
     setImage(root, 0xD1, -1, 0x20000A);   // the hall without the logo
     Widget* title = widgetNew();
     addChild(root, title);
-    setText(title, "Chapter Select", 0x10020);
+    setText(title, hordeChapters ? "Horde - Chapter Select" : "Chapter Select", 0x10020);   // (Horde Mode: its own)
     setRect(title, 0, 0x20, 0, 0);
     static const char* const kBoss[4] = {"The Chariot", "The Hanged Man", "The Hermit", "The Magician"};
     const int colW = 148, x0 = (cw_ - 4 * colW) / 2;
@@ -1953,7 +2035,7 @@ void Frontend::screenChapters()
             walking_ = false;
             if (onChapter) {   // playerpick: the players first (Back: Chapter Select)
                 const auto f = onChapter;
-                askPlayers("Chapter " + std::to_string(c + 1), [f, c]() { f(c); }, [this]() { screenChapters(); });
+                askPlayers((hordeChapters ? "Horde - Chapter " : "Chapter ") + std::to_string(c + 1), [f, c]() { f(c); }, [this]() { screenChapters(); });
             }
         };
         const std::string help = on ? "Start Chapter " + std::to_string(c + 1) + " (its boss: " + kBoss[c] + ")"
@@ -2414,7 +2496,16 @@ void Frontend::optionsStep(int which, int dir)
     auto wrap = [dir](int v, int n) { return ((v + dir) % n + n) % n; };
     switch (which) {
     case kOptDifficulty: options.difficulty = wrap(std::clamp(options.difficulty, 0, 4), 5); break;
-    case kOptLives: options.lives = wrap(std::clamp(options.lives, 0, 11), 12); break;
+    case kOptLives: {   // GitHub #30: Starting Lives 1 .. kLivesCap (Max Lives goes up with it; game/lives.h)
+        const int s = wrap(livesStartOf(options.lives) - 1, kLivesCap) + 1;
+        options.lives = livesCode(s, std::max(s, livesMostOf(options.lives)));
+        break;
+    }
+    case kOptMaxLives: {   // Max Lives 1 .. kLivesCap (Starting Lives goes down with it)
+        const int m = wrap(livesMostOf(options.lives) - 1, kLivesCap) + 1;
+        options.lives = livesCode(std::min(m, livesStartOf(options.lives)), m);
+        break;
+    }
     case kOptContinues: options.continues = wrap(std::clamp(options.continues, 0, 9), 10); break;   // (0x421564: +1, past 9 -> 0)
     case kOptAutoReload: options.autoReload = !options.autoReload; break;
     case kOptBlood: options.blood = wrap(std::clamp(options.blood, 0, 4), 5); break;   // (a custom colour 5 -> Red)
@@ -2432,7 +2523,8 @@ std::string Frontend::optionsValue(int which) const
     static const int kBlood[6] = {0x1D, 0x1C, 0x1F, 0x20, 0x1E, 0x21};
     switch (which) {
     case kOptDifficulty: return label(0x17 + std::clamp(options.difficulty, 0, 4));
-    case kOptLives: return std::to_string(kLivesTable[std::clamp(options.lives, 0, 11)]);
+    case kOptLives: return std::to_string(livesStartOf(options.lives));
+    case kOptMaxLives: return std::to_string(livesMostOf(options.lives));
     case kOptContinues: return std::to_string(std::clamp(options.continues, 0, 9));
     case kOptAutoReload: return label(options.autoReload ? 0x25 : 0x26);
     case kOptBlood: return label(kBlood[std::clamp(options.blood, 0, 5)]);
@@ -2475,11 +2567,13 @@ std::vector<Frontend::Extra> Frontend::optionsRows()
             for (const int id : {0x1D, 0x1C, 0x1F, 0x20, 0x1E, 0x21}) e.choices.push_back(label(id));
         // optui (user 2026-10-26): Lives (its 12 settings: the start lives and the most, launcher.cpp's table),
         // Continues 0-9 and the volumes in steps of 5 % as lists too, set at once
+        // GitHub #30 (user 2026-11-03): Starting Lives and Max Lives as two rows (game/lives.h; was one list of the
+        // arcade's 12 pairs, "3 (up to 5)")
         if (k == kOptLives) {
-            static const int kMost[12] = {3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5};
-            for (int i = 0; i < 12; ++i)
-                e.choices.push_back(std::to_string(kLivesTable[i]) + " (up to " + std::to_string(kMost[i]) + ")");
-            e.choiceNow = [this]() { return std::clamp(options.lives, 0, 11); };
+            e.name = "Starting Lives";
+            e.help = "The lives each player starts with (1P and 2P together; Max Lives goes up with it)";
+            for (int i = 1; i <= kLivesCap; ++i) e.choices.push_back(std::to_string(i));
+            e.choiceNow = [this]() { return livesStartOf(options.lives) - 1; };
         }
         if (k == kOptContinues) {
             for (int i = 0; i < 10; ++i) e.choices.push_back(std::to_string(i));
@@ -2494,12 +2588,33 @@ std::vector<Frontend::Extra> Frontend::optionsRows()
         }
         if (e.choiceNow)
             e.pickAt = [this, k](int i) {
-                if (k == kOptLives) options.lives = i;
+                if (k == kOptLives) options.lives = livesCode(i + 1, std::max(i + 1, livesMostOf(options.lives)));
                 else if (k == kOptContinues) options.continues = i;
                 else (k == kOptSfx ? options.sfxVolume : options.musicVolume) = i * 5;
                 if (onOptions) onOptions();
             };
         r.push_back(std::move(e));
+        if (k == kOptLives) {   // GitHub #30: Max Lives (the most a life up or a chapter's bonus brings)
+            Extra ml;
+            ml.name = "Max Lives";
+            ml.value = [this]() { return optionsValue(kOptMaxLives); };
+            ml.click = [this]() {
+                optionsStep(kOptMaxLives, 1);
+                if (onOptions) onOptions();
+            };
+            ml.clickBack = [this]() {
+                optionsStep(kOptMaxLives, -1);
+                if (onOptions) onOptions();
+            };
+            ml.help = "The most lives a player can have: life-ups and a chapter's bonus stop there (Starting Lives goes down with it)";
+            for (int i = 1; i <= kLivesCap; ++i) ml.choices.push_back(std::to_string(i));
+            ml.choiceNow = [this]() { return livesMostOf(options.lives) - 1; };
+            ml.pickAt = [this](int i) {
+                options.lives = livesCode(std::min(i + 1, livesStartOf(options.lives)), i + 1);
+                if (onOptions) onOptions();
+            };
+            r.push_back(std::move(ml));
+        }
         // relmenu (user 2026-10-30: Free Play "good but add into the game settings"): Gameplay's Free Play (the Cheat
         // screen's Free-Play, launcher.ini freeplay=) here too, right under Continues (one setting: onFreePlay saves it)
         if (k == kOptContinues) {
@@ -2534,6 +2649,8 @@ void Frontend::screenOptions()
 {
     if (style == kStyleRemake) {   // remakemenu: the "Game" tab of the settings pages
         optRows_ = optionsRows();
+        if (rowsFilter)   // (fxux: the in-game Settings)
+            rowsFilter(optRows_, "Options");
         remakeSettings(label(0xB), &optRows_, 0, [this]() { screenMainMenu(); });
         return;
     }
@@ -2571,6 +2688,8 @@ void Frontend::screenOptions()
         setRect(l, 0, y, 0, th);
         setLabel(l, labelId, 0x20002);
         l->help = help;   // ours: the help line
+        if (!inGameNote.empty() && (labelId == 0xC || labelId == 0xD || labelId == 0xE || labelId == 0x12))
+            l->help += inGameNote;   // (fxux: the in-game Settings: the game rules from the next game)
         return l;
     };
     auto valueLabel = [&](Widget* parent, int id, std::function<void(Widget&)> act, bool locked = false) {
@@ -2613,11 +2732,11 @@ void Frontend::screenOptions()
         });
     }
     y += spacing_;
-    // Life 1P / 2P
-    row(0xD, "The lives every player starts with: one setting for all, 3P / 4P of the 4 players mode too");
+    // Life 1P / 2P (GitHub #30: the starting lives; Max Lives on the Gameplay page, the PC's screen has no row for it)
+    row(0xD, "The lives every player starts with (the most: Gameplay > Max Lives); one setting for all, 3P / 4P too");
     for (int p = 0; p < 2; ++p)
         pair(p ? col2 : col1, p ? 0x35 : 0x34, [&](Widget* v) {
-            texts_.push_back(std::to_string(kLivesTable[std::clamp(options.lives, 0, 11)]));
+            texts_.push_back(std::to_string(livesStartOf(options.lives)));
             setText(v, texts_.back(), 0x20004);
             setHandlers(v, [this, changed](Widget& w) {
                 optionsStep(kOptLives, 1);
@@ -2731,12 +2850,16 @@ void Frontend::screenOptions()
 // ---- ReWrithe's page (screen 100; ours, in the Options screen's style) ----
 void Frontend::screenExtras()
 {
+    if (rowsFilter)   // (fxux: the in-game Settings)
+        rowsFilter(extras, extrasTitle);
     if (style == kStyleRemake) {   // remakemenu: the same rows on the Remake style's page
         remakeSettings(extrasTitle, &extras, extrasTab >= 0 ? extrasTab + 1 : -1, [this]() {
             if (extrasExit) {   // a copy: it may clear itself
                 const auto back = extrasExit;
                 back();
-            } else
+            } else if (rowsFilter)   // relfix (checklist 2026-11-03): the in-game Settings: one Back to the pause
+                screenMainMenu();
+            else
                 screenOptions();
         });
         return;
@@ -2889,6 +3012,8 @@ void Frontend::screenExtras()
                 const auto back = extrasExit;
                 back();
             }
+            else if (rowsFilter)   // relfix: the in-game Settings: one Back to the pause (not the Options screen first)
+                screenMainMenu();
             else
                 screenOptions();
         }, &Frontend::hitText);
@@ -3681,9 +3806,7 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
             if (name.empty())
                 return std::string("x");
             const std::string key = previewKey(name, cfg, true);
-            const std::string f = key.empty() ? std::string()
-                                              : previewBaseFile(dir, std::atoi(key.c_str() + key.find('|') + 1),
-                                                                name.compare(0, 6, "models") == 0 ? 1 : 0);
+            const std::string f = key.empty() ? std::string() : previewKeyFile(dir, key);
             FILE* t = f.empty() ? nullptr : std::fopen(f.c_str(), "rb");
             if (t)
                 std::fclose(t);
@@ -3710,6 +3833,23 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
     fe.onChapter = [](int) {};
     fe.startBossMode = []() {};   // (as the host: Boss Mode and PC Mode are on)
     fe.startPcMode = []() {};
+    // polish: More Modes' Survival / Horde / Typing of the Dead 0 items as a development build has them (the sweep's
+    // pictures; HOTD_FE_RELEASE=1: as a release build, Survival only). relfix (the v1.2.0 checklist: --lang-check /
+    // --lang-shots of the release exe showed Typing of the Dead 0 and Horde): a release build (HOTD_EXPERIMENTAL_MODES
+    // OFF) always as its own menu, Survival only where it is built in (HOTD_SURVIVAL_MODE)
+    {
+        const bool release = std::getenv("HOTD_FE_RELEASE") != nullptr || HOTD_EXPERIMENTAL_MODES == 0;
+        if (HOTD_EXPERIMENTAL_MODES != 0 || HOTD_SURVIVAL_MODE != 0) {
+            fe.startSurvival = []() {};
+            fe.survivalArenaValue = []() { return std::string("Chapter 1: The Courtyard"); };
+            fe.onSurvivalArena = []() {};
+        }
+        if (!release) {
+            fe.startTotd = []() {};
+            fe.hordeSizeValue = []() { return std::string("Normal"); };
+            fe.onHordeSize = []() {};
+        }
+    }
     for (int k = 0; k < 4; ++k)
         fe.chapterEnabled[k] = chapterPlayable(k);
     fe.chapterEnabled[4] = chapterPlayable(3);
@@ -3738,6 +3878,11 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
             fe.bloodRgb = int(std::strtoul(bl, nullptr, 16) & 0xFFFFFF), cfg.blood = 5, cfg.bloodRgb = fe.bloodRgb;   // (menufb: the rows too)
         else
             fe.options.blood = std::clamp(std::atoi(bl), 0, 4);
+    }
+    // options (GitHub #30 / #36 ...): HOTD_FE_INI=<launcher.ini>: the pages' settings from that file (else the defaults)
+    if (const char* ini = std::getenv("HOTD_FE_INI")) {
+        cfg.load(ini);
+        fe.options.lives = cfg.lives;
     }
     // HOTD_FE_MS=<ms>: the screens' clock (the hall's drift)
     const uint32_t shotMs = std::getenv("HOTD_FE_MS") ? uint32_t(std::atoi(std::getenv("HOTD_FE_MS"))) : 0u;

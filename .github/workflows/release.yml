@@ -1,8 +1,13 @@
 # Release builds of The House of the Dead: ReWrithe (docs/release/build_release.md "CI").
-# Runs on a version tag (git tag v1.0.0 && git push origin v1.0.0) or by hand (Actions -> release -> Run workflow).
+# Runs on a version tag (git tag v1.0.0 && git push origin v1.0.0), by hand (Actions -> release -> Run workflow, with a
+# choice of platforms) or on a push to the branch "ci" (a test build of every platform without a tag or a release).
+# Every run only uploads the packages as artifacts (the run's Summary page -> Artifacts): nothing is published.
 # Builds Windows x64, Linux x64 (also the SteamOS / Steam Deck build), macOS universal (arm64 + x86_64, unsigned),
 # runs the tests that need no game data (--version, --mods-test, hotd_nettest; --gl-check on Mesa's software driver) and uploads each package as an artifact.
 # NO GAME DATA is used or packaged. Nothing is published: making the GitHub Release from the artifacts stays manual.
+# Every package is built with HOTD_EXPERIMENTAL_MODES=OFF (no Typing of the Dead 0 or Horde until they are
+# polished: docs/porting.md "Experimental modes"); the tests check that --totd is refused. Survival Mode is in (HOTD_SURVIVAL_MODE=ON, labelled Very
+# Experimental / Proof of Concept).
 #
 # Third-party sources fetched at build time (pinned; licences in NOTICE.md): SDL3 release-3.2.10 (zlib), stb_vorbis
 # (public domain), dr_mp3 51e61d3 (public domain), Musashi 313ebf1 (MIT; its m68kfpu.c / m68kmmu.h / softfloat are
@@ -17,6 +22,17 @@ on:
     branches: [main]
     paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Which packages to build"
+        type: choice
+        default: all
+        options: [all, linux-macos, linux, macos, windows]
+
+# a newer push to the same branch / tag stops the older run (saves the runners' time)
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -31,6 +47,7 @@ jobs:
   windows:
     name: Windows x64
     runs-on: windows-2022
+    if: ${{ !inputs.platforms || inputs.platforms == 'all' || inputs.platforms == 'windows' }}
     steps:
       - uses: actions/checkout@v4
       - name: Fetch third-party sources
@@ -66,6 +83,7 @@ jobs:
           -DHOTD_LOCAL_ICON=OFF -DHOTD_FETCH_SDL3=ON -DHOTD_SDL3_TAG=$SDL3_TAG
           -DHOTD_STB_DIR="$PWD/deps/stb" -DHOTD_DR_LIBS_DIR="$PWD/deps/dr_libs"
           -DHOTD_ARCADE_SOUND=ON -DHOTD_MUSASHI_DIR="$PWD/deps/musashi" -DHOTD_SCSP_DIR="$PWD/deps/mame_scsp"
+          -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON
       - name: Build
         run: cmake --build build --config Release --parallel --target hotd hotd_viewer hotd_nettest
       - name: Tests (no game data)
@@ -76,6 +94,7 @@ jobs:
           build/Release/hotd.exe --version | tee version.txt
           grep -q "v${GITHUB_REF_NAME#v}" version.txt || [ "$GITHUB_REF_TYPE" != tag ]
           build/Release/hotd.exe --mods-test
+          (build/Release/hotd.exe --totd 2>&1 || true) | grep -q "not in this version"   # (TotD / Horde left out; Survival stays)
           build/Release/hotd_nettest.exe
       - name: Graphics test on Mesa's software driver (no game data)
         # compat (2026-10-29): mesa-dist-win's llvmpipe (strict OpenGL, no GPU on the runner) next to a copy of hotd.exe:
@@ -111,11 +130,16 @@ jobs:
 
   linux:
     name: Linux x64 / SteamOS
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')   # (Light Gun Edition: not on every push)
     runs-on: ubuntu-latest
+    # (Light Gun Edition: not on every push to main: tags and by hand only)
+    if: ${{ (github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')) && (!inputs.platforms || inputs.platforms == 'all' || contains(inputs.platforms, 'linux')) }}
     # Valve's Steam Runtime 3 "sniper" SDK (Debian 11, glibc 2.31): the binary then runs on SteamOS 3 and older desktop
     # distributions too (docs/porting.md "SteamOS package")
     container: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
+    # in a container the steps' default shell is sh (dash), which refuses "set -o pipefail" (exit 2: v1.2.0's run)
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - name: Fetch third-party sources
@@ -133,13 +157,19 @@ jobs:
             curl -fsSL -o "mame_scsp/$f" "https://raw.githubusercontent.com/mamedev/mame/$MAME_TAG/src/devices/sound/$f"
           done
       - name: Configure
-        # sniper's default GCC 10 lacks parts of C++20: use its newer GCC (gcc-12; change if the SDK ships another)
-        run: >
-          cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12
-          -DHOTD_FETCH_SDL3=ON -DHOTD_SDL3_TAG=$SDL3_TAG
-          -DHOTD_STB_DIR="$PWD/deps/stb" -DHOTD_DR_LIBS_DIR="$PWD/deps/dr_libs"
-          -DHOTD_ARCADE_SOUND=ON -DHOTD_MUSASHI_DIR="$PWD/deps/musashi" -DHOTD_SCSP_DIR="$PWD/deps/mame_scsp"
+        # sniper's default GCC 10 lacks parts of C++20: use its newest GCC (linux2 2026-11-03: the SDK now ships gcc-14,
+        # no gcc-12 any more; its static libstdc++.a is there: HOTD_STATIC_CXX_RUNTIME)
+        run: |
+          set -euo pipefail
+          v=""; for n in 15 14 13 12; do if command -v "g++-$n" > /dev/null; then v=$n; break; fi; done
+          [ -n "$v" ] || { echo "no gcc-12 or newer in the SDK" >&2; exit 1; }
+          echo "compiler: g++-$v"
+          cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER=gcc-$v -DCMAKE_CXX_COMPILER=g++-$v \
+          -DHOTD_FETCH_SDL3=ON -DHOTD_SDL3_TAG=$SDL3_TAG \
+          -DHOTD_STB_DIR="$PWD/deps/stb" -DHOTD_DR_LIBS_DIR="$PWD/deps/dr_libs" \
+          -DHOTD_ARCADE_SOUND=ON -DHOTD_MUSASHI_DIR="$PWD/deps/musashi" -DHOTD_SCSP_DIR="$PWD/deps/mame_scsp" \
+          -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON
       - name: Build
         run: cmake --build build-linux --parallel --target hotd hotd_viewer hotd_nettest
       - name: Tests (no game data)
@@ -148,7 +178,14 @@ jobs:
           export HOTD_PREF_DIR="$RUNNER_TEMP/pref"
           ./build-linux/hotd --version
           ./build-linux/hotd --mods-test
+          (./build-linux/hotd --totd 2>&1 || true) | grep -q "not in this version"
           ./build-linux/hotd_nettest
+          # SteamOS / older distributions: only glibc and the bundled SDL (libstdc++ linked in: HOTD_STATIC_CXX_RUNTIME;
+          # SDL built from source loads X11 / Wayland / audio at run time)
+          ldd build-linux/hotd
+          ! ldd build-linux/hotd | grep -q 'libstdc++'
+          sdl="$(find build-linux/_deps -name 'libSDL3.so.0' | head -1)"
+          ! ldd "$sdl" | grep -v -E 'linux-vdso|ld-linux|libc\.so|libm\.so|libdl\.so|libpthread\.so|librt\.so' | grep -q '=>'
       - name: Graphics test on Mesa's software driver (no game data)
         # compat (2026-10-29): the distribution's Mesa llvmpipe under a virtual X display. continue-on-error: the
         # container's package mirror is outside this project (a failed install must not stop a release); a real
@@ -166,7 +203,20 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          tools/make_linux_package.sh -b build-linux -o "$GITHUB_WORKSPACE/pkg/HOTD ReWrithe Linux" --no-build
+          bash tools/make_linux_package.sh -b build-linux -o "$GITHUB_WORKSPACE/pkg/HOTD ReWrithe Linux" --no-build
+      - name: Package test (unpacked in a fresh folder, as a player would)
+        # linux2 (2026-11-03): the tarball's own bin/hotd with its bundled libSDL3 (no build folder on the library path)
+        run: |
+          set -euo pipefail
+          t="$RUNNER_TEMP/unpack"; rm -rf "$t"; mkdir -p "$t"
+          (cd pkg && sha256sum -c SHA256SUMS-linux.txt)
+          tar -C "$t" -xzf pkg/hotd-rewrithe-*-linux-x86_64.tar.gz
+          p="$t/HOTD ReWrithe Linux"
+          LD_LIBRARY_PATH= ldd "$p/bin/hotd" | grep -F "$p/bin/libSDL3.so.0"
+          export HOTD_PREF_DIR="$RUNNER_TEMP/pref_pkg"
+          "$p/hotd.sh" --version
+          "$p/bin/hotd" --mods-test
+          ("$p/bin/hotd" --totd 2>&1 || true) | grep -q "not in this version"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64
@@ -177,8 +227,10 @@ jobs:
 
   macos:
     name: macOS universal
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')   # (Light Gun Edition: not on every push)
-    runs-on: macos-14
+    # (macos-latest: GitHub retires the numbered images over time; arm64, Xcode's clang builds both slices)
+    runs-on: macos-latest
+    # (Light Gun Edition: not on every push to main: tags and by hand only)
+    if: ${{ (github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')) && (!inputs.platforms || inputs.platforms == 'all' || contains(inputs.platforms, 'macos')) }}
     steps:
       - uses: actions/checkout@v4
       - name: Fetch third-party sources
@@ -202,6 +254,7 @@ jobs:
           -DHOTD_FETCH_SDL3=ON -DHOTD_SDL3_TAG=$SDL3_TAG
           -DHOTD_STB_DIR="$PWD/deps/stb" -DHOTD_DR_LIBS_DIR="$PWD/deps/dr_libs"
           -DHOTD_ARCADE_SOUND=ON -DHOTD_MUSASHI_DIR="$PWD/deps/musashi" -DHOTD_SCSP_DIR="$PWD/deps/mame_scsp"
+          -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON
       - name: Build
         run: cmake --build build-mac --parallel --target hotd hotd_viewer hotd_nettest
       - name: Tests (no game data)
@@ -210,6 +263,7 @@ jobs:
           export HOTD_PREF_DIR="$RUNNER_TEMP/pref"
           ./build-mac/hotd --version
           ./build-mac/hotd --mods-test
+          (./build-mac/hotd --totd 2>&1 || true) | grep -q "not in this version"
           ./build-mac/hotd_nettest
           lipo -archs build-mac/hotd | grep -q "x86_64 arm64\|arm64 x86_64"
       - name: Package (folder + a small unsigned .app that starts bin/hotd)
@@ -223,6 +277,12 @@ jobs:
           cp -L "$sdl" "$out/bin/libSDL3.0.dylib"
           echo "The House of the Dead: ReWrithe, portable package (no game data)." > "$out/hotd_package.txt"
           for d in ui fonts lang mods; do mkdir -p "$out/data/$d"; cp -R "data/$d/." "$out/data/$d/"; done
+          # the modes left out (Typing of the Dead 0, Horde) leave the language files too (as the Windows package)
+          for f in "$out"/data/lang/*.txt; do
+            awk '{ if ($0 !~ /^[ \t]*#/ && index($0, " = ")) { k = tolower(substr($0, 1, index($0, " = ") - 1));
+                   if (k ~ /typing of the dead|totd|horde/) next } print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          done
+          ! grep -rqiE "^[^#]*(typing of the dead|horde)" "$out/data/lang"
           mkdir -p "$out/data/arcade" "$out/data/pc" "$out/data/music"
           echo "Put your own arcade ROM zip here (MAME's 'hotd' set, Revision A)." > "$out/data/arcade/put the arcade ROM zip here.txt"
           echo "Put your own 1998 PC game here (its installed folder's contents, or a .zip of it)." > "$out/data/pc/put the PC game here.txt"
@@ -230,9 +290,43 @@ jobs:
           cp LICENSE "$out/LICENSE.txt"; cp NOTICE.md "$out/NOTICE.txt"; cp docs/release/CREDITS.txt "$out/CREDITS.txt"; cp CHANGELOG.md "$out/CHANGELOG.txt"; cp docs/online_howto.md "$out/ONLINE HOWTO.txt"
           cp README.md "$out/README.md"
           printf '#!/bin/sh\ncd "$(dirname "$0")" || exit 1\nexec ./bin/hotd "$@"\n' > "$out/hotd.command"
+          printf '#!/bin/sh\n# the setup: the game files check, Install (a copy in a folder you choose) or Play from here\ncd "$(dirname "$0")" || exit 1\nexec ./bin/hotd --setup "$@"\n' > "$out/hotd-setup.command"
           app="$out/HOTD ReWrithe.app"; mkdir -p "$app/Contents/MacOS"
-          printf '#!/bin/sh\n# starts bin/hotd of the folder this .app sits in\ncd "$(dirname "$0")/../../.." || exit 1\nexec ./bin/hotd "$@"\n' > "$app/Contents/MacOS/hotd-launcher"
-          chmod +x "$out/hotd.command" "$app/Contents/MacOS/hotd-launcher" "$out/bin/hotd" "$out/bin/hotd_viewer"
+          # linux2 (2026-11-03): a downloaded (quarantined) unsigned .app is run from a random read-only copy (App
+          # Translocation): no bin/ beside it then; say how to clear the quarantine instead of failing silently
+          cat > "$app/Contents/MacOS/hotd-launcher" <<'EOS'
+          #!/bin/sh
+          # starts bin/hotd of the folder this .app sits in
+          here="$(cd "$(dirname "$0")/../../.." && pwd)"
+          if [ ! -x "$here/bin/hotd" ]; then
+              osascript -e 'display alert "HOTD ReWrithe" message "macOS started this app from a temporary copy (it was downloaded and is not signed by Apple), so it cannot find its bin folder.\n\nOpen Terminal, type  xattr -dr com.apple.quarantine  and a space, drag the HOTD ReWrithe macOS folder into the window, press Return, then open the app again (HOW TO OPEN.txt)."' > /dev/null 2>&1
+              exit 1
+          fi
+          cd "$here" || exit 1
+          exec ./bin/hotd "$@"
+          EOS
+          cat > "$out/HOW TO OPEN.txt" <<'EOS'
+          The House of the Dead: ReWrithe - macOS (11 Big Sur or newer; Apple Silicon and Intel)
+          ================================================================================
+
+          This package is not signed by Apple (no paid developer account), so macOS asks before the first start:
+
+          1. Unzip the download and move the "HOTD ReWrithe macOS" folder where you want it (e.g. your Applications or
+             Games folder). Keep the folder together: the app starts bin/hotd from it.
+          2. Clear the download flag once (it covers every file in the folder): open Terminal, type
+                 xattr -dr com.apple.quarantine
+             (with a space at the end), drag the "HOTD ReWrithe macOS" folder into the Terminal window, press Return.
+             Without this, macOS runs the app from a temporary copy and it cannot find its files.
+          3. Right-click (or Control-click) "HOTD ReWrithe.app" -> Open -> Open. On macOS 15 Sequoia and newer: double-click
+             it, press Done, then System Settings -> Privacy & Security -> scroll down -> "Open Anyway" for HOTD ReWrithe.
+             macOS remembers the choice: from then on a double-click starts it.
+          4. Your own game files: the arcade ROM zip (MAME's "hotd" set) in data/arcade, the 1998 PC game (its folder or a
+             .zip of it) in data/pc, the CD music (Track02 ... Track12) in data/music. Or double-click hotd-setup.command:
+             it checks the files and copies them in for you.
+          Mouse = gun (left shoots, right reloads); a game pad works too. Settings and the log are in the folder's settings/.
+          Updates: the game says when a new version is out; download the new zip (macOS does not update itself).
+          EOS
+          chmod +x "$out/hotd.command" "$out/hotd-setup.command" "$app/Contents/MacOS/hotd-launcher" "$out/bin/hotd" "$out/bin/hotd_viewer"
           cat > "$app/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -249,6 +343,12 @@ jobs:
           # ad-hoc signatures (not a Developer ID: Gatekeeper still asks; README / release notes say how to open it)
           codesign --force -s - "$out/bin/libSDL3.0.dylib" "$out/bin/hotd" "$out/bin/hotd_viewer"
           codesign --force -s - "$app"
+          # linux2 (2026-11-03): the packaged exe loads the bundled SDL (@rpath -> @loader_path), the .app's launcher finds bin/
+          otool -L "$out/bin/hotd" | grep -q "@rpath/libSDL3"
+          otool -l "$out/bin/hotd" | grep -A2 LC_RPATH | grep -q "@loader_path"
+          HOTD_PREF_DIR="$RUNNER_TEMP/pref_pkg" "$out/bin/hotd" --version
+          HOTD_PREF_DIR="$RUNNER_TEMP/pref_pkg" "$app/Contents/MacOS/hotd-launcher" --version
+          rm -rf "$out/settings"   # (the two runs above made it: the package ships without one)
           # no game data
           ! find "$out" -type f \( -iname '*.zip' -o -iname '*.ogg' -o -iname '*.mp3' -o -iname '*.wav' -o -iname '*.rbh' -o -iname '*.bin' -o -iname 'thotd.exe' \) | grep -q .
           (cd "$root" && ditto -c -k --keepParent "HOTD ReWrithe macOS" "hotd-rewrithe-v${ver}-macos-universal.zip" \

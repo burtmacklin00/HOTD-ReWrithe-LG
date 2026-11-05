@@ -7,6 +7,7 @@
 // play-time bookkeeping (bookkeeping_play_end, play_time_*), the join's character body re-init (cut-scene bodies are
 // not drawn yet).
 #include "game/runtime.h"
+#include "game/lives.h"
 
 namespace hotd::game {
 
@@ -36,10 +37,15 @@ constexpr uint32_t kLivesTable = 0xD780;        // (start, max) by lives setting
 // arcade reads them from its EEPROM); free play. The gun calibration is the engine's (the mouse needs none).
 void Runtime::apply_settings()
 {
-    const int lives = settings.lives < 0 || settings.lives > 11 ? 9 : settings.lives;
+    const int lives = livesCodeValid(settings.lives) ? settings.lives : 9;
     mem.at<int16_t>(G::difficulty) = int16_t(settings.difficulty < 0 || settings.difficulty > 4 ? 2 : settings.difficulty);
-    mem.at<uint8_t>(kStartLives) = mem.at<uint8_t>(kLivesTable + uint32_t(lives) * 2);
-    mem.at<uint8_t>(G::max_lives) = mem.at<uint8_t>(kLivesTable + uint32_t(lives) * 2 + 1);
+    if (lives < kLivesSettings) {   // the arcade's setting: its pair from the ROM's table
+        mem.at<uint8_t>(kStartLives) = mem.at<uint8_t>(kLivesTable + uint32_t(lives) * 2);
+        mem.at<uint8_t>(G::max_lives) = mem.at<uint8_t>(kLivesTable + uint32_t(lives) * 2 + 1);
+    } else {   // GitHub #30: Starting Lives / Max Lives as no setting of the arcade has them (game/lives.h)
+        mem.at<uint8_t>(kStartLives) = uint8_t(livesStartOf(lives));
+        mem.at<uint8_t>(G::max_lives) = uint8_t(livesMostOf(lives));
+    }
     mem.at<uint8_t>(G::blood_color) = uint8_t(settings.bloodColor & 3);
     mem.set32(kFreePlay, settings.freePlay ? 1 : 0);
 }
@@ -76,6 +82,10 @@ void Runtime::coop4_enable()
 // the start button (keys 1 / 2, a mouse's middle button): seen by player_start_check on the player's next frame
 void Runtime::player_join(int p)
 {
+    // GitHub #29: in a game in player 2's seat, player 1's input plays player 2 (main.cpp), its start button too (the
+    // continue); player 2's start button joins seat 1. At the title each start button is its own seat's (the arcade's)
+    if (const int16_t mode = mem.at<int16_t>(G::game_mode); soloSeat == 1 && p < 2 && (mode == 4 || mode == 5))
+        p = 1 - p;
     if (lgModes.hardcore && lgOut_[p & 3])   // Light Gun Edition: Hardcore: out of lives is out for the game
         return;
     startRequest[p] = true;

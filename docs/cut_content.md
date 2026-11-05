@@ -5,6 +5,11 @@ Nothing is restored in the game; this is only what exists (the Gallery shows the
 "Textures of the cut creatures" at the end). Restoring is a later, optional mod (ROADMAP.md, "Future (after release):
 restored cut content").
 
+**Survival Mode (2026-11-03, [survival.md](survival.md) "Cut creatures"):** five of the cut creatures fight in Survival Mode
+(never in the normal game): Disiprin, Debu and Neozom with their own standard-enemy tables, which the ROM has complete
+(motion list, attacks, attack choice, death motion: the game only never spawned them); Syndy and Baba with their
+relatives' (types 28 BO_neil and 29 BO_siriru; same joint count). MrG, Lubin and Hiru are still out (other joint counts).
+
 Sources checked: arcade program ROM (maincpu), main_data (models, names, motions), the geometry ROMs (polygons), the
 event scripts (PC EVTALL.RBH; the arcade runs the same scripts), the PC files (ART\STAGEn\*\*.RBH object tables,
 THOTD.EXE). Object IDs are shared by both versions. Part names: main_data pointer table 0xEE4EB0 ([names.md](names.md)).

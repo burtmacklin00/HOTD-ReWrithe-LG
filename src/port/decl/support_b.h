@@ -73,6 +73,8 @@
     void enemy_act6_frame(uint32_t obj);                                      // 0x56360
     void enemy_act6_bite(uint32_t obj);                                       // 0x56320
     void kind101_corpse(uint32_t obj);                                        // 0x5BE60
+    void kind118_corpse(uint32_t obj);                                        // 0x5C0A0
+    void kind118_corpse_frame(uint32_t obj);                                  // 0x5BF80
     virtual void turn_motion_set(uint32_t obj, uint32_t motion, int a, int frames);   // 0x387B0
     virtual void voice_message(int n);                                        // 0x311C0
     // --- the enemy helpers (enemy_helpers.cpp) ---

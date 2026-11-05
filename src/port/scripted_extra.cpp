@@ -128,6 +128,45 @@ template <class P> void Game<P>::kind101_corpse(uint32_t obj)
         task_exit();
 }
 
+// 0x5C0A0 kind118_corpse: kind 101's corpse kept for one scene: +0x70 = scene_number, then kind118_corpse_frame. In
+// Revision A no script spawns it (its four records 0xF0624 / 0xF0654 / 0xFE310 / 0xFE340 are referenced by nothing);
+// the PC's prologue does (0xFE310 / 0xFE340, the sewer): restored under Attract Gore (event.cpp evt_attract_restore)
+template <class P> void Game<P>::kind118_corpse(uint32_t obj)
+{
+    mem.set32(obj, F::kind118_corpse_frame);
+    mem.at<uint16_t>(obj + 0x70) = uint16_t(int16_t(mem.at<int8_t>(G::scene_number)));
+}
+
+// 0x5BF80 kind118_corpse_frame: drawn as kind101_corpse; gone once scene_number is no longer +0x70
+template <class P> void Game<P>::kind118_corpse_frame(uint32_t obj)
+{
+    Tgp::Out none;
+    copro(0x05, nullptr, 0, none);
+    uint32_t p[3] = {mem.u32(obj + 0x20), mem.u32(obj + 0x24), mem.u32(obj + 0x28)};
+    copro(0x12, p, 3, none);
+    uint32_t ry[1] = {mem.u32(obj + 0x30)};
+    copro(0x15, ry, 1, none);
+    const int16_t v = mem.at<int16_t>(obj + 0x64);
+    if (mem.at<int16_t>(obj + 0xCC) == 14) {
+        uint32_t r2[1] = {0x6000};
+        copro(0x15, r2, 1, none);
+        geo_draw_model(0x5E4);
+    } else if (mem.at<uint8_t>(G::blood_color) == 0) {
+        if (v == 0) geo_draw_model(0x5E6);
+        else if (v == 1) geo_draw_model(0x5E8);
+        else if (v == 2) geo_draw_model(0x5E4);
+    } else {
+        if (v == 0) geo_draw_model(0x5E7);
+        else if (v == 1) geo_draw_model(0x5E9);
+        else if (v == 2) geo_draw_model(0x5E5);
+    }
+    const uint16_t scene = uint16_t(int16_t(mem.at<int8_t>(G::scene_number)));
+    const uint16_t kept = mem.at<uint16_t>(obj + 0x70);
+    copro(0x06, nullptr, 0, none);
+    if (kept != scene)
+        task_exit();
+}
+
 // 0x387B0 turn_motion_set(obj, motion, a, frames): the heading of the body's anchor matrix (+0x184, through stored
 // matrix 1, turned z +0x4000 / y -0x4000; coprocessor 0x6F) less the object's heading is spread over the frames as
 // the turn rate (+0xE8) of a set_motion_blend

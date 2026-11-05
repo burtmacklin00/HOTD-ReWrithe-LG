@@ -37,6 +37,9 @@ public:
     float stored(int n, int k) const { return bget(0xF8 + 12 * n + k); }
     // a word of the data ROM (PC Mode's camera paths: the PC's own curve evaluation on the same keys)
     uint32_t data_word(uint32_t a) const { return rom(a); }
+    // words of the data ROM read as other values while set (n pairs {word, value}; nullptr / 0 = the ROM as it is):
+    // the Attract Gore's PC camera keys (camera.cpp camera_path_eval)
+    void set_patch(const uint32_t (*pairs)[2], int n) { patch_ = pairs, patchN_ = n; }
 
     // the routines, by the program's own entry points (docs/coprocessor.md)
     static float frsq(float x);                       // FRSQ as MAME runs it
@@ -70,7 +73,13 @@ private:
     void pathTable(uint32_t i, float t, Out& out) const;   // 0x8C1
     float bget(int a) const;
     void bset(int a, float v);
-    uint32_t rom(uint32_t a) const { return a < words_ ? data_[a] : 0; }
+    uint32_t rom(uint32_t a) const
+    {
+        for (int i = 0; i < patchN_; ++i)
+            if (patch_[i][0] == a)
+                return patch_[i][1];
+        return a < words_ ? data_[a] : 0;
+    }
 
     const uint32_t* data_;
     size_t words_;
@@ -79,6 +88,8 @@ private:
     std::vector<float> b_ = std::vector<float>(0x400, 0.0f);
     float ma0_ = 0.0f;
     bool ma0Known_ = true;
+    const uint32_t (*patch_)[2] = nullptr;
+    int patchN_ = 0;
 };
 
 } // namespace hotd::port

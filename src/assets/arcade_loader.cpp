@@ -246,18 +246,35 @@ void ArcadeSource::buildColorXlat(int n, const std::vector<std::pair<int, int>>&
     float k;
     const uint32_t kBits = rd32(maincpu_, 0xA831C);
     std::memcpy(&k, &kBits, 4);
+    // bugs2 (GitHub #28, red pixels on the Chapter 1 wall weapons): the row library's white ramps (entries 5-10, 38, 68,
+    // 100) end before brightness 63: they reach white at 56-57 (entry 38: 51-52), then hold marker bytes, not colours
+    // ((255, 0..162, 0) then black, blue, green: entry 100 = area 3's row 21, the axes' and swords' metal). The game
+    // copies all 64 (MAME's colour RAM dumps hold them too), but the brightest texels of a fully lit polygon (luma curve
+    // 76 at shades 14-15: brightness 58-62) then took the marker red, which the cabinets do not show and the PC port's
+    // own textures of the same models (white blades) do not have. Such a row's steps after the ramp keep its last colour
+    auto rampEnd = [&](size_t p) {
+        auto lum = [&](int l) { return 299 * maincpu_[p + size_t(l) * 3] + 587 * maincpu_[p + size_t(l) * 3 + 1] + 114 * maincpu_[p + size_t(l) * 3 + 2]; };
+        for (int l = 48; l < 64; ++l) {
+            const bool white = maincpu_[p + size_t(l - 1) * 3] >= 0xF0 && maincpu_[p + size_t(l - 1) * 3 + 1] >= 0xF0 &&
+                               maincpu_[p + size_t(l - 1) * 3 + 2] >= 0xF0;
+            if (white && lum(l) * 10 < lum(l - 1) * 6) return l;
+        }
+        return 64;
+    };
     const size_t list = rd32(maincpu_, 0xA99A0 + size_t(n) * 4);
     for (int i = 0; i < 14; ++i) {
         const size_t p = rd32(maincpu_, list + size_t(i) * 4);
+        const int end = rampEnd(p);
         for (int l = 0; l < 64; ++l)
-            for (int ch = 0; ch < 3; ++ch) put(ch, 1 + 2 * i, l, int(float(maincpu_[p + size_t(l) * 3 + ch]) * k));
+            for (int ch = 0; ch < 3; ++ch) put(ch, 1 + 2 * i, l, int(float(maincpu_[p + size_t(std::min(l, end - 1)) * 3 + ch]) * k));
     }
     // single-row loads (maincpu 0x13F20: row library at 0xE211, 192 bytes per entry, copied unscaled)
     for (auto [row, entry] : rowSwaps) {
         const size_t p = 0xE211 + size_t(entry) * 192;
         if (row < 1 || row > 31 || p + 192 > maincpu_.size()) continue;
+        const int end = rampEnd(p);
         for (int l = 0; l < 64; ++l)
-            for (int ch = 0; ch < 3; ++ch) put(ch, row, l, maincpu_[p + size_t(l) * 3 + ch]);
+            for (int ch = 0; ch < 3; ++ch) put(ch, row, l, maincpu_[p + size_t(std::min(l, end - 1)) * 3 + ch]);
     }
 }
 

@@ -1,7 +1,8 @@
 The fonts in this folder (unchanged copies; see NOTICE.md):
-  NotoSansKR-Bold.otf, NotoSansJP-Bold.otf (Noto Sans CJK): Copyright 2014-2021 Adobe (http://www.adobe.com/). Noto is a trademark of Google Inc.
+  NotoSansKR-Bold.otf, NotoSansJP-Bold.otf, NotoSansSC-Bold.otf (Noto Sans CJK): Copyright 2014-2021 Adobe (http://www.adobe.com/). Noto is a trademark of Google Inc.
   NotoSansArabic-Bold.ttf: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic).
   NotoSansHebrew-Bold.ttf: Copyright 2024 The Noto Project Authors (https://github.com/notofonts/hebrew).
+  NotoSans-Bold.ttf (Latin / Greek / Cyrillic): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).
 They are distributed unmodified, under their original names.
 
 This Font Software is licensed under the SIL Open Font License,

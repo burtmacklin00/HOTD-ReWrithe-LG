@@ -14,6 +14,8 @@
 #include "assets/arcade_loader.h"
 #include "assets/pc_loader.h"
 
+#include "game/cosmods.h"
+
 #include "render/renderer.h"
 
 #include <array>
@@ -54,6 +56,31 @@ struct GalleryLook {
     const char* rows = nullptr;
 };
 GalleryLook galleryLook(int type);
+
+// gallery blood (user 2026-11-03: "look at a creature in each blood colour"): the Gallery's own blood settings, seeded
+// from Options (Blood Color, its custom colour, Blood Particles) and Mods (Rainbow Blood) each time the Gallery opens and
+// never saved: what the player tries here does not change the game's settings
+struct GalleryBlood {
+    int color = 0;            // Options' Blood Color: 0 Red, 1 Green, 2 Blue, 3 Purple, 4 Yellow, 5 Custom
+    int rgb = 0xFFFFFF;       // the custom colour 0xRRGGBB
+    RainbowBloodSettings rainbow;   // Rainbow Blood (on, Colours, Speed, Creature Blood)
+    bool particles = true;    // Blood Particles: the drips from the cut joints and the burst of a new damage step
+    bool operator==(const GalleryBlood& o) const
+    {
+        return color == o.color && rgb == o.rgb && rainbow.on == o.rainbow.on && rainbow.together == o.rainbow.together &&
+               rainbow.speed == o.rainbow.speed && rainbow.creature == o.rainbow.creature && particles == o.particles;
+    }
+};
+const char* galleryBloodColorName(int c);      // "Red" ... "Custom"
+const char* galleryRainbowSpeedName(float s);  // "Still" / "Slow" / "Normal" / "Fast"
+float galleryRainbowSpeedStep(float s, int dir);
+const char* galleryCreatureBloodName(int c);   // "Own Colour Each" / "Rainbow Cycle" / "Off"
+
+// gallery dismemberment (user 2026-11-03): the damage and part-loss models the game swaps in when a part is shot, from
+// its own tables (part_hit 0x68010: part_replacement 0x11DFF0 by type and part class, the per-type damage routines
+// 0xC66A0 that cut the head / arms off at their models, the head's blow-off step 0x135940), grouped by body part
+enum GalleryPart : int { kPartHead, kPartRightArm, kPartLeftArm, kPartBody, kPartLegs, kGalleryParts };
+const char* galleryPartName(int p);   // "Head", "Right Arm" ...
 
 // the window's backgrounds (Gallery::background): 0 the dark default, then the game's skies, then plain colours
 int galleryBackgroundCount();
@@ -166,6 +193,29 @@ public:
     std::string sourceLabel() const;   // "Arcade" / "PC"
     std::string status() const { return status_; }   // empty, or why nothing is drawn
 
+    // ---- gallery blood (GalleryBlood: the Gallery's own, seeded at open by the host) ----
+    const GalleryBlood& blood() const { return blood_; }
+    // a change shows at once: the arcade models' blood entry and wound rows next frame, the PC models' blood pages
+    // reloaded when their colour changes (the PC loader tints them at the load, as the game does)
+    void setBlood(const GalleryBlood& b);
+    std::string bloodLabel() const;    // "Green", "Custom", "Rainbow"
+
+    // ---- gallery dismemberment (GalleryPart; creatures only) ----
+    // per body part a state: 0 whole, 1 .. damageSteps the game's damage models in order, damageSteps + 1 "Off" when
+    // partCanGo (the part cut away, as the game's damage routines / the head's blow-off do). A body step the game ties
+    // to a part loss (the zombies' last chest model: the head and both arms) takes those parts with it, as in play.
+    // Every part whole again on a new entry
+    bool hasDamage() const { return dmg_.any; }
+    int damageSteps(int part) const;
+    bool partCanGo(int part) const;
+    int damageStates(int part) const { return damageSteps(part) + (partCanGo(part) ? 1 : 0); }   // (the last state)
+    int damage(int part) const { return part >= 0 && part < kGalleryParts ? dmgStep_[part] : 0; }
+    void stepDamage(int part, int dir);   // wraps
+    void resetDamage();
+    std::string damageLabel(int part) const;   // "Whole", "Damage 2", "Off", "-" (no models)
+    std::string damageNote() const;            // "" or why there is nothing to change ("No damage models ...")
+    int damagePart = 0;   // the part the keys step (Z: the next part, X / Shift+X: its state; Shift+Z: all whole)
+
 private:
     const StageData* stage(Source s, int chapter);
     void pick();   // the entry's motions and framing
@@ -215,6 +265,36 @@ private:
     int uPos_ = -1, uUv_ = -1;
     bool roomDebug();   // testing: HOTD_GALLERY_RAIL (a room from a camera rail's frame)
     std::string status_;
+
+    // gallery blood
+    GalleryBlood blood_;
+    bool bloodSet_ = false;             // setBlood called (else the models as before: Paths::blood, the stages' own colours)
+    int pcBlood_ = 0;                   // the PcConfig::blood pc_ was made with
+    int pcBloodWanted() const;          // the one blood_ asks for
+    std::map<int, std::array<int, 4>> bloodRowEntries_;   // GGSET lists 0xC5A40: a red blood row entry -> per colour
+    uint16_t bloodEntry_ = 0;           // polygon palette entry 1023 last sent (the blood colour, arcade models)
+    uint32_t bloodRowMask_ = 0;         // polish: the shown look's blood rows (RenderOptions::bloodRowMask, as GameView's)
+    std::string lookRows(const char* rows, std::set<int>& bloodRows) const;   // a look's rows in the blood colour
+    // gallery dismemberment: the shown type's tables (pick), the parts' states, the effects
+    struct DamageData {
+        bool any = false;
+        uint32_t chain[16][8] = {};   // part_replacement by part class: the model of each damage step (0: none)
+        int len[16] = {};
+        uint32_t routine = 0;         // part_damage_callbacks 0xC66A0: the type's damage routine (0 none)
+        int blowOff = 0;              // part_blow_off_step 0x135940: the head's step that knocks it off (0 none)
+        int steps[kGalleryParts] = {};
+        bool canGo[kGalleryParts] = {};
+    } dmg_;
+    int dmgStep_[kGalleryParts] = {};
+    bool noDamage_ = false;   // (the framing: the whole body)
+    void damageInit();
+    // the models drawn for the nodes (0: none) and the cut points (nodes whose part is gone, their parent kept)
+    void damageModels(const Skeleton& sk, std::vector<uint32_t>& model, std::vector<bool>& gone) const;
+    struct Fx { int kind; float start; float pos[3]; int node; };   // kind 0 a burst (on node), 1 a drip (at pos)
+    std::vector<Fx> fx_;
+    std::vector<int> cutNodes_;   // the last drawn cut points (the drips)
+    float nextDrip_ = 0;
+    std::vector<Placement> fxPlacements_;
 };
 
 } // namespace hotd::game

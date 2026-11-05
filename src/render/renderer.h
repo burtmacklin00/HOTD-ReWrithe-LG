@@ -23,6 +23,8 @@ struct Camera {
     float fovY = 0.80f;         // vertical field of view (radians); about 46 degrees like the arcade picture
     float nearZ = 1.0f;         // the perspective's near plane (depth clamp keeps what is nearer; the viewer's Free Cam: less)
     bool perPixelDepth = false; // Depth Buffer whatever Draw Depth says (the viewer's Free Cam: SceneView::freeCamToggle)
+    float shift[2] = {0, 0};    // the picture moved by (x, y) in normalised device units, the view unchanged (a moved
+                                // projection centre: the hit screen shake, GameView::draw); not for the VR eyes
     void basis(float right[3], float up[3], float fwd[3]) const;
 };
 
@@ -33,6 +35,10 @@ struct RenderOptions {
     bool cull = true;            // arcade: Model 2 back-face culling of single-sided polygons
     bool mipmap = true;          // arcade: Model 2 texture mip levels (with filtering on)
     bool pcBilinear = false;     // PC: the driver dialog's bilinear option (off in the release's devs.cfg: point sampling)
+    // team (2026-11-03): Options > Video > Transparency: 0 Smooth (the translucent texels cut at half their filtered
+    // cover, as before), 1 Clean Edges (the same cut, the colour from the solid texels only: no fringe), 2 Dithered (the
+    // cover stippled in a 4 x 4 screen-door pattern, the solid texels' colour)
+    int transparency = 0;
     float lightDir[3] = {0.3f, 0.8f, -0.5f};
     float ambient = 0.45f;
     float clear[3] = {0.02f, 0.02f, 0.04f};
@@ -44,7 +50,23 @@ struct RenderOptions {
     uint8_t sepia[64][3] = {};
     // Light Gun Edition: the fun modes' looks: 1 Night Vision (green), 2 Wireframe (neon lines on black), 3 VHS (washed out)
     int look = 0;
+    // cosmods: the Rainbow Blood mod (game/cosmods.h): 0 off; 1 each draw item (a splash, a body part) its own hue; 2 one
+    // hue for all; 3 the custom Blood Color (bloodRgb) on the arcade creatures' painted wounds (user 2026-11-03: the same
+    // recolour; entry 1023 already holds it). Arcade: polygon palette entry 1023 (the blood colour); PC: the blood
+    // texels the loader marked (alpha kRainbowAlpha, PcConfig::kBloodRainbow). rainbowPhase: the hue now, 0..1
+    int rainbow = 0;
+    float rainbowPhase = 0.0f;
+    float bloodRgb[3] = {1.0f, 0.0f, 0.0f};   // mode 3: the custom colour, 0..1
+    // the game's own rainbow (user 2026-11-03: as the computer screens behind Curien, palette_animation 0x25310 cycles
+    // the 90-colour table 0xAB120): its colours 0..1 when rainbowGame, else a plain hue
+    bool rainbowGame = false;
+    int rainbowSync = -1;   // Fast: the polygon palette entry (1009..1017, palette_animation's cycling ones) the blood entry takes
+    float rainbowTable[90][3] = {};
+    // rainbow2 (modes 1 / 2, arcade): the colour rows that hold the creatures' blood (Runtime::bloodRows, bit = row
+    // 0..31): every shade of them takes the rainbow per pixel, as the custom colour's tintBloodRows does on the CPU
+    uint32_t bloodRowMask = 0;
 };
+constexpr int kRainbowAlpha = 250;   // cosmods: a PC blood texel's alpha with Rainbow Blood on (drawn opaque)
 
 // Decal layers inside one model: a triangle lying in the plane of an earlier triangle of the same mesh (same facing) and
 // overlapping it (the blood and face layers of the creature parts: 598 arcade part models, a few PC ones) gets layer
@@ -113,6 +135,19 @@ public:
     int debugTie = 0;
     bool debugIds = false;                   // each item drawn in a flat colour = its index (debugNames: what it is)
     std::vector<std::string> debugNames;
+    // vr (2026-11-03, docs/vr.md): an explicit eye for the next draws instead of the Camera's view and symmetric
+    // perspective: a world -> eye matrix (column-major, rows right / up / forward of the left-handed eye, +z ahead, as
+    // draw builds from a Camera) and the frustum's edges as tangents (left / down negative: OpenXR's XrFovf angles'
+    // tangents), the same near plane and far plane as a Camera. Null (always outside VR): the Camera's, unchanged.
+    // The items' sideOnly strips are drawn whole with it (the 4:3 picture has no place in a headset's view)
+    struct EyeView {
+        float view[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        float tanLeft = -1, tanRight = 1, tanUp = 1, tanDown = -1;
+        float nearZ = 1.0f;
+    };
+    const EyeView* eye = nullptr;
+    // the view-projection the last draw used (column-major; vr: the eye's, for the overlays drawn over it)
+    float lastViewProj[16] = {};
 
 private:
     std::map<uint32_t, std::array<float, 2>> uvScroll_;
@@ -150,9 +185,9 @@ private:
     gl::GLuint spareUint_ = 0, spareFloat_ = 0, spareArray_ = 0;
     void makeSpareTextures();
     gl::GLuint programBand_ = 0;   // depthfix: the same shaders with KEY_BAND_FRAG (Depth Buffer's key band per pixel)
-    gl::GLint uViewProj_ = -1, uOffset_ = -1, uShading_ = -1, uLighting_ = -1, uLightDir_ = -1, uAmbient_ = -1, uFilter_ = -1;
+    gl::GLint uViewProj_ = -1, uOffset_ = -1, uShading_ = -1, uLighting_ = -1, uLightDir_ = -1, uAmbient_ = -1, uFilter_ = -1, uTransp_ = -1;
     gl::GLint uRot_ = -1;
-    gl::GLint uCull_ = -1, uMip_ = -1, uPcCullSign_ = -1, uClampUV_ = -1, uDepthBias_ = -1, uFloorY_ = -1, uFloorPull_ = -1, uPush_ = -1, uFade_ = -1, uSideOnly_ = -1, uSideClip_ = -1, uFlat_ = -1, uGrey_ = -1, uSepia_ = -1, uTie_ = -1, uTieItem_ = -1, uIdMode_ = -1;
+    gl::GLint uCull_ = -1, uMip_ = -1, uPcCullSign_ = -1, uClampUV_ = -1, uDepthBias_ = -1, uFloorY_ = -1, uFloorPull_ = -1, uPush_ = -1, uFade_ = -1, uSideOnly_ = -1, uSideClip_ = -1, uFlat_ = -1, uGrey_ = -1, uSepia_ = -1, uRainbow_ = -1, uRainbowPhase_ = -1, uBloodRgb_ = -1, uRainbowTable_ = -1, uRainbowGame_ = -1, uRainbowSync_ = -1, uBloodRows_ = -1, uTie_ = -1, uTieItem_ = -1, uIdMode_ = -1;
     gl::GLint uCamPos_ = -1, uM2Known_ = -1, uM2Light_ = -1, uM2Diffuse_ = -1, uM2Ambient_ = -1, uM2SpecScale_ = -1, uM2SpecCtl_ = -1, uCamFwd_ = -1, uM2Gamma_ = -1;
     gl::GLint uHasRepl_ = -1, uPcFilter_ = -1, uGreyRepl_ = -1, uSort_ = -1, uSortItem_ = -1, uPrepass_ = -1, uHybrid_ = -1, uKeyless_ = -1, uProj_ = -1, uBiasScale_ = -1;
     bool sortFragDepth_ = false;   // earlyz: Arcade Sort through gl_FragDepth (HOTD_SORT_FRAGDEPTH / _EXACT), else vertex depth

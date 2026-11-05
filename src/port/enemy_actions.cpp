@@ -126,7 +126,7 @@ template <class P> void Game<P>::enemy_act12_walk_to_spot(uint32_t obj)
     if ((mem.at<uint8_t>(obj + ob(0x58)) & 1) == 0)
         return;
     enemy_frame_end(obj);
-    if (walk_to(obj, mem.f32(rec + 4), mem.f32(rec + 0xC), 0x100, 1.0f) != 0) {
+    if (walk_to(obj, mem.f32(rec + 4), mem.f32(rec + 0xC), 0x100, 1.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {   // (TotD 0: the carrier waits)
         set_motion_blend(obj, 0x216, 16, 4);
         mem.at<Enemy>(obj).routine = F::enemy_act12_frame;
     }
@@ -191,7 +191,7 @@ template <class P> void Game<P>::ENGuardZombieRunAfterResearcher(uint32_t obj)
     if ((mem.at<uint8_t>(obj + ob(0x58)) & 1) == 0)
         return;
     const bool slow = mem.at<Enemy>(obj).action == 2 && mem.at<uint8_t>(G::chapter) == 2 && mem.at<uint8_t>(G::event_index) == 2;
-    if ((!pc_path() || prey != 0) && walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), slow ? 0x180u : 0x8000u, 8.0f) != 0) {
+    if ((!pc_path() || prey != 0) && walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), slow ? 0x180u : 0x8000u, 8.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {
         set_motion_blend(obj, ((mem.at<Enemy>(obj).parts_lost >> 1) & 1) ? 0x260 : 0x264, 42, 4);
         guard_bite_slot(obj, F::ENGuardZombieBiteAgent);
     }
@@ -267,7 +267,7 @@ template <class P> void Game<P>::ENGuardZombieRunAfterResearcher2(uint32_t obj)
     enemy_scripted_hit(obj);
     if ((mem.at<uint8_t>(obj + ob(0x58)) & 1) == 0)
         return;
-    if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 16.0f) != 0) {
+    if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 16.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {
         set_motion_blend(obj, ((mem.at<Enemy>(obj).parts_lost >> 1) & 1) ? 0x260 : 0x264, 42, 4);
         guard_bite_slot(obj, F::ENGuardZombieBiteAgent);
     }
@@ -286,7 +286,7 @@ template <class P> void Game<P>::ENGuardZombieRunAfterResearcher_St3_00(uint32_t
     enemy_scripted_hit(obj);
     if ((mem.at<uint8_t>(obj + ob(0x58)) & 1) == 0)
         return;
-    if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 16.0f) != 0) {
+    if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 16.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {
         if (uint16_t(mem.at<Enemy>(obj).type) == 0x3F)
             set_motion_blend(obj, 0x24A, 0, 8);
         else
@@ -562,7 +562,7 @@ template <class P> void Game<P>::enemy_act15_attack_researcher(uint32_t obj)
             mem.at<Enemy>(obj).substate = 1;
         }
     } else if (sub == 1) {
-        if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 24.0f) != 0) {
+        if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 24.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {
             set_motion_blend(obj, ((mem.at<Enemy>(obj).parts_lost >> 2) & 1) ? 0x25B : 0x25A, 0, 8);
             guard_bite_slot(obj, F::ENGuardZombieBiteAgent);
         }
@@ -598,7 +598,7 @@ template <class P> void Game<P>::enemy_act6_attack_researcher(uint32_t obj)
     };
     const int16_t sub = mem.at<Enemy>(obj).substate;
     if (sub == 0) {
-        if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 15.0f) != 0) {
+        if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 15.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {
             set_motion_blend(obj, 0x264, 30, 4);
             const int32_t m = mem.at<Enemy>(obj).motion;
             uint32_t i = 0;
@@ -649,7 +649,7 @@ template <class P> void Game<P>::enemy_act14_attack_researcher(uint32_t obj)
             mem.at<Enemy>(obj).substate = 1;
         }
     } else if (sub == 1) {
-        if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 16.0f) != 0) {
+        if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 16.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {
             set_motion_blend(obj, 0x24A, 0, 8);
             guard_bite_slot(obj, F::ENGuardZombieBiteAgent);
         }
@@ -685,7 +685,7 @@ template <class P> void Game<P>::enemy_act17_attack_researcher(uint32_t obj)
             mem.at<Enemy>(obj).substate = 1;
         }
     } else if (sub == 1) {
-        if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 24.0f) != 0) {
+        if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 24.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {
             if (mem.at<uint8_t>(G::event_index) == 1)
                 set_motion_blend(obj, 0x26C, 30, 16);
             else
@@ -739,14 +739,16 @@ template <class P> void Game<P>::enemy_act7_chainsaw_attack(uint32_t obj)
     } else if (sub == 1) {
         const float px = mem.f32(prey + ob(0x20)), pz = mem.f32(prey + ob(0x28));
         if (((mem.at<Enemy>(obj).parts_lost >> 1) & 1) == 0) {
-            if (walk_to(obj, px, pz, 0x8000, 8.0f) != 0) {
+            if (walk_to(obj, px, pz, 0x8000, 8.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {
                 attack(0x225, 24, 8);
                 return;
             }
         } else if (walk_to(obj, px, pz, 0x8000, 11.0f) != 0) {
-            attack(0x21C, 40, 24);
-            return;
-        } else if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 14.0f) != 0) {
+            if (!(gPreyHold && gPreyHold(obj))) {   // (held: no second step this frame)
+                attack(0x21C, 40, 24);
+                return;
+            }
+        } else if (walk_to(obj, mem.f32(prey + ob(0x20)), mem.f32(prey + ob(0x28)), 0x8000, 14.0f) != 0 && !(gPreyHold && gPreyHold(obj))) {
             attack(0x21C, 30, 12);
             return;
         }

@@ -288,7 +288,7 @@ template <class P> void Game<P>::body_free_parts(uint32_t obj)
         mem_free(mem.u32(obj + 0xE0));
         mem_free(mem.u32(obj + 0x114));
         mem_free(mem.u32(obj + 0x118));
-        mem.set32(G::player_bodies + 4 * uint32_t(int32_t(mem.at<int8_t>(obj + 0x2E6))), 0);
+        mem.set32(body_slot_addr(int32_t(mem.at<int8_t>(obj + 0x2E6))), 0);   // (G::player_bodies + 4 x slot; Survival: 16.. its own)
     }
 }
 

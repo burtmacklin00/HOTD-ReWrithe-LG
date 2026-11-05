@@ -450,6 +450,8 @@ template <class P> void Game<P>::pick_target_player(uint32_t obj)
         (void)obj;   // the PC form: not ported (vtable only; ProofPc replays it)
     } else {
         mem.at<int8_t>(obj + 0x2E8) = -1;
+        if (gAttackHold && gAttackHold(obj))   // (ours: The Typing of the Dead 0's window, game.h; null in the arcade)
+            return;
         int n = 0;
         if (player_in_play(0) && mem.at<uint8_t>(G::player_targeted) == 0) {
             ++n;

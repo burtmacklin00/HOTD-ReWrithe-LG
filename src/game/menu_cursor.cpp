@@ -9,6 +9,7 @@ namespace hotd::game {
 bool MenuCursor::event(const SDL_Event& e, const MenuCursorConfig& c, float canvasW)
 {
     const float speed = float(std::clamp(c.speed, 1, 10)) / 5.0f;
+    const float gyroSpeed = float(std::clamp(c.gyroSpeed, 1, 10)) / 5.0f;   // (GitHub #36: the gyro's own)
     switch (e.type) {
     case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
     case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
@@ -57,7 +58,7 @@ bool MenuCursor::event(const SDL_Event& e, const MenuCursorConfig& c, float canv
             return false;
         // tilt to point: about 40 degrees turn crosses the screen at speed 5; a little dead zone against drift
         const float yaw = e.gsensor.data[1], pitch = e.gsensor.data[0];
-        const float k = canvasW / 0.7f * speed * dt;
+        const float k = canvasW / 0.7f * gyroSpeed * dt;
         if (std::fabs(yaw) > 0.02f) dx_ -= yaw * k;
         if (std::fabs(pitch) > 0.02f) dy_ -= pitch * k;
         ++gyroMoves;

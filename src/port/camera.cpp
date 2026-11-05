@@ -1189,7 +1189,20 @@ template <class P> void Game<P>::camera_globals_reset()
 template <class P> void Game<P>::camera_path_eval(uint32_t path, uint32_t frame, uint32_t eye, uint32_t look,
                                                   uint32_t roll, uint32_t zoom)
 {
+    // Attract Gore (user 2026-11-04, the attract as the 1998 PC plays it): the prologue's scene 7 (mode 9, chapter slot
+    // 5; path 107, the hostage and the two zombies) on the PC's camera keys. CAMALL.RBH's path 107 ends higher than
+    // the ROM's (frame 100: eye y 13.79 instead of 10.79, look-at y 18 instead of 16; every other path matches the
+    // ROM's keys): copro data words 0xC803 / 0xC7CC / 0xC7D0 read as the PC's values for this call. Off: Revision A
+    // (PC Mode's camera already plays CAMALL.RBH's keys: pc_path below)
+    static constexpr uint32_t kPcKeys[3][2] = {{0xC803, 0x415CA565}, {0xC7CC, 0x41900000}, {0xC7D0, 0x41900000}};
+    const bool pcKeys = !P::pc && gAttractGore && path == 107 && !pc_path() && mem.at<int16_t>(G::game_mode) == 9 &&
+                        mem.at<int8_t>(G::chapter) == 5 && tgp.data_word(0xC803) == 0x412CA565 &&
+                        tgp.data_word(0xC7CC) == 0x41800000 && tgp.data_word(0xC7D0) == 0x41800000;
+    if (pcKeys)
+        tgp.set_patch(kPcKeys, 3);
     Tgp::Out o = cam_copro(0x6E, {path, frame});
+    if (pcKeys)
+        tgp.set_patch(nullptr, 0);
     if constexpr (!P::pc) {
         if (pc_path()) {
             // PC Mode / Boss Mode on the arcade logic: THOTD.EXE camera_path_eval 0x461980: the frame truncated to an

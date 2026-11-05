@@ -40,6 +40,12 @@ with.
   `f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca`, Hebrew
   `dfdb3056de1f4542b888c77a1a8a750548a802e271479f56e52152423b64dde8` (of the files as downloaded 2026-10-26). The
   bidirectional algorithm and the Arabic shaping (`src/render/bidi.*`) are this project's own code.
+- `data/fonts/NotoSansSC-Bold.otf` (the Simplified Chinese menu font) is Noto Sans CJK SC by Google and Adobe (Version
+  2.004, from github.com/notofonts/noto-cjk), Copyright 2014-2021 Adobe, and `data/fonts/NotoSans-Bold.ttf` (the
+  Latin / Greek / Cyrillic / Vietnamese menu font: Russian, Turkish, Polish, Vietnamese) is Noto Sans v2.015, Copyright 2022 The Noto Project Authors
+  (github.com/notofonts/latin-greek-cyrillic); both unchanged, under the SIL Open Font License 1.1:
+  `data/fonts/OFL.txt`. SHA-256: SC `c6cb5a93abaa9edc8ee7463b7ebb7f42d618d40e6ed2f7a5371c97b0b64767c0`, Noto Sans
+  `1df075a380fc7cb898acf64c1f7b3b4dd780de3caa860178bf929de35817a913` (of the files as downloaded 2026-11-03).
 - `data/ui/prompts/xelu/` (the default button prompts: every controller's and the keyboard's / mouse's icons) are from
   **Xelu's Free Controller & Key Prompts** by Nicolae "Xelu" Berbece (Those Awesome Guys), updated by Paul Paun,
   thoseawesomeguys.com/prompts; public domain under Creative Commons Zero (CC0 1.0): `data/ui/prompts/LICENSE-Xelu.txt`
@@ -63,13 +69,16 @@ with.
 | Monocypher 4.0.3 | compiled in (online co-op) | CC0-1.0 (or BSD-2-Clause) | `src/third_party/monocypher/LICENCE.md` (CC0 chosen) |
 | Musashi (Karl Stenerud, commit 313ebf1) | compiled in (arcade sound board) | MIT | below |
 | MAME SCSP / SCSP DSP (mame0289) | compiled in (arcade sound board) | BSD-3-Clause | below |
-| Noto Sans KR / JP / Arabic / Hebrew | `data/fonts/` | SIL OFL 1.1 | `data/fonts/OFL.txt` |
+| Noto Sans KR / JP / SC / Arabic / Hebrew, Noto Sans | `data/fonts/` | SIL OFL 1.1 | `data/fonts/OFL.txt` |
 | Xelu's Free Controller & Key Prompts | `data/ui/prompts/xelu/` | CC0 1.0 | `data/ui/prompts/LICENSE-Xelu.txt` |
 | Kenney Input Prompts 1.5A | `data/ui/prompts/kenney/` | CC0 1.0 | `data/ui/prompts/LICENSE-Kenney.txt` |
 | Visual C++ runtime (Windows only) | `bin/` | Microsoft Visual Studio redistributable | Visual Studio's license terms |
 | ANGLE (The ANGLE Project Authors, chromium/7258; Windows only) | `bin/libEGL.dll`, `bin/libGLESv2.dll` (the DirectX renderer; built by vcpkg's `angle` port from Google's sources) | BSD-3-Clause | below |
 | xxHash (Yann Collet; inside ANGLE) | `bin/libGLESv2.dll` | BSD-2-Clause | below |
 | zlib 1.3.2 (Jean-loup Gailly, Mark Adler; ANGLE's) | `bin/z.dll` | zlib | below |
+| OpenXR SDK loader 1.1.65 (The Khronos Group Inc.; Windows only) | `bin/openxr_loader.dll` (VR headsets: `--vr openxr`, docs/vr.md; built against the SDK's prebuilt loader, not in this repository) | Apache-2.0 | `licenses/OpenXR-LICENSE.txt` in the package (`docs/release/LICENSE-OpenXR-Apache-2.0.txt` here) |
+| OpenXR loader for Android 1.1.65 (The Khronos Group Inc.; the Meta Quest APK only) | `lib/arm64-v8a/libopenxr_loader.so` in the APK (docs/quest.md; from `openxr_loader_for_android-1.1.65.aar`, not in this repository) | Apache-2.0 | `assets/licenses/OpenXR-LICENSE.txt` in the APK |
+| SDL3's Android Java activity (the Meta Quest APK only) | `classes.dex` in the APK (SDL's `android-project` sources, compiled) | zlib | `assets/licenses/SDL-LICENSE.txt` in the APK |
 
 ### SDL3 (zlib license)
 

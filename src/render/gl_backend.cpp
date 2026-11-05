@@ -236,6 +236,19 @@ void setShaderCacheFile(const std::string& path) { gBlobFile = path; }
 
 void prepareWindow(int backend)
 {
+#if defined(__ANDROID__)
+    // quest: the device's OpenGL ES 3 (the Quest: Adreno, ES 3.2) through EGL; no desktop OpenGL, no ANGLE
+    (void)backend;
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
+    SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);   // (SDL's minimums would allow a 16-bit RGB565 surface: the menus banded)
+    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
+    return;
+#endif
     if (backend == kBackendAngle && angleAvailable()) {
         setupES();
     } else if (backend == kBackendGL && SDL_GetHintBoolean(SDL_HINT_OPENGL_ES_DRIVER, false)) {   // (back from ANGLE)
@@ -280,6 +293,24 @@ bool angleAvailable()
 SDL_GLContext createContext(SDL_Window*& window, int backend, std::string& err)
 {
     err.clear();
+#if defined(__ANDROID__)
+    (void)backend;   // quest: OpenGL ES always (prepareWindow's attributes), the ES layer's replacements on it
+    SDL_GLContext es = SDL_GL_CreateContext(window);
+    if (!es) {
+        err = std::string("OpenGL ES 3: ") + SDL_GetError();
+        return nullptr;
+    }
+    gES = true;
+    if (const char* missing = load()) {
+        err = std::string("OpenGL ES function missing: ") + missing;
+        SDL_GL_MakeCurrent(window, nullptr);
+        SDL_GL_DestroyContext(es);
+        gES = false;
+        return nullptr;
+    }
+    gInUse = "OpenGL ES";
+    return es;
+#endif
     if (backend == kBackendAngle) {
         if (angleAvailable()) return tryAngle(window, err);
         SDL_Log("renderer: DirectX (ANGLE) chosen, but libEGL.dll / libGLESv2.dll are not beside the game: OpenGL");

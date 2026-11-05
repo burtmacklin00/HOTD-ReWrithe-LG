@@ -8,6 +8,10 @@ namespace hotd::port {
 // Gameplay "Attract Gore" (user 2026-10-31): the attract demo's hits change models / blow parts off and show their
 // effects as the 1998 PC does (no game-mode test); off = Revision A (only in game mode 4). Play (mode 4) is unchanged.
 bool gAttractGore = true;
+// The Typing of the Dead 0's attack window (game.h)
+bool (*gAttackHold)(uint32_t obj) = nullptr;
+bool (*gHitHold)(int player) = nullptr;
+bool (*gPreyHold)(uint32_t obj) = nullptr;
 
 
 // 0x34A50 / PC 0x471828: x = x * 0x41C64E6D + 0x3039 (rand_state), returns bits 16-31
@@ -24,6 +28,8 @@ template <class P> uint32_t Game<P>::rand()
 // 0x69B0 / PC 0x437344 (player, points): score + points, floored at 0
 template <class P> void Game<P>::add_score(int player, int32_t points)
 {
+    if (survivalScoring)   // (Survival Mode: its own points, survival_hits; game.h)
+        return;
     Player& pl = mem.at<Player>(player_rec(player));   // 4P: seats 2 / 3 in the block
     int32_t s = pl.score + points;
     if (!(0 <= s))
@@ -48,6 +54,7 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
     mem.set32(G::body_current, obj);
     const uint32_t root = uint32_t(o.part_root);
     mem.at<uint8_t>(G::eye_hits) = 0xFF;
+    survivalHitSeats = 0;
     mem.at<int16_t>(G::part_tally + 2) = 0;
     mem.at<int16_t>(G::part_tally) = 0;
     if (coop4_on()) {   // 4P: seats 2 / 3's tallies
@@ -133,6 +140,13 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
                 add_score(k.killer, 120);
         }
     }
+    if (survivalScoring) {   // Survival Mode's points (game.h survival_hits): the seats that hit, the killer, the head hits
+        const bool four = coop4_on();
+        const uint32_t seats = survivalHitSeats;   // (part_hit's: the parts hit this frame; the object's bits 1 / 2 stay set)
+        const uint32_t head = eye == 0xFF ? 0 : four ? mem.at<uint8_t>(coop4::kEyeSeats) : eye == 2 ? 3u : 1u << (eye & 1);
+        if (seats != 0 || head != 0)
+            survival_hits(obj, seats | head, life - int32_t(mem.at<int16_t>(G::hit_damage)) > 0 ? -1 : int(mem.at<Obj>(obj).killer), head);
+    }
     body_free_cut_parts(root);
 }
 
@@ -163,6 +177,7 @@ template <class P> void Game<P>::part_hit(uint32_t pa)
             if (four ? ((seats >> p) & 1) == 0 : ((part.flags >> (((p & 0xFF) + 1) & 0x1F)) & 1) == 0)
                 continue;
             const uint32_t pp = four ? (p & 1) : p;
+            survivalHitSeats |= 1u << (p & 3);   // (Survival Mode's points: the seats whose shots hit this frame)
             const int32_t ht = int32_t(mem.u32(G::hit_type));
             const uint8_t sever = mem.at<uint8_t>(G::part_roles + uint32_t(ht * 31) * kRole + uint32_t(part.role) * kRole + 4);
             if (cls == 1)

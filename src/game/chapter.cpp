@@ -111,9 +111,11 @@ void Runtime::chapter_start(int chapter, int event, int players, int mode)
     if (mode == 4 && mem.u32(G::frame_counter) == 0)
         mem.set32(G::frame_counter, 1015);
     mem.at<int16_t>(G::hostages_rescued_chapter) = 0;
+    // GitHub #29: one player in player 2's seat (soloSeat 1; arcade games: PC Mode's seats are its character picks)
+    const bool p2Solo = players == 1 && soloSeat == 1 && !pm_on() && mode == 4;
     for (int p = 0; p < 2; ++p) {
         port::a::Player& pl = mem.at<port::a::Player>(G::players, uint32_t(p));
-        if (p < players) {
+        if (p2Solo ? p == 1 : p < players) {
             pl.state = 5;
             pm_join_char(p);
             pm_reload_at[p] = 0;
@@ -147,6 +149,19 @@ void Runtime::chapter_start(int chapter, int event, int players, int mode)
     mem.at<int16_t>(G::players_in_game_b) = int16_t(std::min(players, 2));
     coop4_reset(players, lives);
     chapter_load(kChapterGroup);
+    retry_point_take();
+}
+
+// GitHub #5: the retry point (players 1 / 2 in play or starting it, their scores and lives) as a chapter begins
+void Runtime::retry_point_take()
+{
+    retryPoint.chapter = mem.at<int8_t>(G::chapter);
+    for (int p = 0; p < 2; ++p) {
+        const port::a::Player& pl = mem.at<port::a::Player>(G::players, uint32_t(p));
+        retryPoint.in[p] = pl.state == 5 || pl.state == 2 || pl.state == 3;
+        retryPoint.score[p] = pl.score;
+        retryPoint.lives[p] = pl.lives;
+    }
 }
 
 // 0x25D40 game_chapter_start (sub-mode 1, after game_chapter_end_wait put chapter + 1; the port's, src/port/
@@ -168,6 +183,7 @@ void Runtime::game_chapter_start()
     chapterDone = false;
     const int chapter = mem.at<int8_t>(G::chapter);
     chapterChanged = chapter;
+    retry_point_take();   // (#5)
     if (log)
         log("chapter " + std::to_string(chapter + 1) + " starts (event " + std::to_string(int(mem.at<int8_t>(G::event_index))) + ")");
 }
@@ -236,6 +252,7 @@ void Runtime::texture_area_load(uint32_t area, int32_t cover)
     if (log && std::getenv("HOTD_TRACE_ROWS"))
         log("texture_area_load area " + std::to_string(area));
     colorRows.clear();
+    bloodRows.clear();
     ++colorRowsSerial;
 }
 
@@ -244,6 +261,7 @@ void Runtime::texture_area_load(uint32_t area, int32_t cover)
 void Runtime::color_row_set(int32_t row, int32_t entry)
 {
     colorRows[2 * row + 1] = entry;   // the odd table rows: 0x512D20 + row x 0x100 = table row 2 x row + 1
+    bloodRows.erase(2 * row + 1);      // (GGSET marks it again when it is a blood row)
     ++colorRowsSerial;
     // the work RAM part (ch4proof, the whole-game differential): the row into the three shadow tables (r / g / b,
     // 0x40 halfwords from the library's byte triples) and colour_row_queue (palette_grey_build averages these tables)

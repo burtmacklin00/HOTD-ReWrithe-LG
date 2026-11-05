@@ -113,10 +113,12 @@ void Runtime::object_draw(uint32_t obj)
 void Runtime::body_draw(uint32_t obj)
 {
     struct Keep { int& v; int s; ~Keep() { v = s; } } keep{objectDraw_, objectDraw_};
-    struct KeepBody { uint32_t& v; uint32_t s; ~KeepBody() { v = s; } } keepBody{drawBody_, drawBody_}, keepPart{drawPart_, drawPart_};
+    struct KeepBody { uint32_t& v; uint32_t s; ~KeepBody() { v = s; } } keepBody{drawBody_, drawBody_}, keepPart{drawPart_, drawPart_},
+        keepBossPart{drawBossPart_, drawBossPart_};
     ++objectDraw_;
     drawBody_ = obj;
     drawPart_ = 0;
+    drawBossPart_ = 0;
     port::Game<A>::body_draw(obj);
 }
 

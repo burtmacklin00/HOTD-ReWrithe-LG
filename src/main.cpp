@@ -9,8 +9,8 @@
 //        [--steam-test-vdf <file> [--steam-grid-out <folder>]]   testing: that shortcuts.vdf instead of Steam's
 //   hotd --check-files [--arcade <zip|folder>] [--pc <folder>] [--force-check]   the files check alone (exit code)
 //   [--arcade <zip|folder>] the ROMs (checked; the regions are rebuilt into the cache folder) instead of --regions
-//   [--models arcade|pc] [--difficulty 0-4] [--lives 0-11] [--blood 0-5] [--strict] (no teaser cuts) override the
-//   launcher's choices; [--no-launcher] straight into the game; [--auto-start] (testing) presses Start;
+//   [--models arcade|pc] [--difficulty 0-4] [--lives 0-11] [--start-lives N] [--max-lives N] [--blood 0-5] [--strict]
+//   (no teaser cuts) override the launcher's choices; [--no-launcher] straight into the game; [--auto-start] (testing) presses Start;
 //   [--start-at P:F] (testing) player P presses start at game frame F (join / continue); --shot-at 0 = the launcher.
 //   [--title | --no-title] the arcade's title screen and attract loop before Chapter 1 (src/game/attract.cpp; start =
 //   key 1 / 2 or a mouse's middle button): default the launcher's "Title / attract" in a launcher run, off in every
@@ -68,10 +68,14 @@
 #include "game/audio.h"
 #include "game/bot.h"
 #include "game/chapters.h"
+#include "game/lives.h"
 #include "game/diff_replay.h"
 #include "game/pcmode_scores.h"
 #include "game/ragdoll.h"
+#include "game/cosmods.h"
 #include "game/sonic.h"
+#include "game/typing.h"
+#include "game/typing_hud.h"
 #include "game/files_check.h"
 #include "game/host.h"
 #include "game/sights.h"
@@ -95,6 +99,7 @@
 #include "game/installer.h"
 #include "game/lang.h"
 #include "game/view.h"
+#include "vr/vr_scene.h"
 #include "net/net_game.h"
 #include "net/online_menu.h"
 #include <optional>
@@ -103,6 +108,7 @@
 #include "render/gl_backend.h"
 #include "render/overlay.h"
 #include "render/crt.h"
+#include "render/gamma.h"
 #include "render/renderer.h"
 #include "assets/archive.h"
 #include "assets/mods.h"
@@ -122,6 +128,9 @@
 #include "util/game_exe.h"
 #ifdef HOTD_HAVE_ARCADE_SOUND
 #include "audio/sound_board.h"
+#endif
+#if defined(__ANDROID__)
+#include "util/android_app.h"   // quest (docs/quest.md)
 #endif
 
 #include <SDL3/SDL.h>
@@ -220,17 +229,19 @@ static bool gunAtEdge(const game::GunState& g, int lw, int lh)
 }
 // GitHub #17 (user 2026-11-03): Options > Gameplay "Edge Reload", as The House of the Dead 2: a player in play with
 // rounds fired whose mouse crosshair arrives on the screen's edge reloads (an off-screen pull, the original's reload),
-// once per arrival; only while shots are on (an off-screen pull in a cut-scene would skip it)
+// once per arrival; only while shots are on (an off-screen pull in a cut-scene would skip it). GitHub #42 (2026-11-04:
+// "Edge screen reload does not work in PC Mode"): PC Mode too, against the character's full load (pm_full_rounds;
+// was: never in PC Mode)
 static bool gEdgeWas[4] = {};
 static bool edgeReloadNow(game::Runtime& rt, int p, bool atEdge, bool on)
 {
     const bool arrived = atEdge && !gEdgeWas[p & 3];
     gEdgeWas[p & 3] = atEdge;
-    if (!on || !arrived || rt.pm_on())
+    if (!on || !arrived)
         return false;
     const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
     return rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && rt.mem.u32(game::A::G::shot_enable) != 0 && pl.state == 5 &&
-           pl.rounds < 6 && rt.mem.u32(game::A::G::ammo_enabled) != 0;
+           pl.rounds < rt.pm_full_rounds(p) && rt.mem.u32(game::A::G::ammo_enabled) != 0;
 }
 // the game area's half width in arcade units (the screen is +-192 high) for the launcher's Aspect: widescreen = the
 // window's; 4:3 = the arcade's 496-wide screen (248) at most; aspect1610: 16:10 = 192 x 1.6 = 307.2 at most
@@ -501,6 +512,38 @@ static game::MenuHooks* gTourHooks = nullptr;   // misc18: the menu's hooks (the
 static const int gMenuTourN = std::getenv("HOTD_MENU_PERF_TOUR") ? std::max(60, std::atoi(std::getenv("HOTD_MENU_PERF_TOUR"))) : 0;
 
 static int gAutofireEvery = 15;   // --autofire-every N (T1): frames between autofire shots
+static int gClearMarksOpt = -1;   // --hit-marks dots|smooth (old: dithered|see-through) (bugs1 #35): Video > Hit Marks for this run
+static int gShowCrossOpt = -1;   // gunfb: --no-crosshair (0) / --show-crosshair (1): Video > Show Crosshairs for this run
+static int gFlashSizeOpt = -1;   // gunfb: --shot-flash-size small|arcade|large (or 0|1|2): Video > Shot Flash Size for this run
+static int gTranspOpt = -1;      // fxux: --transparency auto|dots|smooth|dark (or 3|2|1|0): Video > Transparency for this run
+// fxux (user 2026-11-03: "Settings in the pause menu: the full Options pages over the paused game"): the menus' Options
+// pages shown from the pause (the screen is the menu's, the game held as it was); the paused game's picture under them
+static bool gOverGame = false;
+static unsigned gOverTex = 0;
+static int gOverW = 0, gOverH = 0;
+// the settings a game in progress takes from the menus' at once (the rest it read at its start: from the next game,
+// menu_pages.h menuInGameRows). Online the game rules stay the host's: only this PC's own draw / sound / input ones
+static void liveSettings(game::LaunchConfig& g, const game::LaunchConfig& m, bool online)
+{
+    g.hitSparks = m.hitSparks, g.muzzleFlash = m.muzzleFlash, g.bloodParticles = m.bloodParticles, g.clearMarks = m.clearMarks;
+    g.shotFlashSize = m.shotFlashSize, g.showCrosshairs = m.showCrosshairs;   // (gunfb)
+    g.transparency = m.transparency, g.smooth = m.smooth, g.frameRate = m.frameRate, g.vsync = m.vsync, g.menuFps = m.menuFps;
+    g.gamma = m.gamma, g.crt = m.crt, g.teamFlash = m.teamFlash, g.holdSkip = m.holdSkip, g.scoreDisplay = m.scoreDisplay;
+    std::copy(m.sights, m.sights + 4, g.sights);
+    g.music = m.music, g.musicVolume = m.musicVolume, g.sfxVolume = m.sfxVolume, g.musicNumbering = m.musicNumbering;
+    g.menuStyle = m.menuStyle, g.liveBackground = m.liveBackground, g.menuMusic = m.menuMusic;
+    g.fullscreen = m.fullscreen, g.exclusive = m.exclusive, g.display = m.display;
+    g.resFullW = m.resFullW, g.resFullH = m.resFullH, g.resWinW = m.resWinW, g.resWinH = m.resWinH;
+    std::copy(m.keys, m.keys + 4, g.keys);
+    std::copy(m.padBinds, m.padBinds + 4, g.padBinds);
+    std::copy(m.pad, m.pad + 4, g.pad);
+    std::copy(&m.gunCal[0][0], &m.gunCal[0][0] + 16, &g.gunCal[0][0]);
+    g.gunFlash = m.gunFlash, g.gunBorder = m.gunBorder, g.padPrompts = m.padPrompts, g.buttonStyle = m.buttonStyle;
+    g.iconOutline = m.iconOutline, g.touchCursor = m.touchCursor, g.gyroCursor = m.gyroCursor, g.cursorSpeed = m.cursorSpeed;
+    g.gyroCursorSpeed = m.gyroCursorSpeed, g.mouseSens[0] = m.mouseSens[0], g.mouseSens[1] = m.mouseSens[1];
+    if (!online)   // (the host's for both PCs online: protocol 16's Auto Reload)
+        g.autoReload = m.autoReload, g.edgeReload = m.edgeReload, g.chapterRetry = m.chapterRetry;
+}
 static bool gAutofireQuiet = false;   // the cut-scene viewer's seek: no "fire at" lines
 // the cut-scene viewer (game/scene_view.h; the Gallery's Cut-scenes page, --scene-view C:S)
 static game::SceneView gScene;
@@ -515,6 +558,199 @@ static bool gFreeDrag = false;                   // the right button held (Free 
 static bool gTrailer = false;
 static int gTrailerCfg = -1;   // (-1: not seen yet)
 static uint64_t gTrailerNote = 0;
+// vr (2026-11-03, docs/vr.md): --vr preview | openxr: the VR frame (vr/vr_scene.h) instead of the flat picture in
+// play, the gun's ray as player 1's aim; null: off (nothing of VR runs). --vr-eye left / right / both (the preview's
+// window), --vr-head yaw,pitch,roll (degrees: the preview's head held there), --vr-preview-test (headless: the aim's
+// math, then --render with the preview, the round trip of the game's own aim each frame)
+static std::unique_ptr<vr::Scene> gVr;
+static std::string gVrBackend;
+static int gVrEye = 2;
+static bool gVrHeadSet = false, gVrTest = false;
+static float gVrHead[3] = {0, 0, 0};
+static bool vrStart(const std::string& vrDir)
+{
+    std::string err;
+    auto b = vr::make(gVrBackend);
+    if (!b) {
+        std::fprintf(stderr, "vr: backend \"%s\" not available (%s)\n", gVrBackend.c_str(),
+                     gVrBackend == "openxr" ? "built without HOTD_OPENXR: docs/vr.md" : "use preview or openxr");
+        return false;
+    }
+    b->display = gVrEye;
+    auto s = std::make_unique<vr::Scene>();
+    if (!s->init(std::move(b), vrDir, err)) {
+        std::fprintf(stderr, "vr: %s\n", err.c_str());
+        return false;
+    }
+    if (gVrHeadSet) {
+        const float lean[3] = {0, 0, 0};
+        s->backend()->scriptHead(gVrHead, lean);
+    }
+    s->followGameAim = gVrTest;
+    gVr = std::move(s);
+    std::printf("vr: %s backend on (%s)\n", gVrBackend.c_str(), vrDir.c_str());
+    return true;
+}
+static std::string vrDataDir()
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    for (const std::string& d : lang::dataDirs())
+        if (fs::is_directory(fs::path(d) / "data" / "vr", ec))
+            return (fs::path(d) / "data" / "vr").string();
+    return lang::dataDirs().empty() ? std::string("data/vr") : (fs::path(lang::dataDirs()[0]) / "data" / "vr").string();
+}
+// vr: a frame in VR: the HUD (drawHud: the window's / --render's HUD call for a w x h picture with the players' aim
+// in its pixels) into the screen plane's panel, without player 1's sight (the 3D crosshair is it), the eyes, the desktop
+// picture into outFbo
+static void vrFrame(game::Runtime& rt, game::GameView& view, game::Hud& hud, int aspect, unsigned outFbo, int outW, int outH,
+                    const game::FrameSnapshot* prev, float alpha,
+                    const std::function<void(int w, int h, const float aim[4][2])>& drawHud)
+{
+    vr::Scene::Frame f;
+    f.view = &view;
+    f.rt = &rt;
+    f.hud = &hud;
+    f.prev = prev;
+    f.alpha = alpha;
+    f.halfW = gameHalfW(aspect, 16, 9);   // (the game area's shape: 4:3 248, 16:10 307, widescreen 341)
+    f.outFbo = outFbo, f.outW = outW, f.outH = outH;
+    f.drawHud = [&](int w, int h) {
+        float aim[4][2];
+        for (int p = 0; p < 4; ++p)
+            view.fromArcade(rt.gun[p].x, rt.gun[p].y, w, h, aim[p][0], aim[p][1]);
+        const bool cross0 = hud.drawCross[0];
+        hud.drawCross[0] = false;
+        if (rt.mem.at<int16_t>(game::A::G::game_mode) == 5) {   // the game over's route map: under the HUD, on the panel
+            const float clear[3] = {0, 0, 0};
+            hud.drawUnder(rt, w, h, clear);
+        }
+        drawHud(w, h, aim);
+        hud.drawCross[0] = cross0;
+    };
+    gVr->frame(f);
+    if (gVr->lost()) {   // openxr: the runtime ended the session (its dashboard's quit, the headset gone): flat from now
+        SDL_Log("vr: the headset session ended: back to the flat game");
+        gVr->shutdown();
+        gVr.reset();
+    }
+}
+// quest (2026-11-03, docs/quest.md): the window's swap; on Android none while VR runs (the headset is the display and
+// xrWaitFrame paces the loop; the window's surface is never shown)
+static void vrSwap(SDL_Window* window)
+{
+#if defined(__ANDROID__)
+    if (gVr) return;
+#endif
+    SDL_GL_SwapWindow(window);
+}
+// quest: a flat screen's frame (the setup page, the menus, the end screen) in VR when vr.ini menu_panel is on (the
+// Quest's default): the window's picture on a big screen (Scene::panelFrame), the right controller's ray as the mouse
+// (moved there; the trigger = the left button, B / Y / a menu button = Esc, A / X = Enter); then the window's swap
+static void vrFlatFrame(SDL_Window* window)
+{
+    if (gVr && gVr->settings.menuPanel) {
+        int ww = 0, wh = 0, lw = 0, lh = 0;
+        SDL_GetWindowSizeInPixels(window, &ww, &wh);
+        SDL_GetWindowSize(window, &lw, &lh);
+        const vr::Scene::Pointer p = gVr->panelFrame(0, ww, wh, lw, lh);
+        static bool held = false;   // (a press sent: its release follows wherever the ray is then)
+        if (p.valid) SDL_WarpMouseInWindow(window, p.x, p.y);
+        auto button = [&](bool down) {
+            SDL_Event ev{};
+            ev.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+            ev.button.windowID = SDL_GetWindowID(window);
+            ev.button.button = SDL_BUTTON_LEFT;
+            ev.button.down = down;
+            ev.button.clicks = 1;
+            ev.button.x = p.x, ev.button.y = p.y;
+            SDL_PushEvent(&ev);
+            held = down;
+        };
+        if (p.press && p.valid) button(true);
+        if (p.release && held) button(false);
+        auto key = [&](SDL_Keycode k, SDL_Scancode sc) {
+            for (const bool down : {true, false}) {
+                SDL_Event ev{};
+                ev.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+                ev.key.windowID = SDL_GetWindowID(window);
+                ev.key.key = k, ev.key.scancode = sc, ev.key.down = down;
+                SDL_PushEvent(&ev);
+            }
+        };
+        if (p.back) key(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE);
+        if (p.enter) key(SDLK_RETURN, SDL_SCANCODE_RETURN);
+        // (testing, a PC: HOTD_VR_PANEL_SHOT=<png>,<N>: the window's picture after the N-th big-screen frame, with the
+        // preview backend: the eyes as the headset would show them)
+        if (static const char* ps = std::getenv("HOTD_VR_PANEL_SHOT"); ps && std::strchr(ps, ',')) {
+            static int n = 0;
+            if (++n == std::atoi(std::strrchr(ps, ',') + 1)) {
+                const std::string file(ps, size_t(std::strrchr(ps, ',') - ps));
+                Renderer grab;
+                writePng(file, ww, wh, grab.readBack(ww, wh));
+                std::printf("VR PANEL SHOT: %s (%d x %d), pointer %s %.0f %.0f\n", file.c_str(), ww, wh, p.valid ? "on" : "off", p.x, p.y);
+                std::fflush(stdout);
+            }
+        }
+        if (gVr->lost()) {
+            SDL_Log("vr: the headset session ended");
+            gVr->shutdown();
+            gVr.reset();
+        }
+    }
+    vrSwap(window);
+}
+#if defined(__ANDROID__)
+// quest: the player's game files are not in the app's folder yet: the setup page is this message instead (on the big
+// screen), the folder is looked at again every 3 s; once both are there, the launcher's Start as at a normal start (the
+// files check, then the menu). gQuestWaitFiles: set in main (a launcher start without both files)
+static bool gQuestWaitFiles = false;
+static bool questWaitFiles(game::Launcher& menu, SDL_Window* window, int ww, int wh)
+{
+    static Uint64 nextLook = 0;
+    static std::vector<std::string> lines;
+    static Overlay text;
+    static bool textOk = false;
+    if (!gQuestWaitFiles)
+        return false;
+    if (SDL_GetTicks() >= nextLook) {
+        nextLook = SDL_GetTicks() + 3000;
+        const android::GameFiles f = android::findGameFiles();
+        if (!f.arcade.empty() && !f.pc.empty()) {
+            SDL_Log("quest: the game files are there now: %s, %s", f.arcade.c_str(), f.pc.c_str());
+            menu.cfg.arcade = f.arcade;
+            menu.cfg.pc = f.pc;
+            menu.quiet = true;
+            gQuestWaitFiles = false;
+            SDL_Event ev{};   // (the launcher's Start, as --auto-start's)
+            ev.type = SDL_EVENT_KEY_DOWN;
+            ev.key.key = SDLK_RETURN;
+            ev.key.windowID = SDL_GetWindowID(window);
+            SDL_PushEvent(&ev);
+            return false;
+        }
+        lines = android::missingFilesLines(f);
+    }
+    if (!textOk) {
+        std::string err;
+        textOk = text.init(err);
+        text.setStyle(0, 240, 235, 220);
+        text.translate = false;
+    }
+    gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+    gl::Viewport(0, 0, ww, wh);
+    gl::ClearColor(0.08f, 0.02f, 0.02f, 1.0f);
+    gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+    if (textOk) {
+        size_t longest = 1;
+        for (const std::string& l : lines) longest = std::max(longest, l.size());
+        const int scale = std::max(1, std::min(int(float(ww) * 0.92f / float(longest * 8)), int(float(wh) * 0.8f / float(lines.size() * 10 + 1))));
+        text.setText(lines, scale);
+        text.drawAnchored(ww, wh, float(ww) * 0.5f, float(wh) * 0.5f, 0.5f, 0.5f);
+    }
+    return true;
+}
+#endif
 static int gSceneTestStage = 0;   // HOTD_SCENE_TEST's step (6: back on the page)
 // its game: the page's players / models, the scene's chapter and route; the settings that change the play (Sonic Mode,
 // computer teammates) off. routeForce: replaced by the scene's route (none: the --autofire play's own)
@@ -583,6 +819,10 @@ static void teamStatsPrint(hotd::game::Runtime& rt, const char* when)
                     gTeam->heldForHostage, gTeam->onHostage);
     if (gTeam)   // cpu3: CPU shots within 20 of a hostage, pulls held for a held hostage / a hidden or off-screen target
         std::printf(" cpu_near_hostage %u held_captor %u held_hidden %u", gTeam->nearHostage, gTeam->heldCaptor, gTeam->heldHidden);
+    if (gTeam)   // (team 2026-11-03) the CPU seats' kills by kind and the bosses' hit points they took
+        std::printf(" KILLS bats %u/%u small %u/%u projectiles %u/%u enemies %u/%u boss_hits %u boss_damage %d", gTeam->tally.bats, gTeam->tally.seen[0],
+                    gTeam->tally.small, gTeam->tally.seen[1], gTeam->tally.projectiles, gTeam->tally.seen[2], gTeam->tally.enemies, gTeam->tally.seen[3],
+                    gTeam->tally.bossHits, gTeam->tally.bossDamage);
     std::printf("\n");
     if (static const bool audit = std::getenv("HOTD_BOT_AUDIT") != nullptr; audit && gTeam && std::strcmp(when, "end") == 0)
         gTeam->printAudit(rt);
@@ -590,7 +830,51 @@ static void teamStatsPrint(hotd::game::Runtime& rt, const char* when)
 // PC Mode (docs/pcmode.md): --pc-mode / the front end's PC Mode screen (startPcMode); the characters per seat (0..6 of
 // THOTD.EXE's table 0x5CE348: 0 No Player, 1 Rogan, 2 G, 3 Rogan 2, 4 G 2, 5 Sophie, 6 Researcher), --pc-char a,b,c,d
 static int gPcMode = 0;
+// The experimental modes (user 2026-11-03: The Typing of the Dead 0, Horde Mode and Survival Mode stay out of public
+// releases until they are polished; CMake HOTD_EXPERIMENTAL_MODES, docs/porting.md "Experimental modes"). Off: their
+// menu items, High Scores tables and command-line options are gone (the options refused with a message)
+#ifndef HOTD_EXPERIMENTAL_MODES
+#define HOTD_EXPERIMENTAL_MODES 1
+#endif
+static constexpr bool kExperimentalModes = HOTD_EXPERIMENTAL_MODES != 0;
+// polish (user 2026-11-03): Survival Mode ships in the release, labelled "Very Experimental / Proof of Concept" (its menu
+// item, its help line, a notice when it starts); CMake HOTD_SURVIVAL_MODE (default ON) keeps it in a build with the
+// experimental modes OFF. The Typing of the Dead 0 and Horde Mode stay HOTD_EXPERIMENTAL_MODES only
+#ifndef HOTD_SURVIVAL_MODE
+#define HOTD_SURVIVAL_MODE 1
+#endif
+static constexpr bool kSurvivalMode = kExperimentalModes || HOTD_SURVIVAL_MODE != 0;
+// an experimental mode's command-line option (--totd*, --typing, --horde*: Survival's old names too, the new Horde's
+// --horde-mode / --horde-size); --survival*: Survival's (kSurvivalMode)
+static bool experimentalOption(const std::string& a)
+{
+    return a == "--typing" || a.rfind("--totd", 0) == 0 || a.rfind("--horde", 0) == 0;
+}
+static bool survivalOption(const std::string& a) { return a.rfind("--survival", 0) == 0; }
+// The Typing of the Dead 0 (game/typing.h): --totd / the main menu's More Modes item (feAction 48); the mode's layer,
+// the scripted typist of --totd-test (testing), the chapters' stats printed so far
+static int gTotd = 0;
+static std::unique_ptr<game::Typing> gTyping;
+static std::unique_ptr<game::Typist> gTypist;
+static bool gTotdTest = false;
+static size_t gTotdPrinted = 0;
+static float gTotdWpm = 70.0f, gTotdAcc = 0.95f;   // --totd-typist wpm,accuracy,seed
+static unsigned long long gTotdSeed = 1;
+static std::string gTotdDict;                       // --totd-dict (empty: typing.ini's)
+static bool gTotdVerbose = false;
 static int gBossTick = 0;   // menus3: a Boss Mode game (Game Speed Auto: the PC's 60 Hz, as PC Mode)
+// Survival Mode (game/survival.h, docs/survival.md): --survival <arena> / the menu's Survival: the arena (-1 none); --survival-test N: the
+// headless self-test (N waves with the autofire, then the summary); --survival-seed / --survival-smg-wave / --survival-cap
+static int gSurvivalArena = -1, gSurvivalTest = 0, gSurvivalSmgWave = 0, gSurvivalCap = 24;
+static bool gSurvivalBuyer = false;   // --bot in Survival (the balance runs): the bot buys by SurvivalMode::testBuy's rule
+static uint32_t gSurvivalSeed = 0x484F5244;
+static bool gSurvivalCut = true;
+static uint64_t gSurvivalNote = 0;   // polish: the "Very Experimental" notice's start (ms; a Survival game's start), 0 none
+std::string gSurvivalScoresFile;   // survival_scores.txt in the settings folder (empty: headless, not saved)
+// Horde Mode (game/horde.h, docs/horde.md): the arcade game with copies of its creatures; the game's size (0 off,
+// 1-3 Low / Normal / High: --horde-mode [size] / --horde-size, the menu's More Modes > Horde + Chapter Select) and the
+// menu's setting (Horde Size: <name>)
+static int gHordeSize = 0, gHordeMenuSize = 2;
 static bool gPcFreePlay = false;   // --pc-free-play (testing: as the Cheat screen's Free-Play)
 static int gPcChars[4] = {1, 0, 1, 2};
 // the seats PC Mode's select made computer teammates (bits; -1: no select, --pc-mode: the seat bots as set). A seat
@@ -617,6 +901,18 @@ static float gEnemyStep = -1.0f;       // (-1: launcher.ini enemy4p= / 100) --4p
 // the defaults: player 2 arrows / Space, Right Ctrl / Right Shift, Enter / 2, player 3 W A S D / F / R / 3, player 4
 // I J K L or the keypad's 8 4 5 6 / H, keypad 0 / Y, keypad . / 4, player 1 1 / P)
 static std::function<bool()> gRestart;
+static std::function<bool()> gRetry;   // GitHub #5: a Chapter Retry (false: not in this game); HOTD_RETRY_AT tests it
+// GitHub #5: the pause's lines for Hud::drawPause when they are ours (Retry Chapter in them); empty: the PC's pause
+static std::vector<std::string> pauseLinesOf(const game::Pause& p)
+{
+    if (!p.retry && !p.settings && !p.gameOver())
+        return {};
+    std::vector<std::string> l = {p.gameOver() ? "GAME OVER" : "PAUSED"};
+    for (int i = 0; i < p.itemCount(); ++i)
+        l.push_back(p.itemAt(i) == game::Pause::kContinue ? "Continue" : p.itemAt(i) == game::Pause::kRetry ? "Retry Chapter"
+                    : p.itemAt(i) == game::Pause::kSettings ? "Settings" : "Exit");   // (fxux: Settings)
+    return l;
+}
 // select: a clear went on into the next chapter (Runtime::chapterChanged): the run's chapter (a game over restarts it)
 // and, with --render, the view of the new chapter's world
 static std::function<void(int)> gChapterChanged;
@@ -761,9 +1057,99 @@ static Uint64 netSkipNoteUntil = 0;   // a joiner's trigger in a cut-scene: "Onl
 // Sonic Mode (game/sonic.h): the play-time tick schedule (its preset set when a game starts; online: the host's)
 static hotd::game::SonicClock gSonic;
 // the top 10's file of a preset: ranking.bin (off: the arcade's speed), ranking_frenzy.bin, ranking_overkill.bin, ...
+// The Typing of the Dead 0: its own, ranking_totd.bin, ranking_totd_frenzy.bin, ...
 static std::string rankingName(int preset)
 {
-    return preset > 0 ? std::string("ranking_") + hotd::game::sonicKey(preset) + ".bin" : std::string("ranking.bin");
+    // (Horde Mode: its own, ranking_horde.bin, ranking_horde_frenzy.bin, ...: its scores do not mix with the arcade's)
+    const std::string mode = gTotd ? "totd" : gHordeSize > 0 ? "horde" : "";
+    if (preset > 0)
+        return "ranking_" + (mode.empty() ? std::string() : mode + "_") + hotd::game::sonicKey(preset) + ".bin";
+    return mode.empty() ? std::string("ranking.bin") : "ranking_" + mode + ".bin";
+}
+// The Typing of the Dead 0: the length of the tick about to run in real time (Sonic Mode: shorter) for its WPM, and
+// the tick's typing (before rt.frame(): the typist of --totd-test, the queued keys, player 1's gun)
+static double totdTickMs(hotd::game::Runtime& rt, double hz)
+{
+    const uint64_t c = gSonic.cost(rt);
+    return 1000.0 / hz * double(c ? c : 42) / 42.0;
+}
+// The Typing of the Dead 0: one SDL event while player 1 types (the window's event loop, and the self-test's typist,
+// whose keys come through here as SDL events too, totd2): SDL's text events (the layout's own characters, any case)
+// become the tick's keys; Backspace (and Escape with a lock) drop the lock when typing.ini allows it; every other
+// printable key is kept from the game's key bindings then (a letter must never also fire, reload or aim). true: taken
+static bool totdEvent(const SDL_Event& e)
+{
+    if (e.type == SDL_EVENT_TEXT_INPUT) {
+        for (const char* c = e.text.text; c && *c; ++c)
+            gTyping->typed(uint8_t(*c));   // (ASCII prompts: a byte of another script is a miss)
+        return true;
+    }
+    if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) {
+        const SDL_Keycode k = e.key.key;
+        const bool chord = (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) != 0;
+        // totd1 (user 2026-11-03 "backspace"): a wrong letter is never entered, so Backspace has nothing to
+        // undo; it only drops the lock with drop_lock_keys = 2 (was: always, a typo's habitual Backspace
+        // threw the word away). Escape with a lock drops it (1, the default)
+        const int drop = gTyping->config().dropLockKeys;
+        if (!chord && e.type == SDL_EVENT_KEY_DOWN && gTyping->locked() &&
+            ((k == SDLK_ESCAPE && drop >= 1) || (k == SDLK_BACKSPACE && drop >= 2))) {
+            gTyping->cancel();
+            return true;
+        }
+        if (!chord && ((k >= 32 && k < 127) || k == SDLK_BACKSPACE || (k >= SDLK_KP_DIVIDE && k <= SDLK_KP_PERIOD && k != SDLK_KP_ENTER)))
+            return true;   // (its character comes as a text event)
+    }
+    return false;
+}
+// --totd-test's typist (totd2: "test by driving the real keyboard input path"): each key as a person's keyboard sends
+// it, a key-down (Shift held for a capital), the text event, a key-up, through SDL's queue into totdEvent above
+static void totdPress(uint32_t key)
+{
+    static char text[128][2];
+    static const bool events = SDL_InitSubSystem(SDL_INIT_EVENTS);
+    if (!events || key == 0 || key >= 128)
+        return;
+    SDL_Event e{};
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.key.key = key == 27 ? SDLK_ESCAPE : SDL_Keycode(std::tolower(int(key)));
+    e.key.mod = std::isupper(int(key)) ? SDL_KMOD_LSHIFT : SDL_KMOD_NONE;
+    e.key.down = true;
+    SDL_PushEvent(&e);
+    if (key >= 32 && key < 127) {
+        text[key][0] = char(key);
+        SDL_Event t{};
+        t.type = SDL_EVENT_TEXT_INPUT;
+        t.text.text = text[key];
+        SDL_PushEvent(&t);
+    }
+    e.type = SDL_EVENT_KEY_UP;
+    e.key.down = false;
+    SDL_PushEvent(&e);
+}
+static void totdBefore(hotd::game::Runtime& rt, double hz)
+{
+    if (!gTotd || !gTyping)
+        return;
+    const double ms = totdTickMs(rt, hz);
+    if (gTypist) {   // (the self-test: its keys through the event queue, as the window's loop takes them)
+        gTypist->tick(rt, *gTyping, ms, totdPress);
+        const bool keys = hotd::game::Typing::inPlay(rt);
+        for (SDL_Event e; SDL_PollEvent(&e);)
+            if (keys)
+                totdEvent(e);
+    }
+    gTyping->before(rt, ms);
+}
+static void totdAfter(hotd::game::Runtime& rt)
+{
+    if (!gTotd || !gTyping)
+        return;
+    gTyping->after(rt);
+    while (gTotdPrinted < gTyping->chapters.size()) {   // a chapter's results (the clear): its line
+        std::printf("TOTD chapter %d: %s\n", gTyping->chapters[gTotdPrinted].chapterNo, gTyping->summary(gTyping->chapters[gTotdPrinted]).c_str());
+        ++gTotdPrinted;
+        std::fflush(stdout);
+    }
 }
 // the display time of a headless run in Sonic Mode, by chapter (the line at a chapter's change and at the end)
 static void sonicReport(const char* what, int chapter)
@@ -976,9 +1362,57 @@ void stateTrace(game::Runtime& rt, uint64_t framesBefore)
 
 void autofire(game::Runtime& rt, int frame)
 {
+    if (rt.survival.active() && rt.survival.frozen) {   // Survival Mode (game/survival.h): every seat in play shoots the nearest
+        // target (the SMG held, the handgun a pull every gAutofireEvery frames), reloads by hand when empty, and between
+        // the rounds shoots the sign of what the test players buy (SurvivalMode::testBuy: the shop's own path)
+        const game::SurvivalMode& sv = rt.survival;
+        float x = 0, y = 0;
+        const bool on = autofireTarget(rt, frame - frame % gAutofireEvery, x, y);
+        for (int s = 0; s < rt.seat_count(); ++s) {
+            game::Runtime::GunInput& g = rt.gun[s];
+            const bool wasHeld = g.held;
+            g = {};
+            if (rt.mem.u32(rt.player_rec(s)) != 5)
+                continue;
+            if (sv.shopOpen()) {
+                if (const int it = sv.testBuy(rt, s); it >= 0 && frame % 20 == 0) {
+                    g.onScreen = g.trigger = true;
+                    g.x = game::SurvivalMode::kSigns[it].x;
+                    g.y = game::SurvivalMode::kSigns[it].y;
+                }
+                continue;
+            }
+            if (rt.mem.at<uint8_t>(rt.player_rec(s) + 0x3D) == 0) {   // empty: off the screen (the reload)
+                g.trigger = frame % 2 == 0;
+                continue;
+            }
+            if (on) {
+                // testing: HOTD_SURVIVAL_AIM_UP=n: n arcade pixels above the target's centre (head shots: the head's points)
+                static const float up = game::survivalEnv("AIM_UP") ? float(std::atof(game::survivalEnv("AIM_UP"))) : 0.0f;
+                g.onScreen = true;
+                g.x = x + float(s * 3);
+                g.y = y + up;
+                if (sv.seat[s].smg) {
+                    g.held = true;
+                    g.trigger = !wasHeld;   // the first pull; then the SMG fires by itself while held
+                } else {
+                    g.trigger = frame % gAutofireEvery == (s * 7) % gAutofireEvery;
+                }
+            }
+        }
+        return;
+    }
     // with both players in, they take turns (player 2's shots through the same gun-input layer)
     int p = rt.mem.u32(game::A::G::players + 0xCC) == 5 ? (frame / 15) % 2 : 0;
+    if (rt.soloSeat == 1 && rt.mem.u32(game::A::G::players) != 5)
+        p = 1;   // (GitHub #29: player 2 alone)
+    // HOTD_AUTOFIRE_SEAT=n (testing, gunfb): only that seat fires (two players in, the other's gun idle on the screen)
+    static const int onlySeat = std::getenv("HOTD_AUTOFIRE_SEAT") ? std::clamp(std::atoi(std::getenv("HOTD_AUTOFIRE_SEAT")), 0, 1) : -1;
     rt.gun[0] = rt.gun[1] = {};
+    if (onlySeat >= 0 && !rt.coop4_on()) {
+        p = onlySeat;
+        rt.gun[1 - onlySeat] = {true, false, 120.0f, -40.0f};   // (the idle gun aims at the screen, never pulled)
+    }
     if (rt.coop4_on()) {   // the 4P mode (docs/coop4.md): the seats in play take turns
         rt.gun[2] = rt.gun[3] = {};
         int in[4], n = 0;
@@ -1122,11 +1556,15 @@ void outputsFrame(game::Runtime& rt, const game::LaunchConfig& cfg)
 bool autoReloadWanted(game::Runtime& rt, int p)
 {
     const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
-    return !rt.pm_on() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && rt.mem.u32(game::A::G::shot_enable) != 0 &&
+    return !rt.pm_on() && !rt.survival.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && rt.mem.u32(game::A::G::shot_enable) != 0 &&
            pl.state == 5 && pl.rounds == 0 && pl.empty != 0 && rt.mem.u32(game::A::G::ammo_enabled) != 0;
 }
 void autoReloadSeats(game::Runtime& rt, bool on)
 {
+    // survival2 (user 2026-11-03): no auto reload in Survival Mode whatever the setting says (the reload by hand is part
+    // of its game: SurvivalMode::gunInput); the setting itself is untouched, every other game has it as set
+    if (rt.survival.active())
+        on = false;
     rt.pm_auto_reload = on;
     if (!on)
         return;
@@ -1316,6 +1754,7 @@ void livesOut(game::Runtime& rt, const std::vector<uint64_t>& at)
 // is the PC entry screen's default (SIMON) until our name entry comes; gBossTimesFile empty (headless): not saved
 std::string gBossTimesFile;
 int gPmRankTable = 0;   // High Scores: PC Mode's table's index (the boss tables follow it)
+int gTotdRankTable = -1;   // High Scores: The Typing of the Dead 0's first table (one per Sonic Mode preset; after the bosses')
 int gBossShowMode = 0, gBossShowRank = -1;   // the window: the table to show after the game (0 none) and the new row
 int gBossEntryMs = -1;                        // the window: a new best time waiting for its name (-1 none)
 // HOTD_BOSS_NAME (testing): the name a new best time gets without the entry screen (upper case, A-Z 0-9 space, 10 at most)
@@ -1448,6 +1887,75 @@ unsigned pmOwnSeats()
     return m;
 }
 
+// Survival Mode's end (game/survival.h): the waves' lines, the result line, the score filed in the Survival table (headless /
+// HOTD_SURVIVAL_NAME: at once; the window: under the name "PLAYER" until a name entry is made for it). The self-test's
+// result: ok when wave N was cleared with creatures spawned and no bad memory access
+int gSurvivalShowRank = -1;   // the window: the new row's rank in the table shown after the game (-1 none)
+bool gSurvivalDone = false;
+bool gSurvivalPending = false;      // the window: a new row waits for its name
+game::SurvivalScores::Row gSurvivalRow;
+int gSurvivalRankTable = -1;        // High Scores: the Survival table's index
+int gHordeRankTable = -1;           // High Scores: the Horde table's index (Horde Mode: ranking_horde.bin)
+void survivalFinish(game::Runtime& rt)
+{
+    game::SurvivalMode& h = rt.survival;
+    gSurvivalDone = true;
+    if (h.phase != game::SurvivalMode::Over) {   // (the test's end: the score so far)
+        h.score = 0;
+        for (int p = 0; p < rt.seat_count(); ++p)
+            h.score += h.seat[p].earned;
+    }
+    for (const auto& s : h.stats)
+        std::printf("SURVIVAL round %d%s: creatures %d (cut %d), peak at once %d, frames %llu..%llu\n", s.wave,
+                    s.special == 1 ? " (runners)" : s.special == 2 ? " (brutes)" : "", s.count, s.cut, s.peak,
+                    (unsigned long long)s.start, (unsigned long long)s.end);
+    const bool test = gSurvivalTest > 0;
+    const bool ok = h.phase == game::SurvivalMode::Over || (h.wave >= gSurvivalTest && h.spawned > 0 && !rt.mem.bad);
+    std::string sfx;
+    for (const char* n : game::kSurvivalSfx)
+        if (rt.audio) {
+            const std::string src = rt.audio->extraSource(n);
+            sfx += std::string(" ") + n + "=" + (src.empty() ? "unused" : src);
+        }
+    std::printf("SURVIVAL%s: result=%s %s smg=%d bad_access=%d sfx:%s\n", test ? " TEST" : "", test ? (ok ? "ok" : "FAIL") : "gameover",
+                h.summary(rt).c_str(), int(h.smgOn), int(rt.mem.bad), sfx.c_str());
+    game::SurvivalScores t;
+    if (!gSurvivalScoresFile.empty())
+        t.load(gSurvivalScoresFile);
+    game::SurvivalScores::Row row;
+    const char* nm = game::survivalEnv("NAME");
+    row.score = h.score, row.wave = h.wave, row.arena = h.arena;
+    gSurvivalShowRank = -1;
+    gSurvivalPending = false;
+    if (!test && t.isHigh(row.score)) {
+        if ((nm && *nm) || gSurvivalScoresFile.empty()) {   // a test's name, or headless: filed at once
+            row.name = nm && *nm ? nm : "PLAYER";
+            gSurvivalShowRank = t.insert(row);
+            if (!gSurvivalScoresFile.empty() && !t.save(gSurvivalScoresFile))
+                SDL_Log("survival: %s not written", gSurvivalScoresFile.c_str());
+        } else {
+            gSurvivalPending = true;   // the window: the name entry first (survivalNameEntered)
+            gSurvivalRow = row;
+        }
+    }
+    std::printf("SURVIVAL: rank=%d%s\n", gSurvivalShowRank + 1, gSurvivalPending ? " (name entry)" : "");
+    std::fflush(stdout);
+}
+// the window's name entry for a new Survival row: filed under the name, saved; its rank (0-based)
+int survivalNameEntered(const std::string& name)
+{
+    game::SurvivalScores t;
+    t.load(gSurvivalScoresFile);
+    gSurvivalRow.name = name.empty() ? "PLAYER" : name;
+    const int rank = t.insert(gSurvivalRow);
+    if (!gSurvivalScoresFile.empty() && !t.save(gSurvivalScoresFile))
+        SDL_Log("survival: %s not written", gSurvivalScoresFile.c_str());
+    std::printf("SURVIVAL: name=%s rank=%d\n", gSurvivalRow.name.c_str(), rank + 1);
+    std::fflush(stdout);
+    gSurvivalPending = false;
+    return rank;
+}
+
 int runHeadless(game::Host& host, int frames, bool fire, const std::vector<uint64_t>& out, const std::vector<uint64_t>& startAt,
                 game::Audio& audio)
 {
@@ -1488,7 +1996,17 @@ int runHeadless(game::Host& host, int frames, bool fire, const std::vector<uint6
         hpause.onCue = [&audio](int c) { audio.pcCue(c); };
         hpause.onSound = [&audio](bool hold) { audio.pause(hold); };
     }
+    // relfix2 (testing): HOTD_AUDIO_RESTART_AT=F: at game frame F the sound is set up again (Audio::init), as the
+    // window's every game start does (the SMG's stand-in after a second game: game/audio.cpp loadBank)
+    static uint64_t audioRestartAt = [] { const char* e = std::getenv("HOTD_AUDIO_RESTART_AT"); return e ? std::strtoull(e, nullptr, 10) : 0ull; }();
     for (int i = 0; gNet && gNetFrames >= 0 ? gNet->frame() < uint32_t(gNetFrames) : i < frames; ++i) {
+        if (audioRestartAt && rt.frameCount >= audioRestartAt) {
+            audioRestartAt = 0;
+            std::string e;
+            const std::string root = audio.pcRoot();
+            std::printf("frame %llu: the sound set up again (HOTD_AUDIO_RESTART_AT): %s\n", (unsigned long long)rt.frameCount,
+                        audio.init(root, false, e) ? "ok" : e.c_str());
+        }
         if (pauseFor > 0 && rt.frameCount >= pauseAt && !hpause.paused()) {   // the first frame from F that is in play
             game::PauseInput in;
             in.toggle = true;
@@ -1500,6 +2018,20 @@ int runHeadless(game::Host& host, int frames, bool fire, const std::vector<uint6
             }
         }
         if (hpause.paused()) {
+            // relfix2 (testing): HOTD_PAUSE_KEYS=<one letter a pause frame>: d down, u up, a choose, other none; the
+            // pause has Settings then (the release's Continue / Settings / Exit): its cues into --audio-wav
+            if (static const char* keys = std::getenv("HOTD_PAUSE_KEYS"); keys) {
+                static size_t k = 0;
+                hpause.settings = true;
+                if (k < std::strlen(keys) && std::strchr("dua", keys[k])) {
+                    game::PauseInput in;
+                    in.down = keys[k] == 'd', in.up = keys[k] == 'u', in.activate = keys[k] == 'a';
+                    hpause.frame(rt, in);
+                    std::printf("frame %llu: pause key %c (pause frame %zu): selection %d\n", (unsigned long long)rt.frameCount,
+                                keys[k], k, hpause.selection());
+                }
+                ++k;
+            }
             audio.renderFrame();
             if (gNet) {   // online: the other PCs are told (P<n> PAUSED), the link kept alive; a pause frame = 1/60 s
                 gNet->setPaused(true);
@@ -1599,13 +2131,28 @@ int runHeadless(game::Host& host, int frames, bool fire, const std::vector<uint6
             gBot->frame(rt, totalFrames);
         else if (!gGunReplay.empty())   // HOTD_GUN_REPLAY: a PC trace's gun (pccap)
             gunReplay(rt);
-        else if (fire)
+        else if (fire && !(std::getenv("HOTD_AUTOFIRE_UNTIL") && rt.frameCount >= std::strtoull(std::getenv("HOTD_AUTOFIRE_UNTIL"), nullptr, 10)))   // (clips: the bot stops)
             autofire(rt, i);
+        if (!gNet)   // The Typing of the Dead 0: the typed keys into player 1's gun (offline only)
+            totdBefore(rt, 60.0);
         if (gTeam && !gNet)   // computer teammates (their seats only; online: through the lockstep, netTeamSeat)
             gTeam->frame(rt, totalFrames);
         livesOut(rt, out);
         if (!gNet)
             autoReloadSeats(rt, gAutoReload);   // launcher "Auto reload" / --auto-reload, every seat
+        if (static const bool edgeTest = std::getenv("HOTD_EDGE_TEST") != nullptr; edgeTest && !gNet) {
+            // HOTD_EDGE_TEST=1 (testing, bugs3 / GitHub #42): Gameplay > Edge Reload on, player 1's crosshair onto the
+            // screen's edge for 2 frames every 40; each edge reload counted (the run's last line: "edge reloads: N")
+            static int edgeReloads = 0;
+            if (edgeReloadNow(rt, 0, rt.frameCount % 40 < 2, true)) {
+                rt.gun[0].trigger = true, rt.gun[0].onScreen = false;
+                if (++edgeReloads <= 3)
+                    std::printf("frame %llu: edge reload (P1 had %d of %d rounds)\n", (unsigned long long)rt.frameCount,
+                                int(rt.mem.at<port::a::Player>(rt.player_rec(0)).rounds), int(rt.pm_full_rounds(0)));
+            }
+            if (i + 1 == frames)
+                std::printf("edge reloads: %d (%s)\n", edgeReloads, rt.pm_on() ? "PC Mode" : "arcade");
+        }
         rt.scoreDisplay = gScoreDisplay && !gNet;   // scoredisp: offline only (it is game memory: 0x51F42C)
         for (uint64_t s : startAt)   // --start-at P:F (player P presses start at frame F)
             if (!gNet && (s & 0xFFFFFFFF) == rt.frameCount)
@@ -1626,6 +2173,24 @@ int runHeadless(game::Host& host, int frames, bool fire, const std::vector<uint6
         rt.frame();
         if (gNet)
             gNet->after(rt);
+        if (!gNet)
+            totdAfter(rt);
+        if (gTotdTest && gTyping) {   // --totd-test: the first chapter played to its end (the next one loaded / the end)
+            static int firstChapter = -1;
+            const int ch = rt.mem.at<int8_t>(game::A::G::chapter);
+            if (firstChapter < 0 && rt.mem.at<int16_t>(game::A::G::game_mode) == 4)
+                firstChapter = ch;
+            // (Chapter 4: the Magician beaten, the ending begins: game_ending, sub-mode 8; no clear)
+            const bool ending = rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && rt.mem.at<int16_t>(game::A::G::game_submode) == 8;
+            if (ending && gTyping->chapters.empty()) {
+                gTyping->flush(rt);
+                totdAfter(rt);
+            }
+            if (!gTyping->chapters.empty() && !rt.clear.active && (ending || rt.chapterDone || (firstChapter >= 0 && ch != firstChapter))) {
+                std::printf("TOTD TEST: chapter %d over at frame %llu\n", firstChapter + 1, (unsigned long long)rt.frameCount);
+                break;
+            }
+        }
         if (gNet && rt.pcmode) {   // online PC Mode (the tests read it): a seat's character changed (a joiner's own pick)
             static int was[4] = {-1, -1, -1, -1};
             for (int p = 0; p < rt.seat_count(); ++p) {
@@ -1692,6 +2257,12 @@ int runHeadless(game::Host& host, int frames, bool fire, const std::vector<uint6
                 bossModeFinish(rt);
                 break;
             }
+        }
+        // Survival Mode (game/survival.h): the game over -> the Survival table; --survival-test: done once wave N is cleared
+        if (rt.survival.active() && (rt.survival.justFinished || (gSurvivalTest > 0 && rt.survival.wave >= gSurvivalTest &&
+                                                             rt.survival.phase == game::SurvivalMode::Break))) {
+            survivalFinish(rt);
+            break;
         }
         if (!rt.boss.nextStarted)   // (not the frame whose state is already the next boss's game: the PC shows the old one)
             stateTrace(rt, framesBefore);   // HOTD_STATE_TRACE (pccap): the differential run's state, Boss Mode's clock too
@@ -1808,6 +2379,18 @@ int runHeadless(game::Host& host, int frames, bool fire, const std::vector<uint6
             sub = rt.mem.u32(game::A::G::game_submode);
             std::printf("frame %d: game mode %d sub-mode %u\n", i, mode, sub);
         }
+        // GitHub #5 (testing): HOTD_RETRY_AT=<frame> a Chapter Retry then (as from the pause), =over at the game over
+        // (its Retry Chapter); once a run
+        if (static const char* retryAt = std::getenv("HOTD_RETRY_AT"); retryAt && gRetry &&
+            ((std::strcmp(retryAt, "over") == 0 && rt.gameOverDone) || (retryAt[0] >= '0' && retryAt[0] <= '9' && i == std::atoi(retryAt)))) {
+            retryAt = nullptr;
+            std::printf("frame %d: Chapter Retry\n", i);
+            if (!gRetry()) {
+                std::printf("frame %d: Chapter Retry not possible here\n", i);
+                break;
+            }
+            return runHeadless(host, frames - i - 1, fire, out, startAt, audio);
+        }
         if (rt.gameOverDone) {
             std::printf("frame %d: game over done (%s)\n", i,
                         rt.pcmode ? "PC Mode: the names, the table; online the session ends here" : "the window starts the chapter again");
@@ -1838,6 +2421,61 @@ int runHeadless(game::Host& host, int frames, bool fire, const std::vector<uint6
                     (unsigned long long)watchdog.problemFrame, watchdog.problem.c_str());
     }
     sonicReport("at the end", rt.mem.at<int8_t>(game::A::G::chapter));
+    if (gTotd && gTyping) {   // The Typing of the Dead 0: the whole run's typing and player 1's score
+        const auto& p1 = rt.mem.at<port::a::Player>(game::A::G::players, 0);
+        std::printf("TOTD game: %s score %d lives %d\n", gTyping->summary(gTyping->game).c_str(), int(p1.score), int(p1.lives));
+        if (gTotdTest) {
+            // totd1: the checks of the user's points (2026-11-03): the word lists by difficulty (their mean length),
+            // the attack window (no two attacks closer than attack_gap; the hits taken), the small targets and
+            // projectiles (typed = killed), no enemy killed by a letter before its prompt was done
+            const game::Typing& t = *gTyping;
+            const game::TypingConfig& c = t.config();
+            const int d = t.difficulty();
+            std::string lists;
+            for (const auto& [name, g] : t.given) {
+                char b[96];
+                std::snprintf(b, sizeof b, " %s %u (%.1f letters)", name.c_str(), g.first, g.first ? double(g.second) / g.first : 0.0);
+                lists += b;
+            }
+            std::printf("TOTD lists (difficulty %d, case %s):%s\n", d, t.caseSensitive() ? "as shown" : "ignored", lists.c_str());
+            const uint32_t gap = uint32_t(c.attackGap[d] * 60.0f);
+            std::printf("TOTD attacks: %u begun, %u hits taken, closest %u frames apart (attack_gap %u), wait %.1f s + %.2f s a letter\n",
+                        t.attacks, t.hits, t.attackGapMin == UINT32_MAX ? 0u : t.attackGapMin, gap, c.attackWait[d], c.attackPerLetter[d]);
+            std::printf("TOTD small targets / projectiles: %u typed, %u gone at the last letter, %u killing shots that never landed; letter kills %u\n",
+                        t.smallTyped, t.smallKilled, t.smallMissed, t.letterKills);
+            // totd2: the user's six points per chapter (shown / typed / killed as the game saw it afterwards)
+            for (const game::TypingStats& s : t.chapters) {
+                std::string len;
+                for (const auto& [cls, l] : s.lengths) {
+                    char b[64];
+                    std::snprintf(b, sizeof b, " %s %.1f (%u)", cls.c_str(), l.first ? double(l.second) / l.first : 0.0, l.first);
+                    len += b;
+                }
+                std::printf("TOTD REPORT chapter %d: bats %u/%u/%u projectiles %u/%u/%u small %u/%u/%u (shown/typed/killed) "
+                            "rescued %d of %d, boss %s, grades S%u A%u B%u C%u D%u F%u, hits %u, accuracy %.1f%% wpm %.1f\n",
+                            s.chapterNo, s.bats[0], s.bats[1], s.bats[2], s.projectiles[0], s.projectiles[1], s.projectiles[2],
+                            s.small[0], s.small[1], s.small[2], s.rescued, s.rescueSeen,
+                            s.bossBeaten ? "beaten" : s.bossSeen ? "NOT beaten" : "none", s.killGrade[0], s.killGrade[1],
+                            s.killGrade[2], s.killGrade[3], s.killGrade[4], s.killGrade[5], s.hits, s.accuracy(), s.wpm());
+                std::printf("TOTD LENGTHS chapter %d (mean letters, prompts):%s\n", s.chapterNo, len.c_str());
+            }
+            const bool gapOk = t.attacks < 2 || t.attackGapMin + 1 >= gap;
+            // totd2: typed = killed as the game saw it afterwards (>= 90 %), every boss met beaten
+            const game::TypingStats& g = t.game;
+            const uint32_t typedN = g.bats[1] + g.projectiles[1] + g.small[1], killedN = g.bats[2] + g.projectiles[2] + g.small[2];
+            const bool smallOk = typedN == 0 || killedN * 10 >= typedN * 9;
+            bool bossOk = true;
+            for (const game::TypingStats& s : t.chapters)
+                bossOk = bossOk && (!s.bossSeen || s.bossBeaten);
+            // (totd2: the attack gap is reported, no longer a failure: some attacks never ask the hold, their hits are held)
+            const bool pass = !gTyping->chapters.empty() && gTyping->game.words > 0 && gTyping->game.letters > 0 &&
+                              smallOk && bossOk && t.letterKills == 0;
+            std::printf("TOTD TEST: %s (%zu chapter(s) with results, %u prompts typed%s%s%s%s)\n", pass ? "PASS" : "FAIL",
+                        gTyping->chapters.size(), gTyping->game.words, gapOk ? "" : " (attacks closer than attack_gap)",
+                        smallOk ? "" : ", small targets not killed", t.letterKills ? ", enemies killed by letters" : "",
+                        bossOk ? "" : ", a boss not beaten");
+        }
+    }
     std::printf("%d frames, last draw list %zu models\n", frames, rt.drawList.size());
     if (std::getenv("HOTD_DUMP_DRAWLIST")) {   // debugging: the skins and the players' character bodies
         for (const game::Runtime::SkinDraw& s : rt.skinDraws)
@@ -2330,6 +2968,27 @@ static game::Frontend::GalleryText galleryPreview(int i)
     return t;
 }
 
+// gallery blood / gallery dismemberment: the Remake Gallery's Blood (1) and Damage (2) panels as the host fills them
+// (Sam, a custom colour, Rainbow Blood on, a few parts damaged)
+static game::Frontend::GalleryText galleryPreviewPanel(int panel)
+{
+    const auto& all = game::galleryEntries();
+    int sam = 0;
+    for (size_t i = 0; i < all.size(); ++i)
+        if (std::string(all[i].key) == "t11") sam = int(i);
+    game::Frontend::GalleryText t = galleryPreview(sam);
+    t.bloodColor = 5, t.bloodRgb = 0x30C0FF, t.rainbow = true, t.particles = true;
+    t.rainbowColours = "Each Splash", t.rainbowSpeed = "Normal", t.creatureBlood = "Rainbow Cycle", t.blood = "Rainbow";
+    static const char* const kStates[game::kGalleryParts] = {"Damage 1", "Off", "Whole", "Damage 3", "Whole"};
+    for (int p = 0; p < game::kGalleryParts; ++p) {
+        t.partNames.push_back(game::galleryPartName(p));
+        t.partStates.push_back(kStates[p]);
+        t.partSteps.push_back(2);
+    }
+    t.panel = panel;
+    return t;
+}
+
 // the cut-scene subtitles' table in the program ROM (G::voice_subtitles 0xCB300, 96 bytes an event: x, line 1 at +1,
 // line 2 at +0x31; game/sprites.cpp tile_text_draw keys them sub.<event>.<line>): ("sub.e.l", English)
 static std::vector<std::pair<std::string, std::string>> subtitleTable(const std::string& regions)
@@ -2366,9 +3025,11 @@ static int langTool(const game::LaunchConfig& cfg, const std::string& exportCode
                           "Experimental: {help}",
                           // misc17: the Players page's seats, the pages' "Items  3 / 9" counters, the PC font's
                           // Continues, the chapter's end screen
-                          "Player {n}: Human", "Player {n}: CPU Easy", "Player {n}: CPU Normal", "Player {n}: CPU Hard",
+                          "Player {n}: Human", "Player {n}: CPU Easy", "Player {n}: CPU Normal", "Player {n}: CPU Hard", "Player {n}: CPU Expert",
                           "Player {n} - Extra", "{page}  {n} / {n2}", "Continues {n}", "CHAPTER {n} CLEAR",
-                          "Chapter {n} is not finished yet. Thank you for playing."})
+                          "Chapter {n} is not finished yet. Thank you for playing.",
+                          // gallery blood / gallery dismemberment: a part's damage step, the custom colour's label
+                          "Damage {n}"})
         lang::addPattern(p);
     for (const game::SceneView::Actor& ac : game::SceneView::actors())   // actors2: every actor's name (the page shows four)
         lang::tr(ac.name);
@@ -2386,6 +3047,13 @@ static int langTool(const game::LaunchConfig& cfg, const std::string& exportCode
                              fe.galleryText = [i]() { return galleryPreview(int(i)); };
                              return true;
                          }});
+    // gallery blood / gallery dismemberment: the Remake Gallery's Blood and Damage panels, and the values and lines
+    // the pages show one at a time
+    for (int panel : {1, 2})
+        extra.push_back({17, std::string("gallery_panel") + std::to_string(panel), [panel](game::Frontend& fe) {
+                             fe.galleryText = [panel]() { return galleryPreviewPanel(panel); };
+                             return true;
+                         }});
     static const char* const kOnline[] = {"main", "host", "host-problem", "host-locked", "hosting2", "hosting2-empty",
                                           "hosting4-1", "hosting4-3", "joining2", "joining4", "join", "join-typing",
                                           "fail-password", "fail-full", "fail-version", "fail-locked", "fail-hostleft",
@@ -2397,6 +3065,7 @@ static int langTool(const game::LaunchConfig& cfg, const std::string& exportCode
     // the in-game notes and messages drawn over the play (render/overlay.h translates them)
     static const char* const kNotes[] = {
         "PAUSED", "Continue", "Exit", "> Continue <", "> Exit <", "Trailer Mode On (F7)", "Trailer Mode Off (F7)",
+        "Survival Mode: Very Experimental / Proof of Concept",   // (polish: the notice when a Survival game starts)
         "Only the host can skip", "P{n} PAUSED", "LIGHT GUN CALIBRATION", "Player {n}: shoot the centre of the target ({corner})",
         "top left", "bottom right", "Esc: cancel", "PLAYER {n}: CONTROLLER DISCONNECTED - connect it again",
         "Player 2 is joining...", "A player is joining...", "Player {n} is joining...",
@@ -2505,10 +3174,16 @@ static int langTool(const game::LaunchConfig& cfg, const std::string& exportCode
         "Patched THOTD.EXE found: accepted (an unpatched 1998 PC copy is recommended)",
         // misc17: the Players page's seats (game/frontend.cpp pickSeatText), the PC font's words in play (game/hud.cpp:
         // drawn as text in a language), the chapter's end screen (a chapter not playable yet)
-        "Player {n}: Human", "Player {n}: CPU Easy", "Player {n}: CPU Normal", "Player {n}: CPU Hard",
+        "Player {n}: Human", "Player {n}: CPU Easy", "Player {n}: CPU Normal", "Player {n}: CPU Hard", "Player {n}: CPU Expert",
         "Continues {n}", "Press SPACE to skip Demo", "CHAPTER {n} CLEAR", "Thank you for playing.",
         "Chapter {n} is not finished yet. Thank you for playing.", "Click or press Enter: play again   Esc: quit",
-        "Click, Enter, Esc or pad A / B: back to the main menu", "Click, Enter, Esc or pad A / B: back to the launcher"};
+        "Click, Enter, Esc or pad A / B: back to the main menu", "Click, Enter, Esc or pad A / B: back to the launcher",
+        // gallery blood / gallery dismemberment: the values and lines the Gallery's pages show one at a time
+        "Red", "Green", "Blue", "Purple", "Yellow", "Custom", "Still", "Slow", "Normal", "Fast", "Own Colour Each",
+        "Rainbow Cycle", "Together", "Each Splash", "Rainbow", "Whole", "Off", "Blood:", "(no particles)",
+        "No damage models for this one", "A still model: M steps its damage", "Blood Color, Rainbow", "Damage: part, state",
+        "G: blood colour  N: rainbow  J: particles  Z: body part  X: its damage  Shift+Z: all whole",
+        "The game has no damage models for this part of it"};
     int rc = 0;
     if (!exportCode.empty()) {
         std::string err;
@@ -2623,6 +3298,16 @@ static int langTool(const game::LaunchConfig& cfg, const std::string& exportCode
 
 int main(int argc, char* argv[])
 {
+#if defined(__ANDROID__)
+    // quest (docs/quest.md): SDLActivity passes no arguments: the Quest's own (--root, --vr openxr, the game files from
+    // the app's external folder; util/android_app.h)
+    static std::vector<std::string> questArgs = hotd::android::startArgs(argc, argv);
+    static std::vector<char*> questArgv;
+    for (std::string& s : questArgs) questArgv.push_back(s.data());
+    questArgv.push_back(nullptr);
+    argc = int(questArgs.size());
+    argv = questArgv.data();
+#endif
     // relprep: --version (the one version: CMakeLists.txt's project(... VERSION ...), generated/hotd_version.h)
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--version") {
@@ -2663,6 +3348,9 @@ int main(int argc, char* argv[])
     int frontendScreen = 1;   // --frontend-screen (frontend.h frontendShot): 1 main menu, 2 Options, 3 / 10-15 the settings categories, 117 Gameplay's Advanced page, 4 a Controller page, 8 High Scores, 9 Chapter Select, 16 Co-op
     int soundOpt = -1;   // --sound auto|arcade|pc (LaunchConfig::sound)
     int frames = -1, w = 992, h = 768, players = -1, event = 0, models = -1, difficulty = -1, lives = -1, blood = -1;
+    int startLivesOpt = -1, maxLivesOpt = -1;   // GitHub #30: --start-lives N / --max-lives N (over --lives / launcher.ini)
+    int soloSeatOpt = -1;                       // GitHub #29: --solo-seat 1|2 (over launcher.ini soloseat=)
+    int chapterRetryOpt = -1;                   // GitHub #5: --chapter-retry (Gameplay > Chapter Retry on)
     bool devLines = false;    // --dev-lines: the developer lines from the start (F1 toggles them; polish: off for players)
     bool devKeys = false;     // remakefix: --dev-keys: F1 toggles the developer lines in a player run (else only --dev-lines)
     bool shotFlash = false;   // --shot-flash: the arcade light gun's screen flash on every shot
@@ -2743,6 +3431,7 @@ int main(int argc, char* argv[])
     std::string modsDirOpt;   // --mods-dir <folder>: another folder of packs (searched first)
     std::string jukeboxTestOpt = std::getenv("HOTD_JUKEBOX_TEST") ? std::getenv("HOTD_JUKEBOX_TEST") : "";   // --jukebox-test <folder> (game/jukebox.h)
     std::string exportSounds[2];     // --export-sounds <folder> <arcade zip>
+    std::string boardWav[4];         // --board-wav <out.wav> <arcade zip> <code@seconds,...> <seconds>
     std::string jukeboxLengths[4];   // --jukebox-lengths <folder> <regions> <arcade> <part 0-3> (game/jukebox.h ArcadeLength)
     std::string exportModelsOpt;   // --export-models <folder> --model-ids <hex,...> (custom models: docs/mods.md)
     std::vector<uint32_t> modelIdsOpt;
@@ -2759,6 +3448,8 @@ int main(int argc, char* argv[])
     bool uninstallOpt = false, uninstallYes = false;
     int uninstallSettings = -1;
     std::string setupTestDest;
+    int gammaOpt = -1;   // --gamma 0.6-2.0 (render/gamma.h): over launcher.ini gamma= (Game Gamma)
+    int menuGammaOpt = -1;   // polish: --menu-gamma 0.6-2.0: over launcher.ini menugamma= (Menu Gamma)
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
@@ -2772,6 +3463,115 @@ int main(int argc, char* argv[])
         }
         if (a == "--setup-test") { setupTestDest = next(); continue; }
         if (a == "--setup") { gForceSetup = true; continue; }
+        if (a == "--no-crosshair" || a == "--show-crosshair") { gShowCrossOpt = a == "--show-crosshair" ? 1 : 0; continue; }   // (gunfb)
+        if (a == "--shot-flash-size") {   // gunfb: Video > Shot Flash Size
+            const std::string v = next();
+            gFlashSizeOpt = v == "small" || v == "0" ? 0 : v == "large" || v == "2" ? 2 : 1;
+            continue;
+        }
+        if (a == "--hit-marks") {   // bugs1 (#35): Video > Hit Marks (fxux: the menu's words too)
+            const std::string v = next();
+            gClearMarksOpt = v == "see-through" || v == "smooth" ? 1 : 0;
+            continue;
+        }
+        if (a == "--transparency") {   // fxux: Video > Transparency (the scripted runs had only launcher.ini for it)
+            const std::string v = next();
+            gTranspOpt = v == "auto" ? 3 : v == "dots" ? 2 : v == "smooth" ? 1 : v == "dark" ? 0 : std::clamp(std::atoi(v.c_str()), 0, 3);
+            continue;
+        }
+        if (a == "--start-lives") { startLivesOpt = std::atoi(next().c_str()); continue; }   // GitHub #30
+        if (a == "--max-lives") { maxLivesOpt = std::atoi(next().c_str()); continue; }
+        if (a == "--chapter-retry") { chapterRetryOpt = 1; continue; }   // GitHub #5 (launcher.ini chapterretry=1)
+        if (a == "--solo-seat") { soloSeatOpt = std::atoi(next().c_str()) == 2 ? 1 : 0; continue; }   // GitHub #29: 1 / 2
+        if (a == "--gamma") {
+            const std::string v = next();
+            gammaOpt = gammaParse(v.c_str());
+            if (gammaOpt < 0) { std::fprintf(stderr, "--gamma: a number from 0.6 to 2.0 (not %s)\n", v.c_str()); return 2; }
+            continue;
+        }
+        if (a == "--menu-gamma") {   // polish: Menu Gamma (the menus, the Gallery, the front-end screens)
+            const std::string v = next();
+            menuGammaOpt = gammaParse(v.c_str());
+            if (menuGammaOpt < 0) { std::fprintf(stderr, "--menu-gamma: a number from 0.6 to 2.0 (not %s)\n", v.c_str()); return 2; }
+            continue;
+        }
+        if (a == "--vr") { gVrBackend = next(); continue; }   // vr: preview | openxr (docs/vr.md)
+        if (a == "--vr-eye") { const std::string v = next(); gVrEye = v == "left" ? 0 : v == "right" ? 1 : 2; continue; }
+        if (a == "--vr-head") {
+            gVrHeadSet = std::sscanf(next().c_str(), "%f,%f,%f", &gVrHead[0], &gVrHead[1], &gVrHead[2]) >= 1;
+            continue;
+        }
+        if (a == "--vr-preview-test") {   // the aim's math now; the rest: --render with the preview (below)
+            int checks = 0;
+            if (vr::selfTest(checks) != 0) return 1;
+            gVrTest = true;
+            gVrBackend = "preview";
+            renderHeadless = true;
+            continue;
+        }
+        if (!kExperimentalModes && experimentalOption(a)) {   // (a release build: HOTD_EXPERIMENTAL_MODES OFF)
+            std::printf("%s: The Typing of the Dead 0 and Horde Mode are not in this version "
+                        "(experimental modes, left out of the release builds)\n", a.c_str());   // (stdout: as --version)
+            std::fflush(stdout);
+            return 2;
+        }
+        if (!kSurvivalMode && survivalOption(a)) {   // (HOTD_SURVIVAL_MODE OFF as well)
+            std::printf("%s: Survival Mode is not in this version\n", a.c_str());
+            std::fflush(stdout);
+            return 2;
+        }
+        // The Typing of the Dead 0 (game/typing.h): --totd plays it; --totd-test (testing): headless, the scripted typist
+        // (--totd-typist wpm,accuracy,seed: 70,0.95,1), Chapter 1 to its end (--frames 40000 unless given), lives kept,
+        // muted; --totd-dict <name> another dictionary (data/typing/<name>); --totd-verbose a line per prompt typed
+        if (a == "--totd" || a == "--typing") { gTotd = 1; continue; }
+        if (a == "--totd-test") { gTotd = 1; gTotdTest = true; fire = false; livesKept = true; mute = true; continue; }
+        if (a == "--totd-typist") {
+            const std::string v = next();
+            std::sscanf(v.c_str(), "%f,%f,%llu", &gTotdWpm, &gTotdAcc, &gTotdSeed);
+            continue;
+        }
+        if (a == "--totd-dict") { gTotdDict = next(); continue; }
+        if (a == "--totd-verbose") { gTotdVerbose = true; continue; }
+        if (a == "--horde-mode" || a == "--horde-size") {   // Horde Mode (game/horde.h): the arcade game, more creatures
+            int s = 2;
+            if (i + 1 < argc && game::HordeMode::sizeParse(argv[i + 1]) > 0)
+                s = game::HordeMode::sizeParse(next());
+            else if (a == "--horde-size") {
+                std::fprintf(stderr, "--horde-size: low, normal or high\n");
+                return 1;
+            }
+            gHordeSize = s;
+            continue;
+        }
+        for (const char* old : {"--horde", "--horde-test", "--horde-seed", "--horde-smg-wave", "--horde-cap", "--horde-no-cut"})
+            if (a == old) {   // Survival Mode's old names (it was "Horde" until user 2026-11-03; the new Horde: --horde-mode)
+                a = "--survival" + a.substr(7);
+                break;
+            }
+        if (a == "--survival" || a == "--survival-test") {   // Survival Mode (game/survival.h): an arena (word or 1-based number)
+            if (a == "--survival-test") {   // the self-test: N waves, headless, the autofire, lives kept, muted
+                gSurvivalTest = std::max(1, std::atoi(next().c_str()));
+                if (gSurvivalArena < 0) gSurvivalArena = 0;
+                fire = livesKept = mute = true;
+                gAutofireQuiet = true;
+                if (frames < 0) frames = 400000;
+                continue;
+            }
+            const std::string v = next();
+            gAutofireQuiet = true;   // (--autofire in Survival, the balance runs: no line per shot)
+            gSurvivalArena = game::survivalArenaParse(v);
+            if (gSurvivalArena < 0) {
+                std::fprintf(stderr, "--survival %s: one of", v.c_str());
+                for (const auto& ar : game::survivalArenas()) std::fprintf(stderr, " %s", ar.key);
+                std::fprintf(stderr, " (or 1-%d)\n", int(game::survivalArenas().size()));
+                return 1;
+            }
+            continue;
+        }
+        if (a == "--survival-seed") { gSurvivalSeed = uint32_t(std::strtoul(next().c_str(), nullptr, 0)); continue; }
+        if (a == "--survival-smg-wave") { gSurvivalSmgWave = std::max(0, std::atoi(next().c_str())); continue; }
+        if (a == "--survival-cap") { gSurvivalCap = std::clamp(std::atoi(next().c_str()), 1, 64); continue; }
+        if (a == "--survival-no-cut") { gSurvivalCut = false; continue; }
         if (a == "--make-game-exe") {   // (testing: util/game_exe.h for this package and a PC folder / zip, then quit)
             std::string m;
             const bool ok = util::makeGameExe(packageFolder(), next(), m);
@@ -2779,6 +3579,7 @@ int main(int argc, char* argv[])
             return ok ? 0 : 1;
         }
         if (a == "--export-sounds") { for (std::string& s : exportSounds) s = next(); continue; }   // (its own if: nesting limit)
+        if (a == "--board-wav") { for (std::string& s : boardWav) s = next(); continue; }
         if (a == "--diff-replay") {   // (its own if: the chain below is at the compiler's nesting limit)
             diffReplayDir = next();
             continue;
@@ -2909,7 +3710,7 @@ int main(int argc, char* argv[])
                 p = q + 1;
             }
         }
-        else if (a == "--bot") botSeed = std::strtoll(next().c_str(), nullptr, 10);
+        else if (a == "--bot") botSeed = std::strtoll(next().c_str(), nullptr, 10), gSurvivalBuyer = true;
         else if (a == "--bot-players") botPlayers = std::clamp(std::atoi(next().c_str()), 1, 2);
         else if (a == "--pc-mode" || a == "--pc-free-play")   // --pc-free-play: as the Cheat screen's Free-Play (0xD5B35C)
             { if (a == "--pc-mode") gPcMode = 1; else gPcFreePlay = true; }
@@ -2918,10 +3719,10 @@ int main(int argc, char* argv[])
             while (std::getline(ss, t, ',') && k < 4) gPcChars[k++] = std::clamp(std::atoi(t.c_str()), 0, port::Game<port::A>::kPmCharCount - 1);   // (pmextra: 7..19 the extras)
             gPcMode = 1;
         }
-        else if (a == "--seat-bot") {   // computer teammate: P:L (player 2-4, level 1 easy .. 3 hard; 0 human)
+        else if (a == "--seat-bot") {   // computer teammate: P:L (player 2-4, level 1 easy .. 3 hard, 4 expert; 0 human)
             unsigned pl = 0, lv = 0;
             if (std::sscanf(next().c_str(), "%u:%u", &pl, &lv) == 2 && pl >= 2 && pl <= 4)
-                seatBotOpt[pl - 1] = int(std::min(lv, 3u));
+                seatBotOpt[pl - 1] = int(std::min(lv, 4u));
         }
         else if (a == "--4p-boss-step") gBossStep = std::clamp(float(std::atof(next().c_str())), 0.0f, 2.0f);
         else if (a == "--4p-enemy-step") gEnemyStep = std::clamp(float(std::atof(next().c_str())), 0.0f, 2.0f);
@@ -3058,6 +3859,47 @@ int main(int argc, char* argv[])
         std::printf("export sounds: %d file(s)\n", n);
         return 0;
     }
+    // --board-wav <out.wav> <arcade> <code@seconds,...> <seconds> (sound tests, issues #3 / #26): the arcade sound board
+    // alone, headless: each code (hex) sent at its time, the board's output at the game's gain (x5.5, no limiter) for the whole length
+    if (!boardWav[0].empty()) {
+        std::vector<uint8_t> prog, samples;
+        std::string e;
+        if (!loadSoundRoms("", boardWav[1], prog, samples, e)) { std::fprintf(stderr, "board wav: %s\n", e.c_str()); return 1; }
+        audio::SoundBoard board;
+        if (!board.load(prog, samples, e)) { std::fprintf(stderr, "board wav: %s\n", e.c_str()); return 1; }
+        std::vector<std::pair<size_t, uint32_t>> sends;   // (sample, code)
+        for (size_t p = 0; p < boardWav[2].size();) {
+            const size_t q = std::min(boardWav[2].find(',', p), boardWav[2].size());
+            const std::string item = boardWav[2].substr(p, q - p);
+            const size_t at = item.find('@');
+            sends.emplace_back(size_t((at == std::string::npos ? 0.25 : std::atof(item.c_str() + at + 1)) * 44100.0),
+                               uint32_t(std::strtoul(item.c_str(), nullptr, 16)));
+            p = q + 1;
+        }
+        const size_t frames = size_t(std::max(0.1, std::atof(boardWav[3].c_str())) * 44100.0);
+        std::vector<int16_t> pcm(frames * 2);
+        float buf[2];
+        for (size_t f = 0; f < frames; ++f) {
+            for (const auto& s : sends)
+                if (s.first == f)
+                    board.command(s.second);
+            buf[0] = buf[1] = 0.0f;
+            board.render(buf, 1, 5.5f);   // (the game's board gain, Audio::mix)
+            for (int c = 0; c < 2; ++c)
+                pcm[f * 2 + size_t(c)] = int16_t(std::clamp(buf[c] * 32767.0f, -32768.0f, 32767.0f));
+        }
+        std::FILE* f = std::fopen(boardWav[0].c_str(), "wb");
+        if (!f) { std::fprintf(stderr, "board wav: cannot write %s\n", boardWav[0].c_str()); return 1; }
+        const uint32_t bytes = uint32_t(pcm.size() * 2), rate = 44100, brate = rate * 4, hs = 16, riff = 36 + bytes;
+        const uint16_t fmt = 1, ch = 2, align = 4, bits = 16;
+        std::fwrite("RIFF", 1, 4, f); std::fwrite(&riff, 4, 1, f); std::fwrite("WAVEfmt ", 1, 8, f); std::fwrite(&hs, 4, 1, f);
+        std::fwrite(&fmt, 2, 1, f); std::fwrite(&ch, 2, 1, f); std::fwrite(&rate, 4, 1, f); std::fwrite(&brate, 4, 1, f);
+        std::fwrite(&align, 2, 1, f); std::fwrite(&bits, 2, 1, f); std::fwrite("data", 1, 4, f); std::fwrite(&bytes, 4, 1, f);
+        std::fwrite(pcm.data(), 2, pcm.size(), f);
+        std::fclose(f);
+        std::printf("board wav: %s, %zu code(s), %.2f s\n", boardWav[0].c_str(), sends.size(), double(frames) / 44100.0);
+        return 0;
+    }
 #endif
     if (!jukeboxLengths[0].empty()) {
         std::vector<uint8_t> prog, samples;
@@ -3138,7 +3980,7 @@ int main(int argc, char* argv[])
                            !std::getenv("HOTD_MENU_SHOT") && !std::getenv("HOTD_GALLERY_SHOT") && !std::getenv("HOTD_JUKEBOX_SHOT") &&
                            !std::getenv("HOTD_MENU_PERF_TOUR") && !std::getenv("HOTD_MENU_PERF") && !std::getenv("HOTD_SCENE_TEST") &&
                            !std::getenv("HOTD_STARTUP_TIME") && !std::getenv("HOTD_MENU_TYPE") && !std::getenv("HOTD_RES_LOG") &&
-                           !std::getenv("HOTD_NET_KEYAIM_TEST") && !std::getenv("HOTD_MENU_SEQ") &&
+                           !std::getenv("HOTD_NET_KEYAIM_TEST") && !std::getenv("HOTD_MENU_SEQ") && !std::getenv("HOTD_KEYS") &&
                            exportLang.empty() && langCheckCode.empty() && langShots.empty();
     if (frames < 0 && !check && frontendPng.empty() && !steamAction && !makeShortcut)
         util::logToFile(cache);
@@ -3153,6 +3995,12 @@ int main(int argc, char* argv[])
         gBossTimesFile = cache + "bosstimes.cfg";          // (or a test run naming the time: HOTD_BOSS_NAME)
     if (frames < 0 || std::getenv("HOTD_PM_NAME"))     // PC Mode's high scores (the PC's table 1): the same
         gPmScoresFile = cache + "pcmode_scores.txt";
+    if (frames < 0 || game::survivalEnv("NAME")) {  // Survival Mode's table (game/survival.h): the same
+        gSurvivalScoresFile = cache + "survival_scores.txt";
+        std::error_code ec;   // (its old name, from when the mode was "Horde": moved once)
+        if (!std::filesystem::exists(gSurvivalScoresFile, ec) && std::filesystem::is_regular_file(cache + "horde_scores.txt", ec))
+            std::filesystem::rename(cache + "horde_scores.txt", gSurvivalScoresFile, ec);
+    }
     // a test run without its own HOTD_PREF_DIR never writes the player's launcher.ini (a worker's test once did)
     if ((!std::getenv("HOTD_PREF_DIR") && (frames >= 0 || !inputTestFile.empty() || !frontendPng.empty() ||
                                           !shotAt.empty() || !checkpoints.empty() || autoStart)))
@@ -3260,21 +4108,30 @@ int main(int argc, char* argv[])
         SDL_Log("[mods] %zu mod(s) found, active: %s", allPacks.size(), names.empty() ? "none" : names.c_str());
         // the code mods (game/ragdoll.h): on with their settings (launcher.ini modset.<mod>.<key>=, --mod-set; else
         // the mod.ini defaults); the texture packs to the renderer
-        bool ragdollOn = false;
-        std::map<std::string, std::string> ragdollValues;
-        for (const ModPack& p : allPacks) {
-            if (p.type != "ragdoll") continue;
-            for (const ModPack& q : act) ragdollOn |= q.type == "ragdoll";
-            for (const ModSetting& st : p.settings) {
-                std::string v = st.def;
-                if (auto it = c.modSettings.find(p.id + "." + st.key); it != c.modSettings.end()) v = it->second;
-                for (const std::string& o : modSetOpts)
-                    if (o.rfind(p.id + "." + st.key + "=", 0) == 0) v = o.substr(p.id.size() + st.key.size() + 2);
-                ragdollValues[st.key] = v;
+        // cosmods: the same for each built-in type (ragdoll; rainbowblood, bighead: game/cosmods.h)
+        auto codeMod = [&](const char* type, std::map<std::string, std::string>& values) {
+            bool on = false;
+            for (const ModPack& p : allPacks) {
+                if (p.type != type) continue;
+                for (const ModPack& q : act) on |= q.type == type;
+                for (const ModSetting& st : p.settings) {
+                    std::string v = st.def;
+                    if (auto it = c.modSettings.find(p.id + "." + st.key); it != c.modSettings.end()) v = it->second;
+                    for (const std::string& o : modSetOpts)
+                        if (o.rfind(p.id + "." + st.key + "=", 0) == 0) v = o.substr(p.id.size() + st.key.size() + 2);
+                    values[st.key] = v;
+                }
+                break;
             }
-            break;
-        }
+            return on;
+        };
+        std::map<std::string, std::string> ragdollValues, rainbowValues, bigHeadValues;
+        const bool ragdollOn = codeMod("ragdoll", ragdollValues);
         game::ragdollConfigure(ragdollOn, ragdollValues);
+        const bool rainbowOn = codeMod("rainbowblood", rainbowValues);
+        game::rainbowBloodConfigure(rainbowOn, rainbowValues);
+        const bool bigHeadOn = codeMod("bighead", bigHeadValues);
+        game::bigHeadConfigure(bigHeadOn, bigHeadValues);
         act.erase(std::remove_if(act.begin(), act.end(), [](const ModPack& p) { return p.type != "textures"; }), act.end());
         texturePacks().setActive(std::move(act));
     };
@@ -3334,6 +4191,8 @@ int main(int argc, char* argv[])
     if (models >= 0) cfg.models = models;
     if (soundOpt >= 0) cfg.sound = soundOpt;
     if (players > 0) cfg.players = players;
+    if (gTotdTest && frames < 0)   // --totd-test: headless, Chapter 1's length and some
+        frames = 40000;
     if (sceneViewOpt >= 0) {   // --scene-view: --players (default 4) and --models choose its players and models
         gScene.entry = sceneViewOpt;
         gScene.players = players > 0 ? players : 4;
@@ -3343,6 +4202,11 @@ int main(int argc, char* argv[])
         if (seatBotOpt[p] >= 0) cfg.seatBot[p] = seatBotOpt[p];
     if (difficulty >= 0) cfg.difficulty = difficulty;
     if (lives >= 0) cfg.lives = lives;
+    if (startLivesOpt > 0 || maxLivesOpt > 0)   // GitHub #30 (game/lives.h): a start above the most raises the most
+        cfg.lives = game::livesCode(startLivesOpt > 0 ? startLivesOpt : game::livesStartOf(cfg.lives),
+                                    std::max(maxLivesOpt > 0 ? maxLivesOpt : game::livesMostOf(cfg.lives), startLivesOpt));
+    if (soloSeatOpt >= 0) cfg.soloSeat = soloSeatOpt;
+    if (chapterRetryOpt >= 0) cfg.chapterRetry = chapterRetryOpt != 0;
     if (blood >= 0) cfg.blood = blood;
     for (game::SeatSight& s : cfg.sights) {   // (firing range: the command line sets every player's)
         if (crosshairOpt >= 0) { s.style = crosshairOpt; s.custom = crosshairCustomOpt; }
@@ -3364,6 +4228,10 @@ int main(int argc, char* argv[])
     if (sfxVolOpt >= 0) cfg.sfxVolume = sfxVolOpt;
     if (autoReloadOpt >= 0) cfg.autoReload = autoReloadOpt != 0;
     if (scoreDisplayOpt) cfg.scoreDisplay = true;
+    if (gClearMarksOpt >= 0) cfg.clearMarks = gClearMarksOpt != 0;
+    if (gShowCrossOpt >= 0) cfg.showCrosshairs = gShowCrossOpt != 0;   // (gunfb)
+    if (gFlashSizeOpt >= 0) cfg.shotFlashSize = gFlashSizeOpt;
+    if (gTranspOpt >= 0) cfg.transparency = gTranspOpt;
     if (gameTextOpt >= 0) cfg.gameText = gameTextOpt;
     if (gameSpeedOpt >= 0) cfg.gameSpeed = gameSpeedOpt == 2 ? -1 : gameSpeedOpt;
     if (frameRateOpt >= -1) cfg.frameRate = frameRateOpt;
@@ -3374,6 +4242,9 @@ int main(int argc, char* argv[])
     hotd::setDrawDepth(cfg.drawDepth);
     if (crtOpt >= 0) cfg.crt.preset = crtOpt;
     if (crtSightsOpt >= 0) cfg.crt.crispSights = crtSightsOpt != 0;
+    if (gammaOpt > 0) cfg.gamma = gammaOpt;
+    if (menuGammaOpt > 0) cfg.menuGamma = menuGammaOpt;
+    setGamma100(cfg.gamma);
     if (sonicOpt >= 0) cfg.sonic = sonicOpt;
     // compat (coordinator 2026-10-29): Safe Mode (--safe-mode, "Play (Safe Mode).bat") for a PC that has trouble with the
     // game: a 1280 x 720 window, no Live Background, the menus at 60 fps, vsync, no CRT filter, no texture packs (the
@@ -3612,7 +4483,7 @@ int main(int argc, char* argv[])
         ns.players = uint8_t(std::clamp(c.players, 1, int(ns.seats)));
         ns.models = uint8_t(c.models == 1 ? 1 : 0);
         ns.difficulty = uint8_t(std::clamp(c.difficulty, 0, 4));
-        ns.lives = uint8_t(std::clamp(c.lives, 0, 11));
+        ns.lives = uint8_t(game::livesCodeValid(c.lives) ? c.lives : 9);   // (#30: a pair's code too)
         ns.blood = uint8_t(std::clamp(c.blood, 0, 5));
         ns.sound = uint8_t(std::clamp(c.sound, 0, 2));
         ns.livesKept = livesKept, ns.cuts = c.cuts, ns.defaultRoute = defaultRoute;
@@ -3785,6 +4656,8 @@ int main(int argc, char* argv[])
         }
         game::Runtime& r = host.runtime();
         r.livesKept = livesKept;
+        // GitHub #29: one player in player 2's seat (offline; not with a CPU player 2: that seat is the teammate's)
+        r.soloSeat = gNet || cfg.players != 1 || cfg.seatBot[1] > 0 ? 0 : cfg.soloSeat;
         {   // pmbody: PC Mode's camera paths and motion table from the PC's own files (pmData: CAMALL.RBH, THOTD.EXE);
             // without them PC Mode evaluates the ROM's keys
             const PmData& pm = pmData(cfg.pc);
@@ -3807,6 +4680,21 @@ int main(int argc, char* argv[])
         r.rankingFile = !rankingFileOpt.empty() ? rankingFileOpt : frames < 0 ? cacheDir() + rankingName(gSonic.preset) : std::string();
         if (!r.rankingFile.empty() && rankingFileOpt.empty() && (cfg.hardcore || cfg.suddenDeath || cfg.survival) && !gNet && !bossModeOpt)
             r.rankingFile += cfg.survival ? "_survival" : cfg.suddenDeath ? "_suddendeath" : "_hardcore";   // Light Gun Edition: their own top 10s
+        if (gTotd && !gNet) {   // The Typing of the Dead 0 (game/typing.h): the prompts, a new game's stats, the typist
+            if (!gTyping)
+                gTyping = std::make_unique<game::Typing>();
+            std::string terr;
+            if (!gTyping->load(lang::dataDirs(), terr, gTotdDict))
+                SDL_Log("Typing of the Dead 0: %s", terr.c_str());
+            gTyping->start(cfg.difficulty);
+            gTyping->verbose = gTotdVerbose;
+            gTotdPrinted = 0;
+            gTypist = gTotdTest ? std::make_unique<game::Typist>(gTotdSeed, gTotdWpm, gTotdAcc) : nullptr;
+            std::printf("TOTD: The Typing of the Dead 0, dictionary %s (%zu prompts), difficulty %d%s\n",
+                        gTyping->config().dictionary.c_str(), gTyping->promptCount(), cfg.difficulty,
+                        gTypist ? ", the scripted typist" : "");
+        } else if (gNet)
+            gTotd = 0;   // (online: not yet; docs/typing.md)
         r.nameKeysTest = nameKeysOpt;
         r.rankingLowTest = rankingLowOpt;
         r.nameEntryOnClear = nameEntryOpt || (launcher && inputTestFile.empty() && !autoStart && checkpoints.empty());
@@ -3834,7 +4722,7 @@ int main(int argc, char* argv[])
             gSonic.turbo = cfg.turbo;
             r.lgModes.vampire = cfg.vampire;
             r.lgModes.flashlight = cfg.flashlight;
-            r.lgModes.bigHeads = cfg.bigHeads;
+            r.lgModes.bigHeads = false;   // (v1.2.0: the Big Head mod, Options > Mods, instead)
             r.lgModes.shotgunShells = cfg.shotgun && !arsenal ? 3 : 0;
             r.lg_hit_scale = cfg.shotgun && !arsenal ? 2.5f : 1.0f;
             for (int k = 0; k < 4; ++k)
@@ -3896,7 +4784,7 @@ int main(int argc, char* argv[])
         r.jaText = (gNet ? gNet->gameSettings().gameText : cfg.gameText) == 1;
         r.teammateFlash = cfg.teamFlash;   // Teammate Flashes (draws only; each PC its own)
         r.hideMarks = gTrailer;   // (--trailer)
-        r.hideSparks = !cfg.hitSparks, r.hideMuzzle = !cfg.muzzleFlash; r.hideBlood = !cfg.bloodParticles;
+        r.hideSparks = !cfg.hitSparks, r.shotFlashScale = game::shotFlashScaleOf(cfg.shotFlashSize), r.hideMuzzle = !cfg.muzzleFlash; r.hideBlood = !cfg.bloodParticles; r.transparency = cfg.transparency;
         r.scene4p = cfg.scene4p;   // players 3 / 4's cut-scene variations (draws only; each PC its own)
         r.ownSeat = gNet ? gNet->localPlayer() : -1;   // (menufb: a local game: every seat this PC's own, full flashes)
         // PC Mode on the arcade logic (docs/pcmode.md); online the host's settings for every PC (protocol 16: PC Mode,
@@ -3947,6 +4835,7 @@ int main(int argc, char* argv[])
             if (mask) {
                 gTeam = std::make_unique<game::Bot>(game::Bot::teamSeed(mask, level), 2);
                 gTeam->teammates(mask, level);
+                gTeam->setHalfW(gameHalfW(cfg.aspect, 16, 9));   // (team: headless the Aspect on a 16:9 screen; the window sets its own each frame)
             }
             if (gNet)
                 gNet->hostSeats = gTeam && gNet->multi() ? netHostSeats : nullptr;
@@ -3973,7 +4862,23 @@ int main(int argc, char* argv[])
         // at the PC's 60 Hz (pc_main_loop 0x419168: timeGetTime x 60 / 1000) with Game Speed Auto, as PC Mode, so the
         // fight and its clock (1000 / 60 ms a tick) go as on the PC; it ran at the arcade's 57.52 Hz (the times 4 % long)
         gBossTick = bossModeOpt && chapterStart ? 1 : 0;
-        if (title && chapterStart) {
+        // Horde Mode (game/horde.h): the arcade game with copies of its creatures (local games only; before the
+        // chapter's start: its extra body slots size the skin buffers at the heap reset)
+        if (gHordeSize > 0 && chapterStart && !gNet && gSurvivalArena < 0 && !bossModeOpt) {
+            r.horde.begin(r, gHordeSize);
+            SDL_Log("Horde Mode: %s, %d player(s)", game::HordeMode::sizeName(gHordeSize), cfg.players);
+        }
+        if (gSurvivalArena >= 0 && chapterStart && !gNet) {   // Survival Mode (game/survival.h): the arena's game (local games only)
+            r.survival.arena = gSurvivalArena;
+            r.survival.seed = gSurvivalSeed;
+            r.survival.smgWave = gSurvivalSmgWave;
+            r.survival.maxAlive = gSurvivalCap;
+            r.survival.cutCreatures = gSurvivalCut;
+            r.survival.testBuyer = gSurvivalBuyer;
+            r.survival.startGame(r, cfg.players);
+            SDL_Log("Survival Mode: %s, %d player(s) (Very Experimental / Proof of Concept)", game::survivalArenas()[size_t(gSurvivalArena)].name, cfg.players);
+            gSurvivalNote = std::max<uint64_t>(SDL_GetTicks(), 1);   // (polish: its notice for 6 s)
+        } else if (title && chapterStart) {
             r.apply_settings();
             r.attract_begin();
         } else if (bossModeOpt) {   // Boss Mode: the boss's start (game_new 0x458588 from boss_starts 0x5CD384; online the host's, protocol 18)
@@ -4012,6 +4917,40 @@ int main(int argc, char* argv[])
         }
         return true;
     };
+    // GitHub #5 (user 2026-11-03: "Level retry ... from the pause menu like in the remake. Would be really helpful for
+    // 1cc"): Gameplay > Chapter Retry: the chapter again from its start with the players who began it, each player's
+    // score and lives as they were then (Runtime::retryPoint; Chapter 1: 0 and Starting Lives), the seats as then.
+    // Local arcade games only (not online, PC Mode, Boss / Survival / Horde, The Typing of the Dead 0, the 4P mode)
+    auto canRetry = [&](const game::Runtime& r) {
+        return !gNet && !r.pcmode && !r.boss.active() && !r.survival.active() && !gTotd && !r.seats4 && gHordeSize <= 0 &&
+               !gScene.active() && r.retryPoint.chapter >= 0 && r.retryPoint.chapter < 4 && (r.retryPoint.in[0] || r.retryPoint.in[1]);
+    };
+    auto retryChapter = [&]() -> bool {
+        const game::Runtime::RetryPoint rp = host.runtime().retryPoint;
+        const int players = cfg.players, solo = cfg.soloSeat, title = titleNow;
+        cfg.players = rp.in[0] && rp.in[1] ? 2 : 1;
+        cfg.soloSeat = rp.in[0] ? 0 : 1;
+        runChapter = rp.chapter;
+        titleNow = 0;
+        const bool ok = startGame();
+        titleNow = title, cfg.players = players, cfg.soloSeat = solo;
+        if (!ok)
+            return false;
+        game::Runtime& r = host.runtime();
+        for (int p = 0; p < 2; ++p)
+            if (rp.in[p]) {
+                port::a::Player& pl = r.mem.at<port::a::Player>(game::A::G::players, uint32_t(p));
+                pl.score = rp.score[p];
+                pl.lives = pl.lives_saved = rp.lives[p];
+            }
+        r.retry_point_take();
+        if (r.log)
+            r.log("Chapter Retry: chapter " + std::to_string(rp.chapter + 1) + " again (P1 " +
+                  (rp.in[0] ? std::to_string(rp.score[0]) + " points, " + std::to_string(rp.lives[0]) + " lives" : std::string("out")) +
+                  "; P2 " + (rp.in[1] ? std::to_string(rp.score[1]) + " points, " + std::to_string(rp.lives[1]) + " lives" : std::string("out")) + ")");
+        return true;
+    };
+    gRetry = [&]() { return canRetry(host.runtime()) && retryChapter(); };
     // netplay, joining a game already running (docs/netplay.md): the host's log replayed from the start settings to its
     // join frame (no sound, no log lines; its restarts as the window does them), then the lockstep from there
     auto netCatchUp = [&](std::string& e) -> bool {
@@ -4141,11 +5080,17 @@ int main(int argc, char* argv[])
             rr.hud.anchorEdges = cfg.aspect != 1;   // display2: widescreen (and 16:10): the corners at the edges
             rr.hud.maxAspect = cfg.aspect == 2 ? 1.6f : 0.0f;
             std::copy(cfg.sights, cfg.sights + 4, rr.hud.sights);
+            rr.hud.showSights = cfg.showCrosshairs;   // (gunfb)
             rr.hud.customDirs = xhairDirs;
             rr.hud.widescreen = cfg.aspect != 1;
+            rr.hud.translucentMarks = cfg.clearMarks;
             rr.shotAt = shotAt;
             rr.shotDir = shotDir.empty() ? shotsRoot : shotDir;
             rr.aspect = cfg.aspect;
+            if (!gVrBackend.empty() && !vrStart(vrDataDir())) {   // vr: --vr / --vr-preview-test (docs/vr.md)
+                if (gVrTest) return 1;   // (the preview's test needs it)
+                std::printf("vr: off (the flat picture)\n");   // openxr: no runtime / headset: the run goes on flat
+            }
             std::printf("render: view ready in %.0f ms (%s)\n",
                         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - v0).count(), memoryReport().c_str());
             for (gl::GLenum e = gl::GetError(); e != 0; e = gl::GetError())
@@ -4235,12 +5180,13 @@ int main(int argc, char* argv[])
                 }
                 if (ic.on)
                     ic.prev.take(rt);
-                const bool crt = gCrt.begin(w, h);   // crt: the frame into the filter's target, then through it
+                const bool crt = !gVr && gCrt.begin(w, h);   // crt: the frame into the filter's target, then through it (vr: none)
                 if (!crt) gl::BindFramebuffer(gl::FRAMEBUFFER, rr.fbo);
                 float aim[4][2], aimSeen[4][2];   // players 3 / 4: the 4P mode; aimSeen: where the curved screen shows it
                 for (int p = 0; p < 4; ++p) {
                     float ax = rt.gun[p].x, ay = rt.gun[p].y;
                     rr.hud.cpu[p] = teamSeatShown(p);   // computer teammates: their aim
+                    rt.cpuSeats = rr.hud.cpu[p] ? rt.cpuSeats | 1u << p : rt.cpuSeats & ~(1u << p);   // (gunfb: Teammate Flashes)
                     if (rr.hud.cpu[p])
                         gTeam->aim(p, ax, ay);
                     rr.view->fromArcade(ax, ay, w, h, aim[p][0], aim[p][1]);
@@ -4253,7 +5199,7 @@ int main(int argc, char* argv[])
                 const auto t0 = std::chrono::steady_clock::now();
                 // pcsparks: the 2D drawn under the 3D as the window's frame does (the arcade's low-priority cells, the
                 // PC's game-over route map under its walker)
-                rr.view->opt.clearColor = !rr.hud.drawUnder(rt, w, h, rr.view->opt.clear);
+                rr.view->opt.clearColor = gVr || !rr.hud.drawUnder(rt, w, h, rr.view->opt.clear);
                 const auto tUnder = std::chrono::steady_clock::now();
                 // HOTD_SCENE_FREECAM="F,right,up,forward,yaw,pitch[,zoom]" (testing the cut-scene viewer's Free Cam
                 // headless): F frames after the watch starts it goes on from the scene's camera, moved by that much
@@ -4275,6 +5221,18 @@ int main(int argc, char* argv[])
                     }
                 }
                 rr.view->camOverride = gScene.freeCamNow();
+                // developer (clips): HOTD_DEV_CAM="x,y,z,yaw,pitch,fov" (world units, degrees) holds a free camera there
+                if (static const char* dc = std::getenv("HOTD_DEV_CAM"); dc) {
+                    static Camera devCam;
+                    float v[6] = {0, 0, 0, 0, 0, 46};
+                    std::sscanf(dc, "%f,%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]);
+                    devCam = rr.view->cam;
+                    devCam.pos[0] = v[0], devCam.pos[1] = v[1], devCam.pos[2] = v[2];
+                    devCam.yaw = v[3] * 3.14159265f / 180.0f, devCam.pitch = v[4] * 3.14159265f / 180.0f;
+                    devCam.fovY = v[5] * 3.14159265f / 180.0f;
+                    devCam.nearZ = 0.1f, devCam.perPixelDepth = true;
+                    rr.view->camOverride = &devCam;
+                }
                 static gl::GLuint q3d = 0, qfs = 0;
                 // HOTD_FS_COUNT=1 (earlyz): the 3D's fragment shader runs a frame too (ARB_pipeline_statistics_query:
                 // what the early depth test saves, whatever the GPU's speed)
@@ -4284,15 +5242,39 @@ int main(int argc, char* argv[])
                 if (fsCount && !qfs) gl::GenQueries(1, &qfs);
                 gl::BeginQuery(gl::TIME_ELAPSED, q3d);
                 if (fsCount) gl::BeginQuery(kFsInvocations, qfs);
-                rr.view->draw(rt, w, h);
+                rr.hud.clean = rr.hud.noText = gTrailer;   // (--trailer: Trailer Mode)
+                rr.hud.drawCross[0] = !(gTotd && gTyping);   // The Typing of the Dead 0: no sight for the typist
+                if (gVr) {   // vr: the eyes, the HUD on their screen plane, the stereo pair into rr.fbo (docs/vr.md)
+                    const std::function<void(int, int, const float[4][2])> vrHud = [&rt](int pw, int ph, const float a[4][2]) {
+                        rr.hud.draw(rt, pw, ph, a, false, std::vector<std::string>());
+                    };
+                    vrFrame(rt, *rr.view, rr.hud, rr.aspect, rr.fbo, w, h, nullptr, 1.0f, vrHud);
+                } else {
+                    rr.view->draw(rt, w, h);
+                }
                 if (fsCount) gl::EndQuery(kFsInvocations);
                 gl::EndQuery(gl::TIME_ELAPSED);
-                drawPillarbox(rr.aspect, w, h);   // (the window's Aspect bars in renders too)
+                if (!gVr) drawPillarbox(rr.aspect, w, h);   // (the window's Aspect bars in renders too)
                 const auto tView = std::chrono::steady_clock::now();
                 rr.hud.deferSights = crisp || gClipPipe;   // (a clip: no sights)
-                rr.hud.clean = rr.hud.noText = gTrailer;   // (--trailer: Trailer Mode)
-                rr.hud.draw(rt, w, h, aim, false, {});
+                // (#5, testing: HOTD_PAUSE_TEST=<selection>: --render draws the pause with Chapter Retry's items;
+                // HOTD_PAUSE_TEST_OVER=1 the game over's)
+                if (static const char* pt = std::getenv("HOTD_PAUSE_TEST"); pt) {
+                    game::Pause tp;
+                    tp.retry = !std::getenv("HOTD_PAUSE_TEST_SETTINGS");   // (relfix2: =1 the release's Continue / Settings / Exit)
+                    tp.settings = !tp.retry;
+                    if (std::getenv("HOTD_PAUSE_TEST_OVER")) tp.openGameOver();
+                    rr.hud.pauseSelection = std::atoi(pt);
+                    rr.hud.pauseLines = pauseLinesOf(tp);
+                }
+                if (!gVr) rr.hud.draw(rt, w, h, aim, false, {});
                 rr.hud.deferSights = false;
+                if (!gVr && gTotd && gTyping && rt.mem.at<int16_t>(game::A::G::game_mode) == 4) {   // its prompts (headless pictures)
+                    static game::TypingHud typingHud;
+                    typingHud.draw(rt, *gTyping, w, h, [&](float ax, float ay, float& px, float& py) {
+                        rr.view->fromArcade(ax, ay, w, h, px, py);
+                    });
+                }
                 if (crt && crtAllShots && shotNow) {   // --crt-shots-all: each preset's picture, then the plain one
                     std::filesystem::create_directories(rr.shotDir);
                     for (int pr = 1; pr < kCrtPresets; ++pr) {
@@ -4342,6 +5324,7 @@ int main(int argc, char* argv[])
                     if (ringInit > 0 && skipRingSpot(rt, w, h, pl, pr - pl, rx, ry, rsize))
                         ring.draw(w, h, rx, ry, rsize, 0.6f);
                 }
+                if (!gVr) gammaApply(rr.fbo, w, h);   // gamma (render/gamma.h): the finished picture (vr: the eyes had it)
                 const auto tCpu = std::chrono::steady_clock::now();
                 uint8_t px[4];
                 gl::ReadPixels(0, 0, 1, 1, gl::RGBA, gl::UNSIGNED_BYTE, px);   // waits for the GPU
@@ -4623,6 +5606,13 @@ int main(int argc, char* argv[])
         gAutoReload = cfg.autoReload;
         gScoreDisplay = cfg.scoreDisplay;
         int rc = runHeadless(host, frames, fire, livesOutAt, startAt, audio);
+        if (host.runtime().horde.on())   // Horde Mode's counts (the copies, the peaks: docs/horde.md)
+            std::printf("HORDE: %s bad_access=%d frame=%llu\n", host.runtime().horde.summary().c_str(), host.runtime().mem.bad ? 1 : 0,
+                        (unsigned long long)host.runtime().frameCount);
+        if (gSurvivalTest > 0 && !gSurvivalDone) {   // --survival-test: the frames ran out before wave N was cleared
+            std::printf("SURVIVAL TEST: result=FAIL (not done in %d frames) %s\n", frames, host.runtime().survival.summary(host.runtime()).c_str());
+            rc = 6;
+        }
         if (gNet) {   // the final frame and state compared with the other PC's
             const std::string r = gNet->finish(host.runtime(), 5000);
             std::printf("%s\n", r.c_str());
@@ -4651,6 +5641,16 @@ int main(int argc, char* argv[])
                         *std::max_element(rr.drawn.begin(), rr.drawn.end()), (unsigned long long)rr.glErrors, rr.firstError,
                         (unsigned long long)rr.firstErrorFrame, (unsigned long long)rr.spikes);
             std::printf("MEMORY: %s\n", memoryReport().c_str());
+        }
+        if (gVr && gVrTest) {   // vr: --vr-preview-test's round trip (the game's aim -> the gun's ray -> the aim)
+            const auto& t = gVr->test;
+            std::printf("vr preview test: %d frames, %d round trips checked, mean error %.3f, worst %.3f arcade units, "
+                        "%d over 6 units; %d with the gun's view blocked (not counted); gun ray depth hits %d\n",
+                        t.frames, t.checked, t.checked ? t.sum / t.checked : 0.0, t.worst, t.over, t.blocked, t.depthHits);
+            // ok: on average within 2 arcade units, and 98 % of the trips within 6 (an edge between two depths can
+            // land the hit on the farther surface)
+            const bool ok = t.checked > 0 && t.sum / t.checked < 2.0 && t.over * 50 <= t.checked;
+            std::printf("vr preview test: %s\n", ok ? "ok" : "FAILED");
         }
         if (renderHeadless || std::getenv("HOTD_PERF")) {   // perf: where a frame's time goes (docs/performance.md)
             std::vector<float> st;
@@ -4731,6 +5731,7 @@ int main(int argc, char* argv[])
                            std::getenv("HOTD_SETUP_SHOTS") != nullptr ||   // (setup2: the setup pages' pictures, hidden)
                            std::getenv("HOTD_ZONE_TEST") != nullptr ||     // (the setup boxes' drop test: hidden)
                            std::getenv("HOTD_UPDATE_AUTO") != nullptr ||   // (setup2: the updater's test, hidden)
+                           std::getenv("HOTD_KEYS") != nullptr ||          // (fxux: scripted keys, hidden)
                            std::getenv("HOTD_SETUP_TEST") != nullptr;      // (setup: the setup window's switch, hidden)
     // borderless fullscreen at the start (user 2026-10-19): launcher.ini fullscreen= (default on; the state the player
     // left it in), --fullscreen / --windowed over it. Automated runs never (hidden / off-screen); a developer run
@@ -4746,7 +5747,9 @@ int main(int argc, char* argv[])
     gl::setShaderCacheFile(cacheDir() + "angle_shaders.bin");   // (angle: ANGLE's compiled shaders, kept for the next start)
     gl::prepareWindow(cfg.renderer);   // (angle: ANGLE sets the window up for EGL)
     int backend = cfg.renderer;
+#if !defined(__ANDROID__)   // (quest: no update check on the headset: a sideloaded APK is updated with adb install)
     if ((cfg.updateCheck && !automated) || std::getenv("HOTD_UPDATE_URL")) util::updateCheckStart(HOTD_VERSION_TEXT);   // Options > System > Check for Updates
+#endif
     if (!automated) outputsStart(cfg, cacheDir());   // Light Gun Edition: Hook of the Reaper's outputs
     SDL_Window* window = SDL_CreateWindow("The House of the Dead: ReWrithe", w, h,
                                           SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (automated ? SDL_WINDOW_HIDDEN : 0));
@@ -4875,6 +5878,12 @@ int main(int argc, char* argv[])
             const SDL_DisplayMode* dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
             menuNs = Uint64(1e9 / double(dm && dm->refresh_rate > 1.0f ? dm->refresh_rate : 60.0f));
         }
+#if defined(__ANDROID__)
+        if (gVr) {   // quest: the headset's xrWaitFrame paces every frame (72 Hz): no limiter of ours on top
+            renderNs = 0, menuNs = 1, renderLimit = 0;
+            SDL_GL_SetSwapInterval(0);
+        }
+#endif
     };
     applyPresentation();
     // timing statistics (display): game ticks and rendered frames per second of wall-clock time in the game screen
@@ -4949,6 +5958,15 @@ int main(int argc, char* argv[])
     // what each file is, and an empty result line asks for both files)
     game::Hud hud;
     if (!hud.init(err)) { SDL_Log("%s", err.c_str()); return 1; }
+    if (!gVrBackend.empty() && !gVr && !vrStart(vrDataDir()))   // vr: --vr (docs/vr.md); the flat game when it fails
+        SDL_Log("vr: off");
+    if (gVr && !gVr->settings.arcadeSort && hotd::drawDepth() == hotd::kArcadeSort) {   // quest: vr.ini arcade_sort off
+        hotd::setDrawDepth(hotd::kDepthBuffer);
+        SDL_Log("vr: Draw Depth: the depth buffer (vr.ini arcade_sort off)");
+    }
+#if defined(__ANDROID__)
+    if (gVr) applyPresentation();   // quest: xrWaitFrame paces the loop (no frame limiter, no swap)
+#endif
     Overlay endScreen;
     if (!endScreen.init(err)) { SDL_Log("%s", err.c_str()); return 1; }
     endScreen.setStyle(190, 255, 240, 200);
@@ -4986,7 +6004,8 @@ int main(int argc, char* argv[])
     bool galleryFull = false, galleryInfo = true, galleryPanDrag = false;
     float galleryHint = 0;
     int galleryPage = 0;               // gallery3, the Remake layout: the description's page (Tab)
-    auto galleryRemake = [&]() { return menu.cfg.galleryLayout == 1 && !galleryFull; };
+    int galleryPanel = 0;              // gallery blood: the Remake Gallery's settings panel: 0 Viewer, 1 Blood, 2 Damage (H)
+    auto galleryRemake =[&]() { return menu.cfg.galleryLayout == 1 && !galleryFull; };
     // the Remake layout's grid: the entry dk places on in the shown category (left / right 1, up / down 3), kept inside
     auto galleryGrid = [&](int dk) {
         std::vector<int> list;
@@ -5138,6 +6157,8 @@ int main(int argc, char* argv[])
     int feAction = -1;
     int feBoss = 0;            // Boss Mode: the boss picture chosen (2-6)
     bool bossEnded = false;    // Boss Mode: the game ended (bossModeFinish): back to the menu's times table
+    bool survivalEnded = false;   // Survival Mode: the game ended (survivalFinish): the name entry / the Survival table
+    int feSurvival = 0;           // Survival Mode: the menu's start (arena + 1)
     bool menuAudioHeld = false;   // the menu's music held while the window is inactive (released when the menu is left)
     bool feHeld[4] = {};   // up, down, left, right (from the key events, as the players' arrows)
     std::vector<uint8_t> feCanvas;
@@ -5153,6 +6174,9 @@ int main(int argc, char* argv[])
         menu.open(game::Launcher::Mode::Repair);
     (void)filesFromData;
     menu.quiet = autoMenu && !setupTest;
+#if defined(__ANDROID__)
+    gQuestWaitFiles = launcher && (cfg.arcade.empty() || cfg.pc.empty());   // quest: the files message (questWaitFiles)
+#endif
     // setup2: What's New once on the first start of a new version (launcher.ini lastversion= another one, or settings
     // from before it existed); HOTD_WHATSNEW_TEST=1 shows it in a test run too
     if (launcher && (!automated || std::getenv("HOTD_WHATSNEW_TEST")) && inputTestFile.empty()) {
@@ -5177,6 +6201,10 @@ int main(int argc, char* argv[])
     pause.onCue = [&](int c) { audio.pcCue(c); };
     pause.onSound = [&](bool hold) { audio.pause(hold); };
     pause.onExit = [&]() { pauseExit = true; };
+    bool pauseRetry = false;    // GitHub #5: Retry Chapter was chosen (the pause or the game over's menu)
+    bool settingsCapture = false;   // fxux: the pause's Settings: the next drawn frame kept (no pause lines), then the pages
+    pause.onSettings = [&]() { settingsCapture = true; };
+    pause.onRetry = [&]() { pauseRetry = true; };
     // bossbug (user 2026-10-26): hold to skip a cut-scene (ours, local games). Holding a player's trigger (mouse
     // button, fire key), start key, or a pad's A / right trigger (its Start pauses) for kSkipHold seconds while a cut-scene runs
     // (play, the shots off, the letterbox up) fills a ring in the letterbox bar, then the game runs the rest of the
@@ -5317,6 +6345,9 @@ int main(int argc, char* argv[])
     // reports ID 0 and moves the one cursor. Once a second mouse has really been used (gMiceUsed, P2 input "a second
     // mouse"), the game runs in relative mode: every gun moves by its own mouse's motion.
     bool relMice = false;
+    // GitHub #36: player 1's Mouse Sensitivity not 100 %: in play the mouse moves its crosshair by its motion x the
+    // sensitivity (SDL's relative mode, as with two mice); 100 %: the desktop cursor as before
+    bool p1RelMouse = false;
     bool rawWatch = false;   // watching Windows' raw mouse input for a second mouse (rawMiceWatch)
     SDL_MouseID mouse1 = 0, mouse2 = 0;
     auto playerOf = [&](SDL_MouseID id) -> int {
@@ -5776,6 +6807,9 @@ int main(int argc, char* argv[])
             return;
         }
         game::Runtime& r = liveHost->runtime();
+        // fxux: the menu's draw-only Video settings on the live background too (Transparency stayed at its default)
+        r.transparency = menu.cfg.transparency;
+        r.hideSparks = !menu.cfg.hitSparks, r.hideBlood = !menu.cfg.bloodParticles;
         // a frame the backdrop may show: the 3D's modes (game mode 1, the warning screen, is 2D only), not a part's first
         // frames (a part may start on another part's world), the story (mode 9) from its desk / telephone shot (its
         // first frames: black, and one frame of Chapter 1's world)
@@ -5926,7 +6960,8 @@ int main(int argc, char* argv[])
                 }
                 ++liveRenders;
                 // HOTD_LIVE_DUMP=<dir>[,<every N>] (developer): the live picture every N drawn frames, its mode in the name
-                if (static const char* dump = std::getenv("HOTD_LIVE_DUMP")) {
+                static const char* const liveDump = std::getenv("HOTD_LIVE_DUMP");   // (GCC: no static in a condition)
+                if (const char* dump = liveDump) {
                     std::string dir = dump;
                     int every = 60;
                     if (const size_t c = dir.rfind(','); c != std::string::npos && c > 2) {
@@ -6008,10 +7043,22 @@ int main(int argc, char* argv[])
         prvFbo = prvTex = prvDepth = 0;
         prvFw = prvFh = 0;
     };
-    auto prvHave = [&](int m, int kind = -1) {   // (kind -1: both)
+    auto prvHave = [&](int m, int kind = -1) {   // (kind -1: all; fxux: Hit Marks' two, Transparency's three (arcade))
         std::error_code ec;
-        return (kind == game::kPreviewModels || std::filesystem::exists(game::previewBaseFile(prvDir, m, game::kPreviewBlood), ec)) &&
-               (kind == game::kPreviewBlood || std::filesystem::exists(game::previewBaseFile(prvDir, m, game::kPreviewModels), ec));
+        auto has = [&](int k, int v) { return std::filesystem::exists(game::previewBaseFile(prvDir, m, k, v), ec); };
+        return (kind >= 0 && kind != game::kPreviewBlood || has(game::kPreviewBlood, 0)) &&
+               (kind >= 0 && kind != game::kPreviewModels || has(game::kPreviewModels, 0)) &&
+               (kind >= 0 && kind != game::kPreviewMarks || (has(game::kPreviewMarks, 0) && has(game::kPreviewMarks, 1))) &&
+               (kind >= 0 && kind != game::kPreviewTransp || m == 1 ||
+                (has(game::kPreviewTransp, 0) && has(game::kPreviewTransp, 1) && has(game::kPreviewTransp, 2)));
+    };
+    // fxux: the next run wanted after phase `from` for models m (-1: none): 1 Chapter 1 (no input past the bridge's
+    // fire: Models' bridge, Hit Marks' frame), 2 Chapter 1 again with the --autofire player all the way (the checks'
+    // run: Transparency's pools on the bridge to the mansion; the arcade models)
+    auto prvNextPhase = [&](int m, int from) {
+        if (from < 1 && (!prvHave(m, game::kPreviewModels) || !prvHave(m, game::kPreviewMarks))) return 1;
+        if (from < 2 && !prvHave(m, game::kPreviewTransp)) return 2;
+        return -1;
     };
     auto prvTarget = [&](int fw, int fh) {   // the offscreen picture (fw x fh), made / resized
         if (!prvFbo) {
@@ -6063,8 +7110,9 @@ int main(int argc, char* argv[])
             }
             if (was != now) {
                 for (int m = 0; m < 2; ++m)
-                    for (int kind : {game::kPreviewBlood, game::kPreviewModels})
-                        std::filesystem::remove(game::previewBaseFile(prvDir, m, kind), ec);
+                    for (int kind : {game::kPreviewBlood, game::kPreviewModels, game::kPreviewMarks, game::kPreviewTransp})
+                        for (int v = 0; v < 3; ++v)   // (fxux: the marks' / pools' choices too)
+                            std::filesystem::remove(game::previewBaseFile(prvDir, m, kind, v), ec);
                 if (std::FILE* f = std::fopen(stamp.c_str(), "wb")) {
                     std::fwrite(now.data(), 1, now.size(), f);
                     std::fclose(f);
@@ -6085,7 +7133,7 @@ int main(int argc, char* argv[])
                 return false;
             }
             prvModels = m;
-            prvPhase = prvHave(m, game::kPreviewBlood) ? 1 : 0;   // (Blood Color's there: Chapter 1 straight away)
+            prvPhase = prvHave(m, game::kPreviewBlood) ? prvNextPhase(m, 0) : 0;   // (Blood Color's there: Chapter 1 straight away)
             prvT0 = std::chrono::steady_clock::now();
             prvWorkMs = 0;
             prvLoad(true);
@@ -6136,8 +7184,29 @@ int main(int argc, char* argv[])
         const char* dumpDir = std::getenv("HOTD_PREVIEW_DUMP");
         const char* bridgeOpt = std::getenv("HOTD_PREVIEW_BRIDGE");
         const uint64_t bridge = uint64_t(bridgeOpt ? std::max(1, std::atoi(bridgeOpt)) : game::kPreviewBridgeFrame);
-        const uint64_t last = prvPhase == 0 ? uint64_t(game::kPreviewFrame) : bridge, done = prvDone;
+        // fxux: Chapter 1's stops: Hit Marks' frame, the bridge (Models'), Transparency's pools (arcade), those still
+        // missing, in order (HOTD_PREVIEW_MARKS / HOTD_PREVIEW_TRANSP=<frame>: testing)
+        const char* marksOpt = std::getenv("HOTD_PREVIEW_MARKS");
+        const char* transpOpt = std::getenv("HOTD_PREVIEW_TRANSP");
+        const uint64_t marksAt = uint64_t(marksOpt ? std::max(1, std::atoi(marksOpt)) : game::kPreviewMarksFrame);
+        const uint64_t transpAt = uint64_t(transpOpt ? std::max(1, std::atoi(transpOpt)) : game::kPreviewTranspFrame);
+        const bool wantMarks = prvPhase == 1 && !prvHave(prvModels, game::kPreviewMarks);
+        const bool wantBridge = prvPhase == 1 && !prvHave(prvModels, game::kPreviewModels);
+        const bool wantTransp = prvPhase == 2 && !prvHave(prvModels, game::kPreviewTransp);
+        std::vector<uint64_t> stops;
+        if (prvPhase == 0)
+            stops.push_back(uint64_t(game::kPreviewFrame));
+        else {
+            if (wantMarks) stops.push_back(marksAt);   // (phase 2: Transparency's alone)
+            if (wantBridge) stops.push_back(bridge);
+            if (wantTransp) stops.push_back(transpAt);
+            if (stops.empty()) stops.push_back(bridge);
+            std::sort(stops.begin(), stops.end());
+        }
+        const uint64_t last = stops.back(), done = prvDone;
         uint64_t stop = last;
+        for (const uint64_t s : stops)
+            if (s > done) { stop = s; break; }
         const char* dumpFromOpt = std::getenv("HOTD_PREVIEW_DUMP_FROM");
         const uint64_t dumpFrom = dumpFromOpt ? uint64_t(std::max(10, std::atoi(dumpFromOpt))) : bridge > 400 ? bridge - 400 : 10;
         if (dumpDir && prvPhase == 1 && done + 1 < last)
@@ -6146,10 +7215,12 @@ int main(int argc, char* argv[])
         // way on), then no input, so the big zombie carries the researcher off (HOTD_PREVIEW_FIRE_UNTIL: testing)
         const char* fireOpt = std::getenv("HOTD_PREVIEW_FIRE_UNTIL");
         const uint64_t fireUntil = prvPhase == 0 ? 0 : uint64_t(fireOpt ? std::atoi(fireOpt) : game::kPreviewBridgeFireUntil);
+        // (fxux: phase 2: the --autofire player all the way, as the checks' run)
+        const uint64_t fireAgain = prvPhase == 2 ? 0 : ~uint64_t(0);
         while (r.frameCount - prvStart < stop &&
                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() < 3.0) {
             for (auto& g : r.gun) g = {};
-            if (r.frameCount - prvStart < fireUntil) {
+            if (r.frameCount - prvStart < fireUntil || r.frameCount - prvStart >= fireAgain) {
                 const bool quiet = gAutofireQuiet;
                 gAutofireQuiet = true;
                 autofire(r, int(r.frameCount - prvStart));
@@ -6176,7 +7247,41 @@ int main(int argc, char* argv[])
                     writePngRgba(std::string(dumpDir) + "/ch1_" + (prvModels ? "pc_" : "arcade_") + std::to_string(stop) + ".png",
                                  fw, fh, rgba);
                 }
-                if (stop == last) {
+                // fxux: Hit Marks' pictures: the same frame with its 2D layer (the marks) drawn by each choice;
+                // Transparency's: the 3D drawn by each mode. Cut 1:1 / 2x (the dots must show), kept as bases
+                auto saveFx = [&](int kind, int v, const std::vector<uint8_t>& rgb) {
+                    game::PreviewImg img = game::previewCropFx(rgb, fw, fh, kind);
+                    const std::string f = game::previewBaseFile(prvDir, prvModels, kind, v);
+                    if (img.w > 0 && writePngRgba(f, img.w, img.h, img.rgba)) {
+                        SDL_Log("settings pictures: %s saved (Chapter 1 frame %d)", f.c_str(), int(stop));
+                        ++prvGen;
+                    } else
+                        prvFailed[prvModels] = true;
+                };
+                if (prvPhase == 1 && stop == marksAt && wantMarks) {
+                    if (prvModels == 1) hud.setPcDir(menu.cfg.pc, 0);   // (the PC's mark pictures)
+                    const bool was = hud.translucentMarks, cross = hud.drawCross[0];
+                    const float aim[4][2] = {};
+                    std::fill(std::begin(hud.drawCross), std::end(hud.drawCross), false);
+                    for (int v = 0; v < 2; ++v) {
+                        prvView->draw(r, fw, fh);
+                        hud.translucentMarks = v == 1;
+                        hud.draw(r, fw, fh, aim, false, {});
+                        saveFx(game::kPreviewMarks, v, prvView->renderer.readBack(fw, fh));
+                    }
+                    hud.translucentMarks = was;
+                    std::fill(std::begin(hud.drawCross), std::end(hud.drawCross), cross);
+                }
+                if (stop == transpAt && wantTransp) {
+                    const int was = r.transparency;
+                    for (int v = 0; v < 3; ++v) {
+                        r.transparency = v;
+                        prvView->draw(r, fw, fh);
+                        saveFx(game::kPreviewTransp, v, prvView->renderer.readBack(fw, fh));
+                    }
+                    r.transparency = was;
+                }
+                if (prvPhase == 0 ? stop == last : stop == bridge && wantBridge) {
                     const int kind = prvPhase == 0 ? game::kPreviewBlood : game::kPreviewModels;
                     game::PreviewImg img = game::previewCrop(px, fw, fh, kind);
                     const std::string f = game::previewBaseFile(prvDir, prvModels, kind);
@@ -6193,10 +7298,10 @@ int main(int argc, char* argv[])
         }
         gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
         prvWorkMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        if (at && stop == last && prvPhase == 0 && !prvFailed[std::max(0, prvModels)] && !prvHave(prvModels, game::kPreviewModels)) {
+        if (at && stop == last && !prvFailed[std::max(0, prvModels)] && prvNextPhase(prvModels, prvPhase) > 0) {
             // prevbridge: on to Chapter 1: a fresh runtime (loaded on a worker), the same view
             prvHost.reset();
-            prvPhase = 1;
+            prvPhase = prvNextPhase(prvModels, prvPhase);
             prvLoad(false);
         } else if (at && (stop == last || prvFailed[std::max(0, prvModels)]))
             prvStop();
@@ -6292,6 +7397,14 @@ int main(int argc, char* argv[])
             lightGuns.startCalibration();
             cfg.calibrateNext = menu.cfg.calibrateNext = false;
         }
+        // GitHub #31 (bugs1; "the cursor gets stuck, as if the screen's left edge were near the middle, after pressing 1
+        // to restart"): a restart after the game over comes here without leaveGame, so a game that had gone into SDL's
+        // relative mode (a second mouse used: a laptop's touchpad and a mouse) left it on while relMice went false. SDL
+        // keeps the cursor locked at the window's middle in that mode and reads the mice through its own raw input,
+        // which rawMiceWatch below then took over for the game window: the crosshair followed a cursor held near the
+        // middle. Relative mode off first, as leaveGame does (the cursor back where SDL had it)
+        if (relMice && inputTestFile.empty())
+            SDL_SetWindowRelativeMouseMode(window, false);
         relMice = false;
         gMiceUsed.clear();
         rawWatch = cfg.p2Input == 0 || lightGuns.active() || !inputTestFile.empty();   // the input test: registered (hidden: no input), fed by hand
@@ -6328,9 +7441,9 @@ int main(int argc, char* argv[])
         if (view)
             view->shutdown();
         view.reset();
-        if (relMice && inputTestFile.empty())
+        if ((relMice || p1RelMouse) && inputTestFile.empty())
             SDL_SetWindowRelativeMouseMode(window, false);   // the launcher's own cursor back
-        relMice = false;
+        relMice = p1RelMouse = false;
         if (rawWatch)
             rawMiceWatch(window, false);
         rawWatch = false;
@@ -6347,7 +7460,9 @@ int main(int argc, char* argv[])
     // its route, lives kept; then the seek (or the kept save-state). false: the page's status says why
     auto sceneStart = [&]() -> bool {
         gPcMode = 0;
+        gTotd = 0;
         bossModeOpt = 0;
+        gSurvivalArena = -1;
         const auto routeWas = routeForce;
         const bool keptWas = livesKept;
         livesKept = true;
@@ -8481,6 +9596,8 @@ int main(int argc, char* argv[])
                 fe.pcModeOpen(gNet ? 2 : menu.cfg.players, cpu, uint32_t(SDL_GetTicks()));
             };
             fe.onPcModeStart = [&]() { feAction = 16; };
+            if (kExperimentalModes)   // (experimental: not in release builds)
+                fe.startTotd = [&]() { feAction = 48; };   // The Typing of the Dead 0: an Arcade game played by typing
             // Boss Mode (game/bossmode.h): a boss picture (0x422EE4 ..) -> the game; the times tables (screens 10-14)
             fe.onBossMode = [&](int m) { feBoss = m; };
             fe.startBossMode = [&]() { fe.screenBossMode(); };   // the menu's Boss Mode entry (0x422B90)
@@ -8497,6 +9614,17 @@ int main(int argc, char* argv[])
                     }
                     gp.pc = menu.pcOk ? cfg.pc : std::string();
                     gp.blood = viewBlood();
+                    // gallery blood: the Gallery's own blood settings, from Options and Mods as they are now (changed
+                    // there only for the Gallery: never saved, the game keeps its own)
+                    game::GalleryBlood gb;
+                    gb.color = std::clamp(menu.cfg.blood, 0, 5);
+                    gb.rgb = menu.cfg.bloodRgb & 0xFFFFFF;
+                    gb.rainbow = game::rainbowBloodSettings();
+                    gb.particles = menu.cfg.bloodParticles;
+                    if (const char* rgb = std::getenv("HOTD_GALLERY_BLOOD_RGB"))   // (testing: the custom colour, RRGGBB)
+                        gb.rgb = int(std::strtoul(rgb, nullptr, 16) & 0xFFFFFF);
+                    gallery.setBlood(gb);
+                    galleryPanel = 0;
                     if (!gallery.open(gp, gerr)) {
                         SDL_Log("gallery: %s", gerr.c_str());
                         return;
@@ -8542,6 +9670,24 @@ int main(int argc, char* argv[])
                         t.entryNames.push_back(game::galleryEntries()[size_t(i)].name);   // (regallery: the list)
                     }
                 t.key = gallery.key();
+                // gallery blood / gallery dismemberment: the settings and the parts' states
+                const game::GalleryBlood& gb = gallery.blood();
+                t.bloodColor = gb.color;
+                t.bloodRgb = gb.rgb;
+                t.rainbow = gb.rainbow.on;
+                t.rainbowColours = gb.rainbow.together ? "Together" : "Each Splash";
+                t.rainbowSpeed = game::galleryRainbowSpeedName(gb.rainbow.speed);
+                t.creatureBlood = game::galleryCreatureBloodName(gb.rainbow.creature);
+                t.particles = gb.particles;
+                t.blood = gallery.bloodLabel();
+                for (int p = 0; p < game::kGalleryParts; ++p) {
+                    t.partNames.push_back(game::galleryPartName(p));
+                    t.partStates.push_back(gallery.damageLabel(p));
+                    t.partSteps.push_back(gallery.damageStates(p));
+                }
+                t.damagePart = gallery.damagePart;
+                t.damageNote = gallery.damageNote();
+                t.panel = galleryPanel;
                 return t;
             };
             fe.galleryThumb = [&](int entry) { return gallery.thumb(entry); };
@@ -8551,6 +9697,8 @@ int main(int argc, char* argv[])
             };
             fe.onGallery = [&](int a) {
                 if (a <= 1 || a == 8 || a == 9 || a >= 100) galleryPage = 0;   // (another entry: its first page)
+                if (a >= 40 && a < 56) galleryPanel = 1;        // (gallery blood: its keys show the Blood panel)
+                else if (a >= 56 && a < 80) galleryPanel = 2;   // (and the Damage panel)
                 switch (a) {
                 case 0: gallery.step(-1); break;
                 case 1: gallery.step(1); break;
@@ -8586,8 +9734,46 @@ int main(int argc, char* argv[])
                     menu.cfg.save(cache + "launcher.ini");
                     fe.hideHand = false;
                     break;
+                // gallery blood (the Gallery's own settings: Options and Mods keep theirs)
+                case 34: galleryPanel = (galleryPanel + 1) % 3; break;   // the Remake page's panel: Viewer / Blood / Damage (H)
+                case 35: galleryPanel = (galleryPanel + 2) % 3; break;
+                case 36: case 37: case 38: galleryPanel = a - 36; break;
+                case 40: case 41: case 42: case 43: case 44: case 45: case 46: case 47:
+                case 48: case 49: case 50: case 51: case 52: case 53: case 54: case 55: {
+                    game::GalleryBlood b = gallery.blood();
+                    if (a == 40 || a == 41) {   // Blood Color (G / Shift+G); a colour picked turns the rainbow off
+                        b.color = (b.color + (a == 40 ? 1 : 5)) % 6;
+                        b.rainbow.on = false;
+                    } else if (a <= 47) {       // the custom colour: red / green / blue up or down by 16, as Options
+                        const int shift = 16 - 8 * ((a - 42) / 2), v = (b.rgb >> shift) & 255;
+                        const int nv = (a - 42) % 2 == 0 ? std::min(255, v / 16 * 16 + 16) : std::max(0, (v + 15) / 16 * 16 - 16);
+                        b.rgb = (b.rgb & ~(255 << shift)) | (nv << shift);
+                        b.color = 5;
+                        b.rainbow.on = false;
+                    } else if (a == 48) {
+                        b.rainbow.on = !b.rainbow.on;   // Rainbow Blood (N)
+                    } else if (a == 49) {
+                        b.rainbow.together = !b.rainbow.together;
+                    } else if (a == 50 || a == 51) {
+                        b.rainbow.speed = game::galleryRainbowSpeedStep(b.rainbow.speed, a == 50 ? 1 : -1);
+                    } else if (a == 52 || a == 53) {
+                        b.rainbow.creature = (b.rainbow.creature + (a == 52 ? 1 : 2)) % 3;
+                    } else if (a == 54 || a == 55) {
+                        b.particles = !b.particles;     // Blood Particles (J)
+                    }
+                    gallery.setBlood(b);
+                    break;
+                }
+                // gallery dismemberment: 60 + part its next state, 70 + part its state back, 56 / 57 the keys' part
+                // (Z, X), 58 its state back (Shift+X), 59 every part whole (Shift+Z)
+                case 56: gallery.damagePart = (gallery.damagePart + 1) % game::kGalleryParts; break;
+                case 57: gallery.stepDamage(gallery.damagePart, 1); break;
+                case 58: gallery.stepDamage(gallery.damagePart, -1); break;
+                case 59: gallery.resetDamage(); break;
                 default:
-                    if (a >= 100 && a < 100 + game::kGalCategories) gallery.selectCategory(a - 100);
+                    if (a >= 60 && a < 60 + game::kGalleryParts) gallery.stepDamage(gallery.damagePart = a - 60, 1);
+                    else if (a >= 70 && a < 70 + game::kGalleryParts) gallery.stepDamage(gallery.damagePart = a - 70, -1);
+                    else if (a >= 100 && a < 100 + game::kGalCategories) gallery.selectCategory(a - 100);
                     else if (a >= 1000 && a < 1000 + gallery.count()) gallery.select(a - 1000);   // (a portrait)
                     break;
                 }
@@ -8667,9 +9853,33 @@ int main(int argc, char* argv[])
             // then Boss Mode's five times tables, as the PC's High Scores arrows go on (8, 9, then 10-14 0x423A90 ..)
             for (const char* n : {"Chariot Boss", "Hangedman Boss", "Hermit Boss", "Magician Boss", "All Bosses"})
                 fe.rankingTables.push_back(n);   // (the PC's labels 0x45 .. 0x49)
+            // then The Typing of the Dead 0's top 10s (ranking_totd.bin, ranking_totd_<preset>.bin: Sonic Mode's own)
+            // (the experimental modes' tables only when they are built in: HOTD_EXPERIMENTAL_MODES; else the three stay -1)
+            if (kExperimentalModes) {
+                gTotdRankTable = int(fe.rankingTables.size());
+                for (int p = 0; p < game::kSonicPresets; ++p)
+                    fe.rankingTables.push_back(p ? std::string("Typing of the Dead 0: ") + game::sonicName(p) : std::string("Typing of the Dead 0"));
+            }
+            if (kSurvivalMode) {   // (polish: in the release builds too, HOTD_SURVIVAL_MODE)
+                fe.rankingTables.push_back("Survival");   // Survival Mode's table (game/survival.h: survival_scores.txt)
+                gSurvivalRankTable = int(fe.rankingTables.size()) - 1;
+            }
+            if (kExperimentalModes) {
+                fe.rankingTables.push_back("Horde");   // Horde Mode's top 10 (game/horde.h: ranking_horde.bin, the arcade's own form)
+                gHordeRankTable = int(fe.rankingTables.size()) - 1;
+            }
             fe.rankingTableRows = [&](int table) {
                 std::vector<game::Frontend::RankRow> rows;
-                if (table > gPmRankTable) {   // a boss's times (bosstimes.cfg in the settings folder)
+                if (table == gSurvivalRankTable) {   // (points, "Round n", name)
+                    game::SurvivalScores t;
+                    if (!gSurvivalScoresFile.empty())
+                        t.load(gSurvivalScoresFile);
+                    for (const game::SurvivalScores::Row& r : t.rows)
+                        rows.push_back({r.name, "Round " + std::to_string(r.wave), r.score});
+                    return rows;
+                }
+                const bool totdTable = gTotdRankTable >= 0 && table >= gTotdRankTable && table != gHordeRankTable;
+                if (table > gPmRankTable && !totdTable) {   // a boss's times (bosstimes.cfg in the settings folder)
                     game::BossTimes t;
                     if (!gBossTimesFile.empty())
                         t.load(gBossTimesFile);
@@ -8691,7 +9901,17 @@ int main(int argc, char* argv[])
                 }
                 uint8_t b[0x78] = {};
                 bool have = false;
-                const std::string file = cache + rankingName(table % game::kSonicPresets) + (table >= game::kSonicPresets ? "4p" : "");
+                const int wasTotd = gTotd, wasHorde = gHordeSize;   // (rankingName by the table, not by the last game's mode)
+                gTotd = 0, gHordeSize = 0;
+                std::string file = cache + rankingName(table % game::kSonicPresets) + (table >= game::kSonicPresets ? "4p" : "");
+                if (table == gHordeRankTable) {   // Horde Mode's top 10 (ranking_horde.bin: the arcade's table, its own file)
+                    gHordeSize = 1;
+                    file = cache + rankingName(0);
+                } else if (totdTable) {   // (rankingName with the mode on: the TotD file of that preset)
+                    gTotd = 1;
+                    file = cache + rankingName(table - gTotdRankTable);
+                }
+                gTotd = wasTotd, gHordeSize = wasHorde;
                 if (FILE* f = std::fopen(file.c_str(), "rb")) {
                     have = std::fread(b, 1, sizeof b, f) == sizeof b;
                     std::fclose(f);
@@ -8723,15 +9943,21 @@ int main(int argc, char* argv[])
                 menu.cfg.continues = o.continues;
                 menu.cfg.sfxVolume = o.sfxVolume;
                 menu.cfg.musicVolume = o.musicVolume;
-                cfg = menu.cfg;
-                cfg.save(cache + "launcher.ini");
+                if (gOverGame)   // (fxux: the in-game Settings: the game keeps what it started with but the live ones)
+                    liveSettings(cfg, menu.cfg, gNet != nullptr);
+                else
+                    cfg = menu.cfg;
+                menu.cfg.save(cache + "launcher.ini");
                 audio.setVolume(0.8f * cfg.sfxVolume / 100.0f, 0.6f * cfg.musicVolume / 100.0f);
             };
             fe.onControllerConfig = [&]() { openCategory(game::kCatControls); };   // (the text launcher before)
             // menuart step 3: our extras on "More Options" (the values are menu.cfg's, saved at once)
             auto saveCfg = [&]() {
-                cfg = menu.cfg;
-                cfg.save(cache + "launcher.ini");
+                if (gOverGame)   // (fxux: the in-game Settings: the game's other settings are its start's / the host's)
+                    liveSettings(cfg, menu.cfg, gNet != nullptr);
+                else
+                    cfg = menu.cfg;
+                menu.cfg.save(cache + "launcher.ini");
                 audio.setMusicOn(cfg.music);
                 audio.musicNumbering = cfg.musicNumbering;
                 audio.setVolume(0.8f * cfg.sfxVolume / 100.0f, 0.6f * cfg.musicVolume / 100.0f);
@@ -9481,6 +10707,7 @@ int main(int argc, char* argv[])
                 for (int b = 0; b < 5; ++b)
                     fe.previewStills.push_back(cache + "menu_backdrop_" + (pcFirst ? "pc" : "arcade") + "_" + std::to_string(b) + ".png");
             hooks.menuMusicChanged = [&]() {   // (menufb, user 2026-10-26 "the menu music does not update right": played at once)
+                if (gOverGame) return;   // (fxux: the game's music holds; the menus play it next time)
                 fe.menuCue = game::menuSongOf(menu.cfg.menuMusic).cue;
                 if (menu.cfg.music && fe.onCue)
                     fe.onCue(fe.menuCue);
@@ -9494,8 +10721,8 @@ int main(int argc, char* argv[])
                 const std::string key = game::previewKey(name, menu.cfg, menu.pcOk && !menu.cfg.pc.empty());
                 if (key.empty())
                     return std::string();
-                const int m = std::atoi(key.c_str() + key.find('|') + 1);
-                return prvHave(m, name.compare(0, 6, "models") == 0 ? game::kPreviewModels : game::kPreviewBlood) ? "mem:" + key : std::string();
+                std::error_code ec;   // (fxux: the key's own base: Hit Marks' / Transparency's choices too)
+                return std::filesystem::exists(game::previewKeyFile(prvDir, key), ec) ? "mem:" + key : std::string();
             };
             fe.previewImage = [&](const std::string& key, std::vector<uint8_t>& rgba, int& w, int& h) {
                 return game::previewRender(key, prvDir, menu.cfg, hooks, rgba, w, h);
@@ -9701,6 +10928,19 @@ int main(int argc, char* argv[])
             };
             fe.sonicValue = [&]() { return std::string(game::sonicName(menu.cfg.sonic)); };
             fe.onSonic = [&, saveCfg]() { menu.cfg.sonic = (menu.cfg.sonic + 1) % game::kSonicPresets; saveCfg(); };
+            // Survival Mode (game/survival.h): More Modes' Survival (the arena chosen there; Sonic Mode's preset applies to it)
+            // (both experimental: their items only when built in, HOTD_EXPERIMENTAL_MODES; null callbacks leave them out)
+            static int survivalMenuArena = 0;
+            if (kSurvivalMode) {   // (polish: Survival in the release builds too, labelled Very Experimental)
+                fe.survivalArenaValue = []() { return std::string(game::survivalArenas()[size_t(survivalMenuArena)].name); };
+                fe.onSurvivalArena = []() { survivalMenuArena = (survivalMenuArena + 1) % int(game::survivalArenas().size()); };
+                fe.startSurvival = [&]() { feSurvival = survivalMenuArena + 1; };
+            }
+            if (kExperimentalModes) {
+                // Horde Mode (game/horde.h): More Modes' Horde (its Chapter Select: onChapter) and Horde Size (Low / Normal / High)
+                fe.hordeSizeValue = []() { return std::string(game::HordeMode::sizeName(gHordeMenuSize)); };
+                fe.onHordeSize = []() { gHordeMenuSize = gHordeMenuSize % 3 + 1; };
+            }
             for (int k = 0; k < 4; ++k)
                 fe.chapterEnabled[k] = game::chapterPlayable(k);
             fe.chapterEnabled[4] = game::chapterPlayable(3);   // the ending: after Chapter 4
@@ -9709,6 +10949,8 @@ int main(int argc, char* argv[])
                 saveCfg();
                 menuChapter = c, menuEvent = -1;
                 feAction = 6;
+                // Horde Mode (game/horde.h): its Chapter Select (More Modes > Horde) starts the chapter with copies
+                gHordeSize = fe.hordeChapters ? gHordeMenuSize : 0;
             };
             // the PC's Cheat screen (Ctrl + SKIDMARX; docs/teaser_status/pc_cheats.md): Start plays its stage from its
             // scene (THOTD.EXE game_new 0x458588: chapter = 0xD5B350, event_index = 0xD5B354). Free-Play (0xD5B35C:
@@ -9720,6 +10962,7 @@ int main(int argc, char* argv[])
                 saveCfg();
             };
             fe.onCheatStart = [&](int stage, int scene, bool) {
+                gHordeSize = 0;
                 menuChapter = stage;
                 menuEvent = scene;
                 feAction = 6;
@@ -9884,9 +11127,18 @@ int main(int argc, char* argv[])
         // bossbug (user 2026-10-26): a Boss Mode game left by the pause's Exit (or any way back) keeps no boss: the
         // next Arcade / Chapter Select / PC Mode game started that boss again (only bossEnded cleared it)
         bossModeOpt = 0;
+        gSurvivalArena = -1;   // (Survival Mode likewise: its arena only for the game the menu started)
         // soak (2026-10-27): PC Mode's flag likewise: every mode sets it at its start except the menu's attracts and
         // Online Co-op, which after a PC Mode game ran with PC Mode's rules / its 60 Hz tick (Game Speed Auto)
         gPcMode = 0;
+        if (gTotd && SDL_TextInputActive(window))   // The Typing of the Dead 0: its text input off with the game
+            SDL_StopTextInput(window);
+        if (gTotd && gTotdRankTable >= 0)   // (High Scores opens on its table, the preset played)
+            fe.rankingTable = gTotdRankTable + std::clamp(gSonic.preset, 0, game::kSonicPresets - 1);
+        gTotd = 0;
+        if (gHordeSize > 0 && gHordeRankTable >= 0)   // (Horde Mode likewise: its table; its size only for its game)
+            fe.rankingTable = gHordeRankTable;
+        gHordeSize = 0;
         SDL_HideCursor();
         return Screen::Menu;
     };
@@ -9991,6 +11243,52 @@ int main(int argc, char* argv[])
         }
     };
     for (int loops = 0; running; ++loops) {
+        // HOTD_KEYS="<loop>:<key> <key> ...;<loop>:..." (developer, fxux): at that loop of the window's main loop (any
+        // screen) the keys pressed through the event queue (SDL key names, as HOTD_GALLERY_KEYS); "shot=<name>": a
+        // screenshot as <name>.png in the screenshots folder (--shot-dir) once the loop is drawn; "quit": the run ends.
+        // With --auto-start / --input-test it scripts the menus, the pause and the in-game Settings (a hidden window)
+        if (static const char* ks = std::getenv("HOTD_KEYS"); ks) {
+            static std::vector<std::pair<int, SDL_Keycode>> ups;   // (each key let go 2 loops later: the menus read held arrows)
+            for (size_t u = 0; u < ups.size();)
+                if (ups[u].first <= loops) {
+                    SDL_Event ev{};
+                    ev.type = SDL_EVENT_KEY_UP;
+                    ev.key.key = ups[u].second;
+                    ev.key.scancode = SDL_GetScancodeFromKey(ev.key.key, nullptr);
+                    ev.key.windowID = SDL_GetWindowID(window);
+                    SDL_PushEvent(&ev);
+                    ups.erase(ups.begin() + std::ptrdiff_t(u));
+                } else
+                    ++u;
+            for (std::string s = ks; !s.empty();) {
+                const size_t q = s.find(';');
+                const std::string part = s.substr(0, q);
+                s = q == std::string::npos ? std::string() : s.substr(q + 1);
+                const size_t c = part.find(':');
+                if (c == std::string::npos || std::atoi(part.c_str()) != loops)
+                    continue;
+                std::istringstream kss(part.substr(c + 1));
+                for (std::string k; kss >> k;) {
+                    if (k.rfind("shot=", 0) == 0) {
+                        shotName = k.substr(5);
+                        shot = true;
+                        continue;
+                    }
+                    if (k == "quit") {
+                        running = false;
+                        continue;
+                    }
+                    SDL_Event ev{};
+                    ev.type = SDL_EVENT_KEY_DOWN;
+                    ev.key.key = SDL_GetKeyFromName(k.c_str());
+                    ev.key.scancode = SDL_GetScancodeFromKey(ev.key.key, nullptr);
+                    ev.key.down = true;
+                    ev.key.windowID = SDL_GetWindowID(window);
+                    SDL_PushEvent(&ev);
+                    ups.push_back({loops + 2, ev.key.key});
+                }
+            }
+        }
         if (const bool want = screen == Screen::Launcher && !menu.quiet; want != setupWin)
             setupWindow(want);
         else if (setupWin)
@@ -10025,6 +11323,9 @@ int main(int argc, char* argv[])
         if (screen == Screen::Launcher) {
             SDL_Event e;
             while (SDL_PollEvent(&e)) {
+#if defined(__ANDROID__)
+                if (gQuestWaitFiles && e.type != SDL_EVENT_QUIT) continue;   // quest: the files message takes no input
+#endif
                 if (online.editing() && online.textMode() && e.type != SDL_EVENT_QUIT) {   // online co-op: a field typed
                     if (e.type == SDL_EVENT_TEXT_INPUT) { online.typed(e.text.text); continue; }
                     if (e.type == SDL_EVENT_KEY_DOWN) {
@@ -10040,11 +11341,20 @@ int main(int argc, char* argv[])
                 if (online.textMode() && e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_V && (e.key.mod & SDL_KMOD_CTRL) &&
                     online.pasteCode(online.textFrontend()))
                     continue;   // (the Join page: Ctrl+V puts the copied code in the box)
+                if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && !online.textMode())
+                    menu.handle(e, window);   // linux (Steam Deck): A / B / Start / Back / d-pad as Enter / Esc / arrows
                 if (e.type == SDL_EVENT_QUIT) running = false;
                 else if (pads.event(e)) {}   // (the text launcher is the mouse's)
                 else if (isFullscreenKey(e)) { if (!setupWin) toggleFullscreen(window); }   // F11 (not in the setup's small window)
                 else menu.handle(e, window);
             }
+#if defined(__ANDROID__)
+            if (questWaitFiles(menu, window, ww, wh)) {   // quest: "copy your game files" on the big screen
+                vrFlatFrame(window);
+                menuPace();
+                continue;
+            }
+#endif
             online.frameText();   // online co-op: the network, the LAN list
             // testing: HOTD_ONLINE_TEST=launcher-alone: the launcher's rows Host a Game > Start Hosting > Play Alone
             if (static const char* ot = std::getenv("HOTD_ONLINE_TEST"); ot && std::string(ot) == "launcher-alone" && online.textMode()) {
@@ -10187,14 +11497,41 @@ int main(int argc, char* argv[])
                 ev.key.windowID = SDL_GetWindowID(window);
                 SDL_PushEvent(&ev);
             }
-            SDL_GL_SwapWindow(window);
+            vrFlatFrame(window);   // (quest: on the big screen in VR)
             menuPace();   // (menuperf: on the display's beat, was a 16 ms sleep)
             continue;
+        }
+        if (screen == Screen::Menu && gOverGame) {
+            // fxux: the in-game Settings: back to the pause when the pages leave for the main menu (Back / Exit on
+            // Options; the Quit question too); online this PC keeps the link alive as the pause does
+            if (fe.screen() == 1 || fe.screen() == 21) {
+                gOverGame = false;
+                fe.rowsFilter = nullptr;
+                fe.inGameNote.clear();
+                fe.liveTex = 0, fe.liveW = fe.liveH = 0;
+                if (gOverTex) {
+                    gl::GLuint t = gOverTex;
+                    gl::DeleteTextures(1, &t);
+                    gOverTex = 0;
+                }
+                liveSettings(cfg, menu.cfg, gNet != nullptr);
+                if (relMice) SDL_SetWindowRelativeMouseMode(window, true);
+                p1RelMouse = false;   // (the game's loop sets player 1's mouse mode again)
+                SDL_Log("in-game settings: closed (back to the pause)");
+                screen = Screen::Game;
+                continue;
+            }
+            if (gNet) {
+                gNet->setPaused(true);
+                gNet->idle();
+            }
+            fe.liveTex = gOverTex, fe.liveW = gOverW, fe.liveH = gOverH;   // (the paused game under the pages)
+            fe.liveOldTex = 0, fe.liveMix = 1.0f, fe.liveHold = false;
         }
         if (screen == Screen::Menu) {
             // setup2: a newer release found (util/update_check.h): once, the setup window's Update page (its version,
             // its changelog, Update / Not now; Not now comes back here)
-            if (static bool updateShown = false; !updateShown && !gNet) {
+            if (static bool updateShown = false; !updateShown && !gNet && !gOverGame) {
                 std::string tag;
                 if (util::updateAvailable(tag)) {
                     updateShown = true;
@@ -10504,6 +11841,15 @@ int main(int argc, char* argv[])
                         case SDLK_SPACE: act = 4; break;
                         case SDLK_HOME: act = 5; break;
                         case SDLK_U: gallery.clayCut = !gallery.clayCut; continue;   // the cut creatures untextured
+                        // gallery blood: G Blood Color (Shift: back), N Rainbow Blood, J Blood Particles; H the Remake
+                        // page's panel (Viewer / Blood / Damage). Gallery dismemberment: Z the part, X its state
+                        // (Shift+X back), Shift+Z every part whole
+                        case SDLK_G: act = (e.key.mod & SDL_KMOD_SHIFT) ? 41 : 40; break;
+                        case SDLK_N: act = 48; break;
+                        case SDLK_J: act = 54; break;
+                        case SDLK_H: act = (e.key.mod & SDL_KMOD_SHIFT) ? 35 : 34; break;
+                        case SDLK_Z: act = (e.key.mod & SDL_KMOD_SHIFT) ? 59 : 56; break;
+                        case SDLK_X: act = (e.key.mod & SDL_KMOD_SHIFT) ? 58 : 57; break;
                         case SDLK_1: case SDLK_2: case SDLK_3: case SDLK_4: case SDLK_5: case SDLK_6:
                             act = 100 + int(e.key.key - SDLK_1);
                             break;
@@ -10684,7 +12030,7 @@ int main(int argc, char* argv[])
                     else if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION)
                         jid = e.gaxis.which;
                     if (jid) {   // (padfix: any pad, whoever it plays for: was player 1's / an unassigned one only)
-                        const game::MenuCursorConfig cc{menu.cfg.touchCursor != 0, menu.cfg.gyroCursor, menu.cfg.cursorSpeed};
+                        const game::MenuCursorConfig cc{menu.cfg.touchCursor != 0, menu.cfg.gyroCursor, menu.cfg.cursorSpeed, menu.cfg.gyroCursorSpeed};   // (#36)
                         static std::set<SDL_JoystickID> gyroOn;   // (the gyro turned on once a pad: its events come)
                         if (cc.gyro > 0 && !gyroOn.count(jid))
                             if (SDL_Gamepad* g = SDL_GetGamepadFromID(jid); g && SDL_GamepadHasSensor(g, SDL_SENSOR_GYRO)) {
@@ -11002,6 +12348,8 @@ int main(int argc, char* argv[])
             // not on PC Mode's four panels: a near miss would take another player's arrow)
             fe.snapAim = lightGuns.menuGunOn() && !fe.rangeShown() && !(fe.screen() == 16 && fe.pcSeats == 4);
             fe.update(in, uint32_t(SDL_GetTicks()));
+            if (gOverGame && (fe.screen() == 1 || fe.screen() == 21))
+                continue;   // (fxux: the in-game Settings closed: the pause next loop, no main menu frame between)
             // HOTD_MENU_PERF_TOUR=N (menuperf, docs/performance.md): every Remake page in turn, N frames each, Down then
             // Up pressed every 12 frames (the focus moving; the Jukebox: the chosen row), then the table and the end
             // (a hidden window; it starts once the live attract shows, or after 15 s)
@@ -11303,7 +12651,7 @@ int main(int argc, char* argv[])
             const auto menuT0 = std::chrono::steady_clock::now();
             // menus3: the settings pictures' attract frames, made in the background when missing (not in the Gallery)
             // (HOTD_PREVIEW_TEST=1, testing: made, then the run ends with their count)
-            if (!gallery.isOpen()) {
+            if (!gallery.isOpen() && !gOverGame) {   // (fxux: one game view at a time: none while a game is held)
                 const bool busy = prvFrame(true);
                 if (std::getenv("HOTD_PREVIEW_TEST") && !busy) {
                     std::printf("settings pictures: %d of %d made in %s\n", int(prvHave(0)) + int(prvHave(1)),
@@ -11312,7 +12660,8 @@ int main(int argc, char* argv[])
                     if (const char* out = std::getenv("HOTD_PREVIEW_OUT")) {
                         std::error_code ec;
                         std::filesystem::create_directories(out, ec);
-                        for (const char* n : {"models_0", "models_1", "blood_0", "blood_1", "blood_2", "blood_3", "blood_4", "blood_5"}) {
+                        for (const char* n : {"models_0", "models_1", "blood_0", "blood_1", "blood_2", "blood_3", "blood_4", "blood_5",
+                                              "marks_0", "marks_1", "transp_0", "transp_1", "transp_2", "transp_3"}) {
                             std::vector<uint8_t> px;
                             int w = 0, h = 0;
                             if (fe.previewImage && fe.previewImage(game::previewKey(n, menu.cfg, menu.pcOk), px, w, h))
@@ -11324,10 +12673,15 @@ int main(int argc, char* argv[])
             }
             // liveattract: the Remake screens' background, the attract running live (before the CRT's target is bound)
             // (regallery: not behind the Remake Gallery's pages: the Gallery's own stage / a dark ground)
-            liveFrame((fe.remakeScreen() || fe.classicBackdrop()) && !fe.splashActive() && !(fe.galleryRemake() && gallery.isOpen()) &&
+            if (!gOverGame) liveFrame((fe.remakeScreen() || fe.classicBackdrop()) && !fe.splashActive() && !(fe.galleryRemake() && gallery.isOpen()) &&
                           !fe.galleryRE(), ww, wh);
             gCrt.configure(menu.cfg.crt, 480, fe.canvasWidth());   // crt: the menus are the PC's 640 x 480 screen (a Remake screen: wider)
+            // gamma: Video > Menu Gamma shows at once (the menu's own picture is the preview); polish: the menus, the
+            // Gallery and the front-end screens have their own (Game Gamma: the play's frames below)
+            setGamma100(menu.cfg.menuGamma);
             const bool crtMenu = gCrt.begin(ww, wh);
+            if (!crtMenu)   // (menublocks: the window's own picture, whatever the settings pictures / live attract left bound)
+                gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
             gl::Viewport(0, 0, ww, wh);
             gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
@@ -11449,6 +12803,7 @@ int main(int argc, char* argv[])
             }
             if (crtMenu)
                 gCrt.present(ww, wh, 0);
+            gammaApply(0, ww, wh);   // gamma (render/gamma.h): the menus too
             if (jshot && jshotFrames >= 0 && fe.screen() == 20 && ++jshotFrames == jshotAt) {   // HOTD_JUKEBOX_SHOT
                 Renderer grab;
                 if (std::filesystem::path(jshotPng).has_parent_path())
@@ -11569,7 +12924,11 @@ int main(int argc, char* argv[])
                 Renderer grab;
                 const char* menuPng = menuShot ? std::getenv("HOTD_MENU_SHOT_PNG") : nullptr;   // (remakemenu: its own file)
                 if (!menuPng) std::filesystem::create_directories(shotsRoot);
-                writePng(menuPng ? std::string(menuPng) : shotsRoot + "/hotd_menu_" + timestamp() + ".png", ww, wh, grab.readBack(ww, wh));
+                const std::string keysPng = shotName.empty() ? std::string() : (shotDir.empty() ? shotsRoot : shotDir) + "/" + shotName + ".png";   // (fxux: HOTD_KEYS)
+                writePng(menuPng ? std::string(menuPng) : !keysPng.empty() ? keysPng : shotsRoot + "/hotd_menu_" + timestamp() + ".png", ww, wh,
+                         grab.readBack(ww, wh));
+                if (!keysPng.empty()) SDL_Log("screenshot: %s (menu screen %d)", keysPng.c_str(), fe.screen());
+                shotName.clear();
                 shot = false;
                 if (!shotAt.empty() && shotAt.front() == 0)
                     shotAt.erase(shotAt.begin());
@@ -11837,9 +13196,9 @@ int main(int argc, char* argv[])
                 }
             }
             drawGunAids(menu.cfg, ww, wh, false);   // padpass: a Sinden's white border on the menus too
-            SDL_GL_SwapWindow(window);
+            vrFlatFrame(window);   // (quest: on the big screen in VR)
             menuPace();   // (menuperf: on the display's beat, was a 16 ms sleep)
-            int action = feAction;
+            int action = gOverGame ? -1 : feAction;   // (fxux: the in-game Settings start nothing)
             feAction = -1;
             // pmfix2 (testing): HOTD_MENU_PCMODE=<p1 char>,<p2 char>,<ms>: once the menu has run that long (its live
             // background, the settings pictures), a PC Mode game with those characters as the PC Mode screen's Start
@@ -11906,6 +13265,27 @@ int main(int argc, char* argv[])
             }
             if (action == 0 && cfg.bossRush && !feBoss && !gNet)   // Light Gun Edition: Boss Rush: Arcade = All Bosses (lives carried on)
                 feBoss = 6;
+            if (feSurvival) {   // Survival Mode (game/survival.h): the arena's game (the players asked first)
+                gPcMode = 0;
+                bossModeOpt = 0;
+                gSurvivalArena = feSurvival - 1;
+                feSurvival = 0;
+                SDL_ShowCursor();
+                titleNow = 0;
+                const bool ok = enterGame();
+                titleNow = -1;
+                if (ok)
+                    screen = Screen::Game;
+                else {
+                    gSurvivalArena = -1;
+                    screen = Screen::Launcher;
+                }
+                continue;
+            }
+            if (feBoss || action == 0 || action == 6 || action == 16)
+                gSurvivalArena = -1;   // (a game of another mode never keeps a Survival arena: one left by Exit)
+            if (feBoss || action == 0 || action == 16 || action == 48)
+                gHordeSize = 0;        // (nor a Horde size: only Horde's Chapter Select sets it, onChapter)
             if (feBoss) {   // Boss Mode (0x422EE4 ..: frontend_state 4): the boss's game
                 gPcMode = 0;   // (boss mode is never PC Mode)
                 bossModeOpt = feBoss;
@@ -11932,6 +13312,15 @@ int main(int argc, char* argv[])
                 else
                     fe.screenScenes();   // its status says why
                 continue;
+            }
+            // The Typing of the Dead 0 (More Modes, feAction 48): an Arcade game from Chapter 1 played by typing
+            if (action == 48) {
+                gPcMode = 0;
+                gTotd = 1;
+                SDL_Log("The Typing of the Dead 0");
+                action = 0;
+            } else if (action == 0 || action == 6 || action == 16) {
+                gTotd = 0;
             }
             if (action == 16) {
                 gPcMode = 1;
@@ -12020,7 +13409,7 @@ int main(int argc, char* argv[])
                 if (!shotAt.empty())   // a scripted run ends here
                     running = false;
             }
-            SDL_GL_SwapWindow(window);
+            vrFlatFrame(window);   // (quest: on the big screen in VR)
             menuPace();   // (menuperf: on the display's beat, was a 16 ms sleep)
             if (back) {
                 leaveGame();
@@ -12030,6 +13419,31 @@ int main(int argc, char* argv[])
                     screen = Screen::Game;
                 else
                     running = false;
+            }
+            continue;
+        }
+        if (survivalEnded) {   // Survival Mode's end (game/survival.h): the menus, the name entry for a new row, the Survival table
+            survivalEnded = false;
+            gSurvivalArena = -1;
+            if (launcher && feLoaded) {
+                leaveGame();
+                screen = backToMenu();
+                auto table = [&fe]() {
+                    fe.rankingTable = gSurvivalRankTable;
+                    fe.screenRanking();
+                };
+                if (gSurvivalPending) {
+                    fe.onNameEntered = [table](const std::string& n) {
+                        survivalNameEntered(n);
+                        table();
+                    };
+                    fe.screenNameEntry("ROUND " + std::to_string(gSurvivalRow.wave) + "  " + std::to_string(gSurvivalRow.score) + " PTS");
+                } else
+                    table();
+            } else {
+                if (gSurvivalPending)
+                    survivalNameEntered("PLAYER");
+                running = false;
             }
             continue;
         }
@@ -12122,8 +13536,15 @@ int main(int argc, char* argv[])
         // a game by itself), or with the title off in the main menu, as the PC's game over goes back to its front end.
         // It restarted the game here: the arcade's title loop (its start button / a trigger started Chapter 1 again),
         // or a chapter past Chapter 1 straight away. Online, the scripted runs and the cut-scene viewer: as before
+        // GitHub #5: Chapter Retry on: the game over asks first (GAME OVER: Retry Chapter / Exit, the pause's menu)
+        if (host.runtime().gameOverDone && cfg.chapterRetry && canRetry(host.runtime()) && !gBot && inputTestFile.empty() &&
+            checkpoints.empty() && !pause.gameOver()) {
+            SDL_Log("game over: Retry Chapter / Exit");
+            pause.openGameOver();
+            paused = true;
+        }
         if (host.runtime().gameOverDone && launcher && feLoaded && !gNet && inputTestFile.empty() && !gScene.active() &&
-            !host.runtime().boss.active() && !gBot && checkpoints.empty()) {
+            !host.runtime().boss.active() && !gBot && checkpoints.empty() && !pause.gameOver()) {
             SDL_Log("front end: game over -> %s", cfg.title ? "the attract" : "the main menu");
             leaveGame();
             screen = backToMenu();
@@ -12134,7 +13555,7 @@ int main(int argc, char* argv[])
             }
             continue;
         }
-        if (host.runtime().gameOverDone) {
+        if (host.runtime().gameOverDone && !pause.gameOver()) {
             if (gNet)   // netplay: a joining PC's replay restarts here too
                 gNet->markRestart();
             if (!startGame())
@@ -12155,6 +13576,10 @@ int main(int argc, char* argv[])
             const bool want = (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0 && !inputTest;
             if (want != SDL_GetWindowMouseGrab(window))
                 SDL_SetWindowMouseGrab(window, want);
+            // (#36: player 1's mouse by its motion while its sensitivity is not 100 %)
+            const bool rel = want && !relMice && cfg.mouseSens[0] != 10 && cfg.p1Input == 0 && !lightGuns.active();
+            if (rel != p1RelMouse && (rel ? SDL_SetWindowRelativeMouseMode(window, true) : SDL_SetWindowRelativeMouseMode(window, relMice)))
+                p1RelMouse = rel;
         }
         gunVisibleArea(window, lw, lh);   // (#15: the display's edge, also in Borderless)
         // the window's size changed (resize, maximize, fullscreen): every gun keeps its point of the game's screen
@@ -12395,8 +13820,20 @@ int main(int argc, char* argv[])
             skipStale = true;
         }
         skipLoop = loops;
+        // The Typing of the Dead 0 (game/typing.h): the keyboard types while player 1 is in play: SDL's text events (the
+        // layout's own characters, any case) become the tick's keys; Backspace (and Escape with a lock) drop the lock
+        // when typing.ini allows it; every other printable key is kept from the game's key bindings then (a letter
+        // must never also fire, reload or aim). F-keys, Enter, Escape without a lock, Alt / Ctrl chords go on as usual
+        const bool totdKeys = gTotd && gTyping && !gNet && !feAttract && !gScene.active() && !paused && !pause.paused() &&
+                              game::Typing::inPlay(rt);
+        if (gTotd && gTyping && !gNet && !feAttract && screen == Screen::Game && !SDL_TextInputActive(window))
+            SDL_StartTextInput(window);
         while (SDL_PollEvent(&e)) {
+            if (gVr && gVr->backend()->event(e))   // vr: the preview's head keys (docs/vr.md)
+                continue;
             if (gScene.active() && !feAttract && sceneEvent(e))
+                continue;
+            if (totdKeys && totdEvent(e))
                 continue;
             // the cut-scene's hold-to-skip: the buttons held (from the events: SDL's own state misses injected ones)
             if ((e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP) && e.button.button == SDL_BUTTON_LEFT)
@@ -12450,8 +13887,10 @@ int main(int argc, char* argv[])
                 if (lightGuns.active() && !pointer)
                     continue;   // pads: light guns on: every mouse through raw input (the desktop cursor is everyone's)
                 const int p = playerOf(id);
-                if ((p == 0 || id == 0 || pointer) && (!relMice || pointer)) { guns[p].x = e.motion.x; guns[p].y = e.motion.y; }
-                else moveGun(guns[p], e.motion.xrel, e.motion.yrel);   // x / y: SDL's one cursor, moved by every mouse
+                // (#36: a mouse moved by its motion goes x its player's Mouse Sensitivity)
+                const float ms = p < 2 ? float(std::clamp(cfg.mouseSens[p], 5, 20)) / 10.0f : 1.0f;
+                if ((p == 0 || id == 0 || pointer) && (!relMice || pointer) && (!p1RelMouse || pointer)) { guns[p].x = e.motion.x; guns[p].y = e.motion.y; }
+                else moveGun(guns[p], e.motion.xrel * ms, e.motion.yrel * ms);   // x / y: SDL's one cursor, moved by every mouse
                 guns[p].pointer = pointer;   // edgereload: a touch / pen's edge pixel is on the picture (gunAtEdge)
             } else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
                 if (relMice && e.button.which == 0)
@@ -12464,11 +13903,13 @@ int main(int argc, char* argv[])
                     continue;   // pads: light guns on: the buttons through raw input
                 const int p = playerOf(e.button.which);
                 Gun& g = guns[p];
-                if (e.button.button == SDL_BUTTON_LEFT) g.trigger = true;
+                if (e.button.button == SDL_BUTTON_LEFT) g.trigger = g.held = true;
                 else if (e.button.button == SDL_BUTTON_RIGHT) g.reload = true;
                 else if (e.button.button == SDL_BUTTON_MIDDLE && e.button.which == SDL_PEN_MOUSEID)
                     g.reload = true;   // edgereload: the pen's barrel button (SDL: button 2) = reload, as its eraser (3)
                 else if (e.button.button == SDL_BUTTON_MIDDLE) (lightGuns.weaponSwitch ? g.weaponNext : g.reload) = true;   // Light Gun Edition: reload, or Arsenal Mode's next weapon
+            } else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) {
+                guns[playerOf(e.button.which)].held = false;   // Survival Mode's SMG: the trigger let go
             } else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) {
                 // the players' aim keys, held (from the events: SDL_GetKeyboardState misses injected events);
                 // keybind: each player's own keys (cfg.keys, game/keybinds.h)
@@ -12477,6 +13918,9 @@ int main(int argc, char* argv[])
                     for (int d = 0; d < 4; ++d)
                         if (cfg.keys[p].has(game::kActUp + d, sc))
                             keyAim[p][d] = e.key.down;
+                for (int p = 0; p < 4; ++p)   // Survival Mode's SMG: the fire key held
+                    if (cfg.keys[p].has(game::kActFire, sc) && !e.key.repeat)
+                        guns[p].held = e.key.down;
                 if (!e.key.down || e.key.repeat)
                     continue;
                 // keybind: the players whose keys work here (players 3 / 4: the 4P mode in a local game), the pause keys
@@ -12773,6 +14217,8 @@ int main(int argc, char* argv[])
                     winPauseFor = n;
                 }
             }
+            if (gVr && gVr->takeMenu())   // openxr: a controller's menu button (docs/vr.md "Controls")
+                pauseIn.toggle = true;
             if (winPauseAt >= 0 && (long long)rt.frameCount >= winPauseAt && winPaused < 0 && !paused)
                 pauseIn.toggle = true;
             else if (winPaused >= 0 && paused && ++winPaused == winPauseFor)
@@ -12785,14 +14231,30 @@ int main(int argc, char* argv[])
             if (paused && lh > 0) {
                 // ours: which pause item player 1's pointer is on. The items (Hud::drawPause) are centred on the PC's
                 // 640 x 480 screen fitted to the window's height: "Continue" at y 248, "Exit" at y 272, ~20 high
+                // (fxux: as the last drawPause laid them out, every way of drawing them: Settings, #5's Retry Chapter)
                 const float s = float(lh) / 480.0f, px = (guns[0].x - (float(lw) / 2.0f - 320.0f * s)) / s,
                             py = guns[0].y / s;
-                // Light Gun Edition: easier to shoot: Continue anywhere in the band above the line between the two
-                // items, Exit below it (each about three times the items' size)
-                if (std::abs(px - 320.0f) <= 220.0f)
-                    pauseIn.hover = py >= 190.0f && py < 270.0f ? 0 : py >= 270.0f && py < 350.0f ? 1 : -1;
+                pauseIn.hover = hud.pauseItemAt(px, py);
+            }
+            if (paused && gVr && view) {   // quest: the VR gun on the pause items (the HUD panel: the arcade screen's
+                const vr::Scene::Aim va = gVr->takeAim();   // plane), the trigger chooses (no mouse on a headset)
+                if (va.valid) {
+                    const int ph = gVr->settings.hudLines, pw = int(std::lround(float(ph) * std::max(192.0f, gameHalfW(cfg.aspect, 16, 9)) / 192.0f));
+                    float ax = 0, ay = 0;
+                    view->fromArcade(va.x, va.y, pw, ph, ax, ay);
+                    const float s = float(ph) / 480.0f, px = (ax - (float(pw) / 2.0f - 320.0f * s)) / s, py = ay / s;
+                    const int over = hud.pauseItemAt(px, py);   // (fxux: the items as drawn)
+                    if (over >= 0) pauseIn.hover = over, pauseIn.pointerMoved = true;
+                    if (va.pulls > 0 && over >= 0) pauseIn.activate = true;
+                }
             }
             pause.cutScenes = !gNet;   // (bossbug: the pause in cut-scenes too, local games)
+            pause.retry = cfg.chapterRetry && canRetry(rt);   // GitHub #5: Continue / Retry Chapter / Exit
+            // fxux: Settings (the menus' Options pages over the paused game) when the menus are there; not in the input
+            // test (its pause cases are the PC's Continue / Exit) nor the cut-scene viewer / the menu's attracts / VR.
+            // Online the pause stays as it was (the menu loop would also serve the lobby's network while the game's
+            // link waits): no Settings there
+            pause.settings = launcher && feLoaded && !inputTest && !gScene.active() && !feAttract && !gVr && !gNet;
             if (gScene.active() && pause.paused())
                 pause.reset();   // galfix4: never the game's pause in the cut-scene viewer (its keys never reach it)
             pause.frame(rt, pauseIn);   // 0x41ADF0
@@ -12808,6 +14270,17 @@ int main(int argc, char* argv[])
                 pauseExit = false;
                 if (launcher) { leaveGame(); screen = backToMenu(); }
                 else running = false;
+            }
+            if (pauseRetry) {   // GitHub #5: Retry Chapter (the pause's or the game over's): the chapter from its start
+                pauseRetry = false;
+                pause.reset();
+                paused = false;
+                audio.silence();
+                if (!retryChapter()) {
+                    if (launcher) { leaveGame(); screen = backToMenu(); }
+                    else running = false;
+                }
+                continue;   // (a new runtime: this loop's `rt` is the old one's)
             }
             // the cut-scene's hold-to-skip (kSkipHold above): the time held, by real time (the input test: 1/60 s a
             // loop); paused: kept where it was
@@ -13019,6 +14492,7 @@ int main(int argc, char* argv[])
                     gCrt.toSource(gx, gy, lw, lh);   // crt: the point the curved screen shows under the pointer
                     view->toArcade(gx, gy, lw, lh, ax, ay);
                     const float halfW = gameHalfW(cfg.aspect, lw, lh);
+                    if (gTeam) gTeam->setHalfW(halfW);   // (team: the CPU seats shoot what this PC shows)
                     const bool atEdge = gunAtEdge(guns[0], lw, lh);
                     // the keyboard's trigger / reload keys count too (player 2 on the keyboard); a second mouse / pad / gun
                     // configured as player 2 on this PC is not this PC's player
@@ -13107,23 +14581,45 @@ int main(int argc, char* argv[])
             // own guns there (they had to use players 1 / 2's)
             const bool nameSwap = rt.coop4_on() && rt.rank4Round() == 2 && rt.name_entry_active();
             if (nameSwap) std::swap(guns[0], guns[2]), std::swap(guns[1], guns[3]);
+            if (gTeam) gTeam->setHalfW(halfW);   // (team: the CPU teammates shoot what the window shows, its widescreen sides too)
+            bool vrKeyReload = false;
             for (int p = 0; p < rt.seat_count(); ++p) {   // 4P: players 3 / 4 too
                 float ax, ay;
                 float gx, gy;
-                gunPoint(guns[p], lw, lh, gx, gy);
+                // GitHub #29: one player in player 2's seat plays with player 1's input (the mouse, P1's pad / keys);
+                // player 2's input is then player 1's (a second player joining in seat 1 with P1's start button)
+                Gun& gp = rt.soloSeat == 1 && p < 2 ? guns[1 - p] : guns[p];
+                gunPoint(gp, lw, lh, gx, gy);
                 gCrt.toSource(gx, gy, lw, lh);   // crt: the point the curved screen shows under the pointer
                 view->toArcade(gx, gy, lw, lh, ax, ay);
                 game::Runtime::GunInput& g = rt.gun[p];
                 // a gun on the window's outermost pixel row / column is off screen too: the cursor is kept inside the
                 // window during play (two monitors: it slid onto the other one, user 2026-10-16), so pushing it against
                 // an edge is the off-screen shot (reload), in widescreen and 4:3 alike (a touch / pen: gunAtEdge)
-                const bool atEdge = gunAtEdge(guns[p], lw, lh);
+                const bool atEdge = gunAtEdge(gp, lw, lh);
                 const bool edgeReload = edgeReloadNow(rt, p, atEdge, cfg.edgeReload);   // (#17: HOTD 2's reload)
-                g.onScreen = !guns[p].reload && !atEdge && std::abs(ax) < halfW - 1e-3f && std::abs(ay) < 192.0f;
+                g.onScreen = !gp.reload && !atEdge && std::abs(ax) < halfW - 1e-3f && std::abs(ay) < 192.0f;
                 g.x = ax;
                 g.y = ay;
-                g.trigger = guns[p].trigger || guns[p].reload || edgeReload;
-                guns[p].trigger = guns[p].reload = false;
+                g.trigger = gp.trigger || gp.reload || edgeReload;
+                g.held = gp.held && !gp.reload;   // (Survival Mode's SMG only)
+                if (p == 0) vrKeyReload = gp.reload;   // (vr: the reload button / key, below)
+                gp.trigger = gp.reload = false;
+            }
+            // vr (docs/vr.md): player 1's aim is the VR gun's ray (the last VR frame's); its trigger and a reload (the
+            // gun pointed down) add to the mouse / keys' (the preview: the mouse button is the trigger). Off screen
+            // (pointing away, past the screen's edge, down) a pull reloads as the light gun's off-screen shot
+            if (gVr) {
+                const vr::Scene::Aim va = gVr->takeAim();
+                if (va.valid) {
+                    game::Runtime::GunInput& g = rt.gun[0];
+                    g.x = va.x;
+                    g.y = va.y;
+                    g.onScreen = va.onScreen && !va.reload && !vrKeyReload;
+                    g.trigger = g.trigger || va.pulls > 0 || va.reload;
+                    g.held = (g.held || va.held) && !va.reload;
+                    if (va.start) rt.player_join(0);   // openxr: the left X (docs/vr.md "Controls")
+                }
             }
             if (nameSwap) std::swap(guns[0], guns[2]), std::swap(guns[1], guns[3]);
             // --autofire (T1): the same gun input as the headless runs (no mouse events), so a window run with
@@ -13132,6 +14628,7 @@ int main(int argc, char* argv[])
                 gBot->frame(rt, cpFrames);
             else if (fire)
                 autofire(rt, int(rt.frameCount));
+            totdBefore(rt, gameTickHz(cfg.gameSpeed));   // The Typing of the Dead 0: the typed keys into player 1's gun
             if (gTeam)   // computer teammates (their seats only; the human's input above stays)
                 gTeam->frame(rt, rt.frameCount);
             livesOut(rt, livesOutAt);
@@ -13182,6 +14679,8 @@ int main(int argc, char* argv[])
             rt.frame();
             if (gNet)
                 gNet->after(rt);
+            else
+                totdAfter(rt);
             if (!gScene.active())   // Light Gun Edition: the outputs (not in the cut-scene viewer)
                 outputsFrame(rt, cfg);
             if (gScene.active()) {   // the cut-scene viewer: the scene's end (the ticks stop there)
@@ -13198,6 +14697,10 @@ int main(int argc, char* argv[])
                 bossEnded = true;
             } else if (rt.boss.active() && gNet && rt.boss.phase == game::BossMode::Done)
                 bossEnded = true;
+            if (rt.survival.active() && rt.survival.justFinished) {   // Survival Mode: the game over scene's end -> the table
+                survivalFinish(rt);
+                survivalEnded = true;
+            }
             if (rt.audio) rt.audio->renderFrame();
             // select: a clear went on into the next chapter (a game over restarts that one); the view loads the
             // chapter's world when the game (mode 4) is in another chapter than the view (also the title's start after
@@ -13294,6 +14797,7 @@ int main(int argc, char* argv[])
         for (int p = 0; p < 4; ++p) {   // computer teammates: their own crosshair (the bot's aim), a CPU tag
             hud.drawCross[p] = cfg.crosshairs;   // Light Gun Edition: Show Crosshairs (launcher.ini crosshairs=)
             hud.cpu[p] = teamSeatShown(p);
+            rt.cpuSeats = hud.cpu[p] ? rt.cpuSeats | 1u << p : rt.cpuSeats & ~(1u << p);   // gunfb: their flashes are a teammate's (Teammate Flashes)
             if (hud.cpu[p] && view) {
                 float ax, ay, x, y;
                 gTeam->aim(p, ax, ay);
@@ -13347,6 +14851,7 @@ int main(int argc, char* argv[])
         // crt (render/crt.h): this frame's filter (the menu may have changed it); aim = the pointers on the window,
         // aimSrc = the picture's point the curved screen shows there (the netplay partner's: the other way round)
         gCrt.configure(cfg.crt, cfg.models == 1 ? 480 : 384, cfg.models == 1 ? 640 : 496);
+        setGamma100(cfg.gamma);   // gamma: this frame's (the menu may have changed it)
         float aimSrc[4][2];
         for (int p = 0; p < 4; ++p) {
             aimSrc[p][0] = aim[p][0], aimSrc[p][1] = aim[p][1];
@@ -13355,7 +14860,8 @@ int main(int argc, char* argv[])
         }
         const bool crtShot = gCrt.active() && cfg.crt.shotFiltered;   // F12: the filtered picture as seen
         rt.teammateFlash = cfg.teamFlash;   // (Options can change it in the game)
-        rt.hideSparks = !cfg.hitSparks, rt.hideMuzzle = !cfg.muzzleFlash; rt.hideBlood = !cfg.bloodParticles;
+        hud.translucentMarks = cfg.clearMarks;   // bugs1 (#35): Video > Hit Marks
+        rt.hideSparks = !cfg.hitSparks, rt.shotFlashScale = game::shotFlashScaleOf(cfg.shotFlashSize), rt.hideMuzzle = !cfg.muzzleFlash; rt.hideBlood = !cfg.bloodParticles; rt.transparency = cfg.transparency;
         gScene.fx[0] = cfg.hitSparks, gScene.fx[1] = cfg.muzzleFlash, gScene.fx[2] = cfg.bloodParticles;
         rt.hideMarks = gTrailer && !gScene.active();   // trailer: Trailer Mode (draws only)
         // backdrop: game over (mode 5: fallen body, route map, GAME OVER) clears to black as in MAME (snaps 0087-0094);
@@ -13376,8 +14882,10 @@ int main(int argc, char* argv[])
         // the sights are 2D, drawn by the HUD (the PC's sprites 0x45E / 0x45F or the arcade-style one): the gun mark
         // models drawn here before were 0x660 `tamahi`, the shot spark (user 2026-10-16: "an image of a gunshot")
         std::copy(cfg.sights, cfg.sights + 4, hud.sights);   // (firing range: each player's own)
+        hud.showSights = cfg.showCrosshairs;   // gunfb: Video > Show Crosshairs
         hud.customDirs = xhairDirs;
         hud.widescreen = cfg.aspect != 1;
+        hud.drawCross[0] = !(gTotd && gTyping && !gNet);   // The Typing of the Dead 0: no sight for player 1 (the typist)
         hud.anchorEdges = cfg.aspect != 1;   // display2: widescreen (16:10: its edges): the per-player HUD at the window's edges
         hud.maxAspect = cfg.aspect == 2 ? 1.6f : 0.0f;   // aspect1610
         // rate: the blend between the previous game frame and the newest (Smooth motion): how far the time is past the
@@ -13435,6 +14943,16 @@ int main(int argc, char* argv[])
         hud.clean = sceneClean || trailerNow;
         hud.noText = gScene.noTextNow() || trailerNow;
         auto drawOverlays = [&]() {
+            // The Typing of the Dead 0: the prompts over the enemies, the typing line, the chapter's typing results
+            // (not over the pause menu, the cut-scene viewer)
+            if (gTotd && gTyping && !gNet && view && !paused && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4) {
+                static game::TypingHud typingHud;
+                typingHud.draw(rt, *gTyping, ww, wh, [&](float ax, float ay, float& px, float& py) {
+                    view->fromArcade(ax, ay, lw, lh, px, py);
+                    px = px * float(ww) / float(std::max(lw, 1));
+                    py = py * float(wh) / float(std::max(lh, 1));
+                });
+            }
             if (gTrailerNote && SDL_GetTicks() < gTrailerNote + 1000) {
                 static Overlay trailerTag;
                 static bool trailerInit = false;
@@ -13445,6 +14963,18 @@ int main(int argc, char* argv[])
                 }
             } else {
                 gTrailerNote = 0;
+            }
+            // polish (user 2026-11-03): Survival Mode's start: one line, "Very Experimental / Proof of Concept", 6 s
+            if (gSurvivalNote && SDL_GetTicks() < gSurvivalNote + 6000 && gSurvivalArena >= 0) {
+                static Overlay survivalTag;
+                static bool survivalInit = false;
+                if (!survivalInit) { std::string e2; survivalInit = survivalTag.init(e2); }
+                if (survivalInit) {
+                    survivalTag.setText({"Survival Mode: Very Experimental / Proof of Concept"}, wh >= 720 ? 2 : 1);
+                    survivalTag.drawAnchored(ww, wh, ww * 0.5f, float(wh) * 0.2f, 0.5f, 0.0f);
+                }
+            } else {
+                gSurvivalNote = 0;
             }
             // Clean View: the keys' small hint at the bottom's middle, for 2 s after the start or a key, then fading out
             // (the panel thins and the letters dim, 8 steps)
@@ -13562,11 +15092,20 @@ int main(int argc, char* argv[])
             gl::BindRenderbuffer(gl::RENDERBUFFER, depth);
             gl::RenderbufferStorage(gl::RENDERBUFFER, gl::DEPTH_COMPONENT24, ww, wh);
             gl::FramebufferRenderbuffer(gl::FRAMEBUFFER, gl::DEPTH_ATTACHMENT, gl::RENDERBUFFER, depth);
-            if (gl::CheckFramebufferStatus(gl::FRAMEBUFFER) == gl::FRAMEBUFFER_COMPLETE) {
+            if (gVr && gl::CheckFramebufferStatus(gl::FRAMEBUFFER) == gl::FRAMEBUFFER_COMPLETE) {   // vr: its picture
+                hud.pauseSelection = paused && !settingsCapture ? pause.selection() : -1;
+                hud.pauseLines = pauseLinesOf(pause);   // (#5)
+                const std::function<void(int, int, const float[4][2])> vrHud = [&](int pw, int ph, const float a[4][2]) {
+                    hud.draw(rt, pw, ph, a, false, hudLines(rt, paused));
+                };
+                vrFrame(rt, *view, hud, cfg.aspect, fbo, ww, wh, nullptr, 1.0f, vrHud);
+                shotPixels = view->renderer.readBack(ww, wh);
+            } else if (gl::CheckFramebufferStatus(gl::FRAMEBUFFER) == gl::FRAMEBUFFER_COMPLETE) {
                 view->opt.clearColor = !hud.drawUnder(rt, ww, wh, view->opt.clear);
                 view->draw(rt, ww, wh);
                 pillarbox(ww, wh);
-                hud.pauseSelection = paused ? pause.selection() : -1;
+                hud.pauseSelection = paused && !settingsCapture ? pause.selection() : -1;
+                hud.pauseLines = pauseLinesOf(pause);   // (#5)
                 hud.draw(rt, ww, wh, aimSrc, (debugLines && !trailerNow) || (gScene.active() && !sceneClean), gScene.active() && !sceneClean ? gScene.lines(rt) : hudLines(rt, paused));
                 drawOverlays();
                 drawGunAids(cfg, ww, wh, gunFlash.now && !paused);
@@ -13577,13 +15116,22 @@ int main(int argc, char* argv[])
             gl::DeleteTextures(1, &color);
             gl::DeleteFramebuffers(1, &fbo);
         }
-        const bool crtOn = gCrt.begin(ww, wh);   // crt: the frame into the filter's target
+        const bool crtOn = !gVr && gCrt.begin(ww, wh);   // crt: the frame into the filter's target (vr: none)
         const bool crtCrisp = crtOn && cfg.crt.crispSights;
         if (gScene.phase == game::SceneView::Phase::Seeking) {   // the cut-scene viewer's fast-forward: nothing drawn
             gl::Viewport(0, 0, ww, wh);
             gl::ClearColor(0, 0, 0, 1);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
             hud.drawLines(ww, wh, gScene.lines(rt));
+        } else if (gVr) {   // vr: the eyes and the HUD on their screen plane; the window shows the backend's picture
+            hud.pauseSelection = paused && !settingsCapture ? pause.selection() : -1;
+            hud.pauseLines = pauseLinesOf(pause);   // (#5)
+            const bool dbg = (debugLines && !trailerNow) || (gScene.active() && !sceneClean);
+            const std::vector<std::string> lines = gScene.active() && !sceneClean ? gScene.lines(rt) : hudLines(rt, paused);
+            const std::function<void(int, int, const float[4][2])> vrHud = [&](int pw, int ph, const float a[4][2]) {
+                hud.draw(rt, pw, ph, a, dbg, lines);
+            };
+            vrFrame(rt, *view, hud, cfg.aspect, 0, ww, wh, blendFrom, alpha, vrHud);
         } else {
         {   // Light Gun Edition: the fun look (Night Vision / Wireframe / VHS), Turbo Speed Run's sound
             const int16_t gm = rt.mem.at<int16_t>(game::A::G::game_mode);
@@ -13661,7 +15209,8 @@ int main(int argc, char* argv[])
             }
         }
         pillarbox(ww, wh);
-        hud.pauseSelection = paused ? pause.selection() : -1;
+        hud.pauseSelection = paused && !settingsCapture ? pause.selection() : -1;
+        hud.pauseLines = pauseLinesOf(pause);   // (#5)
         hud.deferSights = crtCrisp;
         hud.draw(rt, ww, wh, aimSrc, (debugLines && !trailerNow) || (gScene.active() && !sceneClean), gScene.active() && !sceneClean ? gScene.lines(rt) : hudLines(rt, paused));
         hud.deferSights = false;
@@ -13962,9 +15511,42 @@ int main(int argc, char* argv[])
         }
         if (gLateShot > 0 && --gLateShot == 0)   // pmfix2 (testing, HOTD_SHOT_LATE): the loop after the tick
             shot = true;
+        if (!gVr) gammaApply(0, ww, wh);   // gamma (render/gamma.h): the window's finished picture (vr: the eyes had it)
+        if (settingsCapture) {   // fxux: the pause's Settings: this picture (drawn without the pause's lines) under the pages
+            settingsCapture = false;
+            const std::vector<uint8_t> px = view->renderer.readBack(ww, wh);
+            std::vector<uint8_t> up(size_t(ww) * size_t(wh) * 4, 255);
+            for (int y = 0; y < wh; ++y)   // (Frontend::liveTex: rows bottom-up; RGBA for GL ES too)
+                for (int x = 0; x < ww; ++x)
+                    for (int c = 0; c < 3; ++c)
+                        up[(size_t(y) * size_t(ww) + size_t(x)) * 4 + size_t(c)] = px[(size_t(wh - 1 - y) * size_t(ww) + size_t(x)) * 3 + size_t(c)];
+            gl::GLuint t = 0;
+            gl::GenTextures(1, &t);
+            gl::BindTexture(gl::TEXTURE_2D, t);
+            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, ww, wh, 0, gl::RGBA, gl::UNSIGNED_BYTE, up.data());
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR);
+            gOverTex = t, gOverW = ww, gOverH = wh;
+            gOverGame = true;
+            fe.rowsFilter = [&](std::vector<game::Frontend::Extra>& rows, const std::string& title) {
+                game::menuInGameRows(rows, title, gNet != nullptr);
+            };
+            fe.inGameNote = " (In a game: from the next game.)";
+            fe.options = {menu.cfg.difficulty, menu.cfg.lives, std::min(menu.cfg.blood, 4), menu.cfg.sfxVolume,
+                          menu.cfg.musicVolume, menu.cfg.autoReload, menu.cfg.continues};
+            fe.screenOptions();
+            SDL_SetWindowRelativeMouseMode(window, false);
+            SDL_SetWindowMouseGrab(window, false);
+            SDL_HideCursor();   // (the bony hand is the cursor)
+            SDL_Log("in-game settings: open (the game paused at frame %llu)", (unsigned long long)rt.frameCount);
+            screen = Screen::Menu;
+        }
         if (shot) {
             if (shotPixels.empty())
                 shotPixels = view->renderer.readBack(ww, wh);
+            else if (!gVr)
+                gammaImage(shotPixels);   // (the offscreen / filtered picture: read before the window's pass)
             const std::string dir = shotDir.empty() ? shotsRoot : shotDir;
             std::filesystem::create_directories(dir);
             const std::string path = dir + (shotName.empty() ? "/hotd_" + timestamp() + "_f" + std::to_string(rt.frameCount)
@@ -13984,7 +15566,7 @@ int main(int argc, char* argv[])
                 if (!c.done) SDL_Log("checkpoint not reached: %s", c.name.c_str());
             running = false;
         }
-        SDL_GL_SwapWindow(window);
+        vrSwap(window);   // (quest: none on Android in VR)
         ++timing.renders;
         if (timing.renders == 1 && std::getenv("HOTD_STARTUP_TIME")) {   // perf: the game's first frame (--auto-start), then the end
             std::printf("startup: the game's first frame at %.0f ms\n", sinceStartMs());

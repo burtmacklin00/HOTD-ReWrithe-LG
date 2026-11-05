@@ -13,6 +13,7 @@
 #include "assets/sprites_pc.h"
 #include "game/sights.h"
 #include "game/lang.h"
+#include "game/lives.h"
 #include "render/ttf.h"
 
 #include <chrono>
@@ -87,6 +88,8 @@ struct Widget {
                                      // height: the Arabic font's tall letters); the PC font as it is
     int fitW = 0;                    // ours (leftovers): a translated text (the language's font) wider than this: drawn
                                      // smaller to fit (the PC Options page's 1P / 2P cells); 0: as it is
+    bool fitFont = false;            // ours (polish): an English text in the PC font wider than fitW: drawn in data/fonts'
+                                     // font, smaller to fit (the PC font has no smaller size)
     bool live = false;               // ours (menuperf): a Remake screen's changing widget (the Jukebox's time, its bar):
                                      // not in the static layer, its own small part, redrawn when its text / user changes
     bool over = false;               // ours (optui): drawn over the focus (the crosshair preview): not in the static layer,
@@ -254,8 +257,21 @@ public:
     std::function<void()> onCoop;               // Co-op (null: grey)
     // Boss Mode / PC Mode (their own workers): set to start that mode; unset: the item is grey ("coming")
     std::function<void()> startBossMode, startPcMode;
+    // The Typing of the Dead 0 (game/typing.h): More Modes' item (null: left out)
+    std::function<void()> startTotd;
     std::function<std::string()> sonicValue;    // Sonic Mode's value ("Off" ...; null: the item is left out)
     std::function<void()> onSonic;              // Sonic Mode clicked: the next preset (the item is rebuilt)
+    // Survival Mode (game/survival.h; More Modes): "Survival" asks the players and starts the arena shown on the item below it
+    // ("Survival Arena: <name>", a click: the next arena). Null: the items are left out
+    std::function<std::string()> survivalArenaValue;
+    std::function<void()> onSurvivalArena;
+    std::function<void()> startSurvival;
+    // Horde Mode (game/horde.h; More Modes): "Horde" opens Chapter Select with hordeChapters set (its title says Horde;
+    // onChapter reads it), "Horde Size: <name>" (a click: the next size). Null: the items are left out. The main menu
+    // clears hordeChapters (the plain Chapter Select is the arcade's)
+    bool hordeChapters = false;
+    std::function<std::string()> hordeSizeValue;
+    std::function<void()> onHordeSize;
 
     // screen 17 (ours): the Gallery (game/gallery.h; the main menu's "Gallery", grey while openGallery is unset): the
     // hall without the logo (0xD1), "Gallery" at the top, the categories down the left (white 24, the shown one yellow;
@@ -294,6 +310,29 @@ public:
         // regallery: the category's entries' names (as entries), the entry's key (the file panel's cross-fade)
         std::vector<std::string> entryNames;
         std::string key;
+        // gallery blood (the Gallery's own blood settings, game/gallery.h GalleryBlood): Blood Color (0-5, the custom
+        // colour), Rainbow Blood and its settings, Blood Particles; `blood` the colour's label. onGallery: 40 / 41 Blood
+        // Color next / back, 42-47 the custom red / green / blue up / down, 48 Rainbow Blood, 49 its Colours, 50 / 51
+        // its Speed, 52 / 53 its Creature Blood, 54 Blood Particles; 34 / 35 the Remake page's panel (Viewer, Blood,
+        // Damage)
+        int bloodColor = 0, bloodRgb = 0xFFFFFF;
+        bool rainbow = false, particles = true;
+        std::string rainbowColours, rainbowSpeed, creatureBlood, blood;
+        std::string bloodHex() const   // " #RRGGBB" after "Custom" (else empty)
+        {
+            if (bloodColor != 5 || rainbow) return "";
+            std::string s = " #";
+            for (int k = 20; k >= 0; k -= 4) s += "0123456789ABCDEF"[(bloodRgb >> k) & 15];
+            return s;
+        }
+        // gallery dismemberment: per body part (Head, Right Arm, Left Arm, Body, Legs) its name, state ("Whole",
+        // "Damage 1", "Off", "-") and last state (0: nothing to change); the keys' part; why there is nothing (or "").
+        // onGallery: 60 + part its next state, 70 + part back, 59 all whole
+        std::vector<std::string> partNames, partStates;
+        std::vector<int> partSteps;
+        int damagePart = 0;
+        std::string damageNote;
+        int panel = 0;
     };
     // gallery3: the model's rectangle of the page as it is now (kGalleryRect, or kGalleryRectTall without the info);
     // regallery: the Remake style's Gallery: its stage (units of the wide screen)
@@ -601,12 +640,24 @@ public:
         // the game rendered of a fixed Chapter 1 frame with that value; "" not made yet / none). The Remake pages show
         // them beside the focused row (up to 3 choices side by side, the current one marked; more: the current one)
         std::function<std::string(int choice)> preview;
+        // fxux: the choices whose pictures show side by side (empty: up to 3 of them, else the current one); a current
+        // choice not among them marks the first (Transparency's Auto: the Arcade Dots picture)
+        std::vector<int> previewList;
+        // relfix2 (user 2026-11-03: "the differences aren't noticeable"): what to look for in choice k's picture
+        // (non-empty: the pictures shown as one that flips between the choices each second and a close-up of each, the
+        // same spot where they differ most, 4x with nearest pixels, each with its look-for line)
+        std::vector<std::string> previewLook;
     };
     // fix28: the preview pictures' maker's progress (a new number: a picture finished, the pages draw them again)
     std::function<int()> previewGen;
     // menus3: a picture made in memory (Extra::preview gave "mem:<key>"): its RGBA; false: not ready
     std::function<bool(const std::string& key, std::vector<uint8_t>& rgba, int& w, int& h)> previewImage;
     std::vector<Extra> extras;
+    // fxux (user 2026-11-03: Settings in the pause menu): the in-game Settings' change to a settings page's rows before
+    // it is built (menu_pages.h menuInGameRows; title: the page's) and the Classic Options screen's note on its game
+    // rules (Difficulty, Lives, Continues, Blood Color: from the next game); null / empty: the menus'
+    std::function<void(std::vector<Extra>& rows, const std::string& title)> rowsFilter;
+    std::string inGameNote;
     // menufb (user 2026-10-26: "clicking crosshairs takes them to a new page / firing range"): the extras page shows the
     // Firing Range under its rows (the rows: menu_pages.h menuRangeRows; both styles): targets to shoot, every player's
     // crosshair where that player aims, hits / shots per player. rangeArt: player seat's crosshair as the game draws
@@ -664,7 +715,6 @@ public:
     std::vector<std::string> tabs;
     std::function<void(int)> onTab;
     int extrasTab = -1;
-    static constexpr int kLivesTable[12] = {1, 2, 3, 1, 2, 3, 4, 1, 2, 3, 4, 5};   // the start lives per setting
 
     // the pointer (0xD5A97C / 0xD5A980)
     void setPointer(int x, int y) { px_ = x; py_ = y; }
@@ -715,11 +765,14 @@ private:
         std::function<void()> act;   // null: grey
         bool heading = false;    // menu2: a group's name (not a button)
         bool debug = false;      // the SKIDMARX items (Cheat, Edit Char Stats, Creature Test) under Quit
+        std::string tag;         // polish: a small red line with the label (Survival's "Very Experimental / Proof of Concept")
         std::string name() const { return label >= 0 ? Frontend::label(label) : text; }
     };
+    static constexpr const char* kSurvivalTag = "Very Experimental / Proof of Concept";   // (polish, user 2026-11-03)
     std::vector<MainItem> mainMenuItems();   // the main menu's items for mainGroup_ (and the debug items)
     // Options (screen 2): its rows' values and steps (which: kOpt*; dir +1 the next value, -1 the one before)
-    enum : int { kOptDifficulty, kOptLives, kOptContinues, kOptAutoReload, kOptBlood, kOptSfx, kOptMusic, kOptRows };
+    enum : int { kOptDifficulty, kOptLives, kOptContinues, kOptAutoReload, kOptBlood, kOptSfx, kOptMusic, kOptRows,
+                 kOptMaxLives = 100 };   // (GitHub #30: Max Lives, a row of the Remake tab and Gameplay, not screen 2's)
     void optionsStep(int which, int dir);
     std::string optionsValue(int which) const;
     std::vector<Extra> optionsRows();        // the Remake style's "Game" tab: Options' rows as settings rows
@@ -824,7 +877,8 @@ private:
     void drawRPreview(Widget& w);
     std::map<const Widget*, const Widget*> rPreviewRow_;
     std::vector<Extra>* rPreviewRows_ = nullptr;
-    struct PreviewPic { std::vector<uint8_t> rgba; int w = 0, h = 0; };
+    // (relfix2: zoom: the close-ups' spot, by the other pictures' names and the crop's size: where they differ most)
+    struct PreviewPic { std::vector<uint8_t> rgba; int w = 0, h = 0; std::map<std::string, std::pair<int, int>> zoom; };
     std::map<std::string, PreviewPic> previewPics_;
     int previewGenSeen_ = -1;
     uint32_t previewPollMs_ = 0;

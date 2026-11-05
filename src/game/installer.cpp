@@ -26,6 +26,9 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#else
+#include "util/pe_icon.h"
+#include "util/png.h"
 #endif
 
 namespace hotd::game {
@@ -37,6 +40,16 @@ namespace {
 constexpr const char* kLinkName = "The House of the Dead - ReWrithe";
 constexpr const char* kRegName = "HOTDReWrithe";
 
+// the program in an install / package folder (linux 2026-11-03: bin/hotd on Linux / macOS)
+fs::path programExe(const fs::path& root)
+{
+#ifdef _WIN32
+    return root / "bin" / "hotd.exe";
+#else
+    return root / "bin" / "hotd";
+#endif
+}
+
 std::string lower(std::string s)
 {
     for (char& c : s) c = char(std::tolower(uint8_t(c)));
@@ -46,6 +59,15 @@ std::string lower(std::string s)
 bool startsWithI(const std::string& s, const std::string& p)
 {
     return s.size() >= p.size() && lower(s.substr(0, p.size())) == lower(p);
+}
+
+// `inner` is `outer` or a folder inside it (case-blind, either separator)
+bool insideOrSame(const fs::path& inner, const fs::path& outer)
+{
+    std::string a = lower(inner.generic_string()), b = lower(outer.generic_string());
+    while (a.size() > 1 && a.back() == '/') a.pop_back();
+    while (b.size() > 1 && b.back() == '/') b.pop_back();
+    return a == b || (a.size() > b.size() && a.compare(0, b.size(), b) == 0 && (a[b.size()] == '/' || b.back() == '/'));
 }
 
 std::string sandbox()
@@ -275,7 +297,7 @@ bool writeUninstallEntry(const fs::path& root, const std::string& version, uint6
     HKEY k = nullptr;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, wide(key).c_str(), 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS)
         return false;
-    const std::string exe = (root / "bin" / "hotd.exe").string(), game = (root / util::kGameExeName).string();
+    const std::string exe = programExe(root).string(), game = (root / util::kGameExeName).string();
     std::error_code ec;
     char date[16];
     const std::time_t t = std::time(nullptr);
@@ -358,7 +380,11 @@ std::string installDirProblem(const std::string& dir, const std::string& program
 {
     if (dir.empty()) return "Choose a folder for the game.";
     const fs::path p(dir);
+#ifdef _WIN32
     if (!p.is_absolute()) return "Choose a full path (with its drive), e.g. " + defaultInstallDir() + ".";
+#else
+    if (!p.is_absolute()) return "Choose a full path, e.g. " + defaultInstallDir() + ".";
+#endif
 #ifdef _WIN32
     for (const char* env : {"ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"}) {
         const char* v = std::getenv(env);
@@ -421,8 +447,7 @@ InstallResult installGame(const InstallOptions& o, const std::function<void(floa
         for (const std::string& src : {o.arcade, o.pc}) {
             const fs::path s = fs::weakly_canonical(fs::path(src), ec);
             if (src.empty() || !fs::is_directory(s, ec)) continue;   // (a zip: only read, never next to anything of ours)
-            const std::string a = lower(fs::weakly_canonical(dest, ec).string()) + "\\", b = lower(s.string()) + "\\";
-            if (a.compare(0, b.size(), b) == 0) {   // the same folder, or one inside it
+            if (insideOrSame(fs::weakly_canonical(dest, ec), s)) {   // the same folder, or one inside it
                 r.err = "The new copy cannot go into the folder of your own game files (" + s.string() + "): choose another folder.";
                 return r;
             }
@@ -495,10 +520,19 @@ InstallResult installGame(const InstallOptions& o, const std::function<void(floa
                 }
             continue;
         }
+        // a loose file: read once, then the set's file with its size AND CRC (many of the 29 share a size: stopping at
+        // the first same-size one imported only 4 of a folder's / an unpacked 7z's files while the check, which matches
+        // by CRC, said Revision A; YouTube report 2026-11-03)
+        std::vector<uint8_t> d;
+        uint32_t crc = 0;
         for (int i = 0; i < nIds; ++i) {
             if (got[size_t(i)] || size != ids[i].size) continue;
-            std::vector<uint8_t> d;
-            if (readAll(f, d) && crc32(d.data(), d.size()) == ids[i].crc && !take(i, d, f)) { writeManifest(dest, m); return r; }
+            if (d.empty()) {
+                if (!readAll(f, d)) break;
+                crc = crc32(d.data(), d.size());
+            }
+            if (crc != ids[i].crc) continue;
+            if (!take(i, d, f)) { writeManifest(dest, m); return r; }
             break;
         }
     }
@@ -592,9 +626,22 @@ InstallResult installGame(const InstallOptions& o, const std::function<void(floa
         r.gameExe = game.string();
         m.files.push_back(util::kGameExeName);
     } else {
-        r.gameExe = (dest / "bin" / "hotd.exe").string();
+        r.gameExe = programExe(dest).string();
     }
     log("game exe: " + msg);
+    std::string icon = r.gameExe;
+#ifndef _WIN32
+    {   // linux (2026-11-03): the desktop entries' icon: THOTD.EXE's icon as a PNG in the install (the player's own file)
+        std::vector<uint8_t> pe;
+        peicon::Rgba img;
+        const fs::path png = dest / "hotd-rewrithe.png";
+        if (pcfs::readFile((dest / "data" / "pc" / "THOTD.EXE").string(), pe) && peicon::largestImage(std::move(pe), img) &&
+            hotd::writePngRgba(png.string(), img.w, img.h, img.px)) {
+            icon = png.string();
+            if (std::find(m.files.begin(), m.files.end(), "hotd-rewrithe.png") == m.files.end()) m.files.push_back("hotd-rewrithe.png");
+        }
+    }
+#endif
     const std::string sb = sandbox();
     for (int which = 0; which < 2; ++which) {
         if (which == 0 ? !o.desktop : !o.startMenu) continue;
@@ -602,14 +649,14 @@ InstallResult installGame(const InstallOptions& o, const std::function<void(floa
                                                : which == 0 ? winshell::desktopFolder() : winshell::startMenuFolder();
         if (folder.empty()) continue;
         std::string made;
-        if (winshell::createShortcutTo(folder, kLinkName, r.gameExe, r.gameExe, made, msg) == winshell::ShortcutResult::Created) {
+        if (winshell::createShortcutTo(folder, kLinkName, r.gameExe, icon, made, msg) == winshell::ShortcutResult::Created) {
             if (std::find(m.shortcuts.begin(), m.shortcuts.end(), made) == m.shortcuts.end()) m.shortcuts.push_back(made);
         }
         log(msg);
     }
     if (o.steam) {
         steam::Options so;
-        so.exe = (dest / "bin" / "hotd.exe").string();
+        so.exe = programExe(dest).string();
         so.pcDir = (dest / "data" / "pc").string();
         const steam::Result sr = steam::addToSteam(so);
         m.steam = m.steam || sr.ok;
@@ -660,11 +707,12 @@ int uninstallGame(const std::string& rootIn, bool yes, int removeSettings)
     const Manifest m = readManifest(root);
     for (const std::string& s : m.shortcuts) {
         const fs::path p(s);
-        if (lower(p.extension().string()) == ".lnk" && lower(p.stem().string()) == lower(kLinkName)) fs::remove(p, ec);
+        const std::string ext = lower(p.extension().string());   // (Linux: the .desktop entries)
+        if ((ext == ".lnk" || ext == ".desktop") && lower(p.stem().string()) == lower(kLinkName)) fs::remove(p, ec);
     }
     if (m.steam) {
         steam::Options so;
-        so.exe = (root / "bin" / "hotd.exe").string();
+        so.exe = programExe(root).string();
         steam::removeFromSteam(so);
     }
     if (!m.regkey.empty()) removeUninstallEntry(m.regkey);

@@ -736,11 +736,24 @@ void PadTest::fixBefore(int k, Ctx& c)
     if (k == 10) m.button(m.a, SDL_GAMEPAD_BUTTON_LEFT_STICK, true);
     if (k == 11) m.button(m.a, SDL_GAMEPAD_BUTTON_LEFT_STICK, false);
     // 3: Aim Sensitivity 200 %: the same stick twice as far
-    if (k == 12) { p2.aimSens = 20; c.pads.configure(c.cfg); markGuns(); m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0.5f); }
-    if (k == 22) { m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0); p2.aimSens = 10; c.pads.configure(c.cfg); }
+    // GitHub #36 (testing): HOTD_SENS_TEST=stick: Stick Sensitivity 200 % instead (the same checks pass);
+    // =stickgyro: also Stick Sensitivity 200 % through the gyro's checks (they pass: the gyro is apart); =gyro: Gyro
+    // Sensitivity 200 % there (the gyro's checks see twice the turn), =touch: Trackpad Sensitivity 200 % (nothing here)
+    static const std::string sensTest = std::getenv("HOTD_SENS_TEST") ? std::getenv("HOTD_SENS_TEST") : "";
+    int& sens12 = sensTest == "stick" ? p2.stickSens : p2.aimSens;
+    if (k == 12) { sens12 = 20; c.pads.configure(c.cfg); markGuns(); m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0.5f); }
+    if (k == 22) { m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0); sens12 = 10; c.pads.configure(c.cfg); }
     // 4 (relpad: the Sideways grip is gone): Motion + stick held normally, flat: raising the front = up, turning right
     // = right; the face buttons as printed (West, East = reload); old launcher.ini files with Sideways (fixAfter)
-    if (k == 23) { p2.style = 3; c.pads.configure(c.cfg); g[1].x = c.lw * 0.5f; g[1].y = c.lh * 0.5f; }
+    if (k == 23) {
+        p2.style = 3;
+        if (sensTest == "stickgyro") p2.stickSens = 20;
+        if (sensTest == "gyro") p2.gyroSens = 20;
+        if (sensTest == "touch") p2.touchSens = 20;
+        c.pads.configure(c.cfg);
+        g[1].x = c.lw * 0.5f;
+        g[1].y = c.lh * 0.5f;
+    }
     if (k == 24 || k == 25) m.sensors(m.a, flat, nullptr);
     if (k == 26) markGuns();
     if (k >= 26 && k <= 35) { const float r[3] = {0.3f, 0, 0}; m.sensors(m.a, nullptr, r); }   // the front raised

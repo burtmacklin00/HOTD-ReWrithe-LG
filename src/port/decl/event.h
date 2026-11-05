@@ -11,6 +11,8 @@
     void evt_ET1P();                                                           // 0x31500
     void evt_ET2P();                                                           // 0x31560
     void evt_ENTB();                                                           // 0x315C0
+    void evt_entb_record(uint32_t rec);                                        // ENTB's body for one record
+    void evt_attract_restore(uint32_t pc);                                     // Attract Gore: the PC's prologue spawns
     void evt_ENTB2();                                                          // 0x31870
     void evt_ENTB3();                                                          // 0x31900
     void evt_ENTBE();                                                          // 0x319C0
@@ -62,6 +64,7 @@
     // boundaries of the interpreter (not ported yet)
     virtual void shadow_light_reset(uint32_t a, uint32_t b);                   // 0x6C2A0 (shadow.cpp)
     virtual void color_row_set(int32_t row, int32_t entry) {}                  // 0x13F20
+    virtual void ggset_blood_row(int32_t row) {}   // (host, display only) GGSET's row whose entry differs by blood colour
     virtual void texture_area_load(uint32_t area, int32_t b) {}                // 0x34FF0
     virtual void rand_seed(uint32_t seed) {}                                   // 0x34A40
     virtual void sound_queue_reset() {}                                        // 0x15630

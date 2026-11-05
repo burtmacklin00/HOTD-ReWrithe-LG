@@ -64,11 +64,15 @@ void Runtime::pc_cells_put(uint32_t layer, int x, int y, uint32_t sprite, int w,
     pc_cells_clear(layer, x, y, w, h);
     if (layer >= kTileRam && l < 4) {
         const uint8_t side = uint8_t(hud_side_of(sprite, x, w));
+        // (rainbow2; HOLD YOUR FIRE! 0x107 is a warning, not a player's HUD)
+        const uint8_t kind = hud_player_sprite(sprite) && sprite != 0x107 ? 1 : sprite >= 0x28 && sprite <= 0x2D ? 2 : 0;
         for (int r = std::max(y, 0); r < std::min(y + h, 64); ++r)
-            for (int c = std::max(x, 0); c < std::min(x + w, 64); ++c)
+            for (int c = std::max(x, 0); c < std::min(x + w, 64); ++c) {
                 // a subtitle / text cell stays centred (a HUD sprite's transparent cells over it must not take it)
-                cellSide[(l * 64 + uint32_t(r)) * 64 + uint32_t(c)] =
-                    (l == 0 && cellText[size_t(r) * 64 + size_t(c)]) ? uint8_t(0) : side;
+                const bool text = l == 0 && cellText[size_t(r) * 64 + size_t(c)];
+                cellSide[(l * 64 + uint32_t(r)) * 64 + uint32_t(c)] = text ? uint8_t(0) : side;
+                cellHud[(l * 64 + uint32_t(r)) * 64 + uint32_t(c)] = text ? uint8_t(0) : kind;
+            }
     }
     if (layer >= kTileRam && l < 4 && x >= 0 && x < 64 && y >= 0 && y < kPcRows) {
         const size_t i = (l * kPcRows + uint32_t(y)) * 64 + uint32_t(x);
@@ -82,6 +86,18 @@ void Runtime::pc_cells_put(uint32_t layer, int x, int y, uint32_t sprite, int w,
 // UNVERIFIED (teaser): the set is read from the routines, not from a list in the original
 int Runtime::hud_side_of(uint32_t sprite, int x, int w)
 {
+    if (!hud_player_sprite(sprite))
+        return 0;
+    if (x + w <= 31)
+        return 1;
+    if (x >= 31)
+        return 2;
+    return 0;
+}
+
+// the per-player HUD sprites (hud_side_of; rainbow2: Rainbow Blood's HUD option tints them, Runtime::cellHud)
+bool Runtime::hud_player_sprite(uint32_t sprite)
+{
     bool perPlayer = sprite == 0xE || sprite == 0xF || sprite == 0x10 || sprite == 0x14 ||   // frames, bullets, torch base
                      (sprite >= 0xA8 && sprite <= 0xC5) ||                                   // torches (lit / burning out)
                      sprite == 0x36 || sprite == 0x40 || sprite == 0x107 ||                  // RELOAD, PRESS START, 0x107
@@ -93,13 +109,7 @@ int Runtime::hud_side_of(uint32_t sprite, int x, int w)
         for (uint32_t d = 0; d < 10 && !perPlayer; ++d)
             perPlayer = uint32_t(mem.at<int16_t>(0xCA720 + d * 2)) == sprite;   // the continue digits
     }
-    if (!perPlayer)
-        return 0;
-    if (x + w <= 31)
-        return 1;
-    if (x >= 31)
-        return 2;
-    return 0;
+    return perPlayer;
 }
 
 void Runtime::pc_cells_clear(uint32_t layer, int x, int y, int w, int h)
@@ -223,6 +233,7 @@ void Runtime::text_layers_clear()
 {
     std::fill(pcCells.begin(), pcCells.end(), 0u);
     std::fill(cellSide.begin(), cellSide.end(), uint8_t(0));
+    std::fill(cellHud.begin(), cellHud.end(), uint8_t(0));
     std::fill(cellText.begin(), cellText.end(), uint8_t(0));
     pcTexts.clear();
     cardLatch_.clear();
@@ -427,7 +438,7 @@ void Runtime::gun_flash_off(uint32_t layer)
 // character, over the 3D picture, with the palette of bank 0x2E's slot (the font sheet 0x1E5)
 void Runtime::tile_text_draw(int x, int y, uint32_t text)
 {
-    if (boss_next_on())   // Boss Mode's undrawn walk-up: THOTD.EXE's tile_text_draw does nothing while pc_boss_next
+    if (boss_next_on() || survival.leadIn())   // Boss Mode's undrawn walk-up: THOTD.EXE's tile_text_draw does nothing while pc_boss_next (Survival's lead-in as it)
         return;
     sprites_ensure();
     const uint16_t base = uint16_t(int16_t(mem.u32(kBanks + 0x2E * 16)) * 0x80 + 0x8000);

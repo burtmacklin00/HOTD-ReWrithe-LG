@@ -13,7 +13,7 @@ constexpr Category Z = Category::Zombies, B = Category::Bosses, H = Category::Hu
 // Creature types (maincpu 0xC7240; developer names BO_ at 0xC8A60) with the official names where known (docs/names.md).
 struct TypeInfo { Category cat; const char* what; };
 const TypeInfo kTypes[94] = {
-    {Z, "Kenfis (dog)"}, {Z, "Saruzou (monkey)"}, {H, "Thomas Rogan"}, {Z, "Ebitan a"}, {Z, "Ebitan b"},
+    {Z, "Kenfis (dog)"}, {Z, "Saruzou (monkey)"}, {H, "Thomas Rogan"}, {Z, "Ebitan A"}, {Z, "Ebitan B"},
     {Z, "MrG (cut)"}, {Z, "Murrer (molb)"}, {Z, "Bouere (frog)"}, {Z, "Kenfis, dark"}, {Z, "Saruzou, dark"},
     {Z, "syndy (cut)"}, {Z, "Sam"}, {Z, "debu (cut)"}, {H, "G"}, {H, "human (haride)"},
     {H, "human (staje)"}, {Z, "Simon"}, {H, "researcher"}, {Z, "Rubin (semu)"}, {H, "researcher"},
@@ -22,11 +22,11 @@ const TypeInfo kTypes[94] = {
     {Z, "Samson"}, {Z, "Harris"}, {Z, "Gilmore"}, {Z, "Bentley"}, {H, "Sophie"},
     {B, "Chariot, armoured"}, {B, "Chariot, armour off"}, {Z, "Drake"}, {Z, "kage"}, {Z, "lubin (cut)"},
     {Z, "Kenfis, variant"}, {Z, "neopetit"}, {Z, "neopetit 2"}, {Z, "neopetit 3"}, {Z, "pkenb"},
-    {Z, "Bentley b"}, {Z, "pdolob"}, {Z, "Harris b"}, {Z, "Taran (taraba)"}, {H, "researcher"},
+    {Z, "Bentley b"}, {Z, "Ebitan C (pdolob)"}, {Z, "Harris b"}, {Z, "Taran (taraba)"}, {H, "researcher"},
     {B, "Hangedman"}, {Z, "Bentley c"}, {Z, "disiprin (cut)"}, {Z, "Robert (tetuman)"}, {Z, "Harris, 21 joints"},
     {Z, "Devilon (small devilon)"}, {Z, "neozom (cut)"}, {Z, "Bourbon (kageo2)"}, {Z, "Gilmore b"}, {Z, "Moody"},
     {H, "Dr. Curien"}, {Z, "Kageo b"}, {Z, "Bourbon b"}, {Z, "Gilmore c"}, {B, "Hermit"},
-    {Z, "Bentley d"}, {Z, "baba (cut)"}, {H, "Sophie, creature (bad ending)"}, {Z, "kageta"}, {B, "Hangedman (devilonx)"},
+    {Z, "Bentley d"}, {Z, "baba (cut)"}, {H, "Sophie, creature (bad ending)"}, {Z, "Parlor (kageta)"}, {B, "Hangedman (devilonx)"},
     {Z, "moodyb"}, {Z, "Harris c"}, {Z, "Bentley e"}, {Z, "Bourbon c"}, {Z, "Gilmore d"},
     {Z, "hiru (cut leech)"}, {B, "Magician"}, {Z, "Harris d"}, {H, "Dr. Curien, second model"}, {Z, "Kenfis jp"},
     {Z, "Kenfis jp, dark"}, {Z, "Kenfis jp, variant"}, {Z, "taalu"}, {Z, "taalu b"}, {Z, "Burner"},

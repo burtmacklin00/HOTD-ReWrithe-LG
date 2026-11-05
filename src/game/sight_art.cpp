@@ -46,6 +46,10 @@ bool seatSightArt(const SeatSight& s, bool pcModels, const assets::PcSprites* pc
                   int seat, int wh, SightArt& out, std::string* err)
 {
     int style = sightStyleKept(s.style);
+    if (style == kSightOff) {   // gunfb: no crosshair: no picture (not an error)
+        out = SightArt{};
+        return true;
+    }
     if (style == 0)
         style = pcModels ? 2 : 1;
     const uint32_t rgb = sightColourRgb(s.colour);

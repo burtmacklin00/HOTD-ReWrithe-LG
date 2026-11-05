@@ -45,6 +45,7 @@ public:
     bool load(const std::string& regionsDir, std::string& err);
     bool loaded() const { return !skeletons_.empty(); }
     const std::vector<uint8_t>& mainData() const { return mainData_; }
+    const std::vector<uint8_t>& maincpu() const { return maincpu_; }   // (the Gallery's damage / blood tables)
 
     int typeCount() const { return int(skeletons_.size()); }
     const Skeleton& skeleton(int type) const { return skeletons_[type]; }   // nodes empty if the type has none

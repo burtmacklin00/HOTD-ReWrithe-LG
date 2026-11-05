@@ -213,13 +213,22 @@ template <class P> void Game<P>::body_init(uint32_t obj, int32_t type, uint32_t 
         for (int32_t k = 0; k < mem.at<BodyPart>(part).child_count; ++k)
             body_part_alloc(part, mem.u32(data + 0x1C + 4 * uint32_t(k)), k);
     }
+    bool placed = false;
     for (uint32_t i = 0; i < 14; ++i) {
         if (mem.u32(G::player_bodies + 4 * i) == 0) {
             mem.set32(G::player_bodies + 4 * i, obj);
             of<int8_t>(obj, 0x2E6) = int8_t(i);
+            placed = true;
             break;
         }
     }
+    // Survival Mode only (extraBodySlots, game.h): the 14 taken, a slot from 16 on
+    for (uint32_t j = 0; !placed && j < uint32_t(extraBodySlots); ++j)
+        if (mem.u32(extraBodyTable + 4 * j) == 0) {
+            mem.set32(extraBodyTable + 4 * j, obj);
+            of<int8_t>(obj, 0x2E6) = int8_t(16 + j);
+            placed = true;
+        }
     if (mem.at<int16_t>(cr::skin_numbers + 2 * uint32_t(int32_t(of<int16_t>(obj, 0xCC)))) != -1)
         skin_template_copy(obj);
     if (of<int16_t>(obj, 0xCC) == 0x22)

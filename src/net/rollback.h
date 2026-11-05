@@ -50,7 +50,7 @@ private:
     std::vector<uint32_t> pcCells_, pcClip_;
     std::map<std::pair<int, int>, std::string> pcTexts_;
     std::vector<game::Runtime::PcNameModel> pcNameModels_;
-    std::vector<uint8_t> cellSide_, cellText_;
+    std::vector<uint8_t> cellSide_, cellText_, cellHud_;
     float light_[3] = {}, focal_ = 496.0f;
     int fade__ = 0xFF;
     uint32_t geoPort__ = 0, geoWords__[12] = {}, geoMat__[12] = {}, wdPc__ = 0, wdFrames__ = 0;

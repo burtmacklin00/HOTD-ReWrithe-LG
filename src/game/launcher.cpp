@@ -5,7 +5,9 @@
 #include "game/files_check.h"
 #include "game/installer.h"
 #include "game/lang.h"
+#include "game/lives.h"
 #include "game/sights.h"
+#include "render/gamma.h"
 #include "util/disc_image.h"
 #include "util/file64.h"
 #include "util/fullscreen.h"
@@ -98,6 +100,9 @@ const PadField* padFields(int& n)
         {"touch", "Touchpad", &PadStyle::touch, nullptr, 0, 3, kTouch, All},
         {"touchclick", "Touchpad Click", &PadStyle::touchClick, nullptr, 0, 1, kClick, All},
         {"aimsens", "Aim Sensitivity", nullptr, &PadProfile::aimSens, 5, 20, kAim, 0},   // (padfix: also on Controls)
+        {"sticksens", "Stick Sensitivity", nullptr, &PadProfile::stickSens, 5, 20, kAim, 0},      // (GitHub #36: each its own)
+        {"gyrosens", "Gyro Sensitivity", nullptr, &PadProfile::gyroSens, 5, 20, kAim, 0},
+        {"touchsens", "Trackpad Sensitivity", nullptr, &PadProfile::touchSens, 5, 20, kAim, 0},
         {"trigger", "Trigger Point", nullptr, &PadProfile::trigger, 1, 9, kTrig, 0},
         {"adaptive", "Adaptive Trigger", nullptr, &PadProfile::adaptive, 0, 3, kLevel, 0},
         {"rumblehit", "Vibration: Hit", nullptr, &PadProfile::rumbleHit, 0, 3, kLevel, 0},
@@ -173,13 +178,15 @@ bool LaunchConfig::load(const std::string& file)
     bool enemy4pSeen = false;   // enemy4p= (cpuai 2026-10-26) not there yet: boss4p= at the old default 25 becomes the new 50
     bool sightSeen[4] = {};     // firing range: a player's crosshair keys there (else player 1's)
     int displayModeSeen = -1, exclusiveSeen = -1;   // rescrash: displaymode= / exclusive= (Video > Display Mode)
+    int startLivesSeen = 0, maxLivesSeen = 0;   // GitHub #30: startlives= / maxlives= (an older file: lives= alone)
+    int gyroSpeedSeen = 0;                      // GitHub #36: gyrocursorspeed= (an older file: the one Cursor Speed's)
     while (std::getline(f, line)) {
         const size_t eq = line.find('=');
         if (eq == std::string::npos)
             continue;
         const std::string k = line.substr(0, eq), v = line.substr(eq + 1);
         const int n = std::atoi(v.c_str());
-        // Light Gun Edition: the fun modes' keys (their own chain: MSVC's limit on one else-if chain, C1061)
+        // Light Gun Edition: its own keys (their own chain: MSVC's limit on one else-if chain, C1061)
         auto funKey = [&]() {
             if (k == "flashlight") flashlight = n != 0;
             else if (k == "bigheads") bigHeads = n != 0;
@@ -198,9 +205,16 @@ bool LaunchConfig::load(const std::string& file)
             else if (k == "turbo") turbo = std::clamp(n, 0, 2);
             else if (k == "bossrush") bossRush = n != 0;
             else if (k == "arsenal") weaponSwitch = n != 0;
+            else if (k == "crosshairs") crosshairs = n != 0;   // (before the crosshair keys of the chain below)
+            else if (k == "lgupdatecheck") updateCheck = n != 0;
+            else if (k == "outputs") outputs = n != 0;
+            else if (k == "outputsport") outputsPort = n > 0 && n < 65536 ? n : 8000;
             else return false;
             return true;
         };
+        // gunfb: Show Crosshairs / Shot Flash Size (their own ifs: the chain below is at MSVC's nesting limit)
+        if (k == "showcrosshairs") { showCrosshairs = n != 0; continue; }
+        if (k == "shotflashsize") { shotFlashSize = std::clamp(n, 0, 2); continue; }
         if (bindsIniLine(k, v, keys, padBinds)) {}   // keybind: key1.fire= / padbind1.fire= ...
         else if (funKey()) {}
         else if (k == "arcade") arcade = fromBase(v, base);
@@ -209,7 +223,7 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "sound") sound = std::clamp(n, 0, 2);
         else if (k == "players") players = std::clamp(n, 1, 4);   // 3 / 4: the 4P mode (docs/coop4.md)
         else if (k == "p3input") p3Input = n >= 0 && n <= 3 ? n : 2;   // 0 mouse, 1 keyboard, 2 pad, 3 gun
-        else if (k == "p2bot" || k == "p3bot" || k == "p4bot") seatBot[k[1] - '1'] = std::clamp(n, 0, 3);
+        else if (k == "p2bot" || k == "p3bot" || k == "p4bot") seatBot[k[1] - '1'] = std::clamp(n, 0, 4);
         else if (k == "p4input") p4Input = n >= 0 && n <= 3 ? n : 2;
         else if (k == "p2input") p2Input = std::clamp(n, 0, 3);
         else if (k == "p1input") p1Input = n == 2 || n == 3 ? n : 0;
@@ -243,7 +257,11 @@ bool LaunchConfig::load(const std::string& file)
         else if (k.size() == 8 && k.rfind("gun", 0) == 0 && k[3] >= '1' && k[3] <= '4' && k.compare(4, 4, "name") == 0)
             gunName[k[3] - '1'] = v;
         else if (k == "difficulty") difficulty = std::clamp(n, 0, 4);
-        else if (k == "lives") lives = std::clamp(n, 0, 11);
+        else if (k == "lives") lives = livesCodeValid(n) ? n : 9;   // (game/lives.h: the arcade's setting 0-11 or a pair's code)
+        else if (k == "startlives") startLivesSeen = n;
+        else if (k == "maxlives") maxLivesSeen = n;
+        else if (k == "soloseat") soloSeat = n == 1 ? 1 : 0;   // (#29)
+        else if (k == "chapterretry") chapterRetry = n != 0;   // (#5)
         else if (k == "blood") blood = std::clamp(n, 0, 5);
         else if (k == "bloodv") bloodV2 = n >= 2;
         else if (k == "padv") padV = n;
@@ -254,7 +272,6 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "pcsplash") pcSplash = n != 0;   // (feat29)
         else if (k == "gametext") gameText = n == 1 ? 1 : 0;
         else if (k == "lang") language = util::utf8Head(v, 16);
-        else if (k == "crosshairs") crosshairs = n != 0;   // (Light Gun Edition; before the crosshair keys below)
         else if (k.rfind("cross", 0) == 0) {   // firing range: player 1's crosshair, then the same keys + 2 / 3 / 4
             const char last = k.back();
             const int s = last >= '2' && last <= '4' ? last - '1' : 0;
@@ -278,9 +295,6 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "edgereload") edgeReload = n != 0;
         else if (k == "scoredisplay") scoreDisplay = n != 0;
         else if (k == "attractgore") attractGore = n != 0;
-        else if (k == "lgupdatecheck") updateCheck = n != 0;
-        else if (k == "outputs") outputs = n != 0;
-        else if (k == "outputsport") outputsPort = n > 0 && n < 65536 ? n : 8000;
         else if (k == "lastversion") lastVersion = util::utf8Head(v, 24);
         else if (k == "holdskip") holdSkip = n != 0;
         else if (k == "gamespeed") gameSpeed = v == "auto" || v == "0" ? -1 : v == "arcade" ? 0 : n == 1 || v == "60" ? 1 : -1;   // (the old 0: the default then -> auto)
@@ -313,11 +327,15 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "touchcursor") touchCursor = std::clamp(n, 0, 1);   // padglyphs: the pad cursor
         else if (k == "gyrocursor") gyroCursor = std::clamp(n, 0, 2);
         else if (k == "cursorspeed") cursorSpeed = std::clamp(n, 1, 10);
+        else if (k == "gyrocursorspeed") gyroSpeedSeen = std::clamp(n, 1, 10);   // (#36)
+        else if (k.size() == 10 && k.rfind("mousesens", 0) == 0 && (k[9] == '1' || k[9] == '2')) mouseSens[k[9] - '1'] = std::clamp(n, 5, 20);
         else if (k == "gunborder") gunBorder = std::clamp(n, 0, 4); // padpass: the white border
         else if (k == "trailer") trailer = n != 0;
         else if (k == "hitsparks") hitSparks = n != 0;
         else if (k == "muzzleflash") muzzleFlash = n != 0;
         else if (k == "bloodparticles") bloodParticles = n != 0;
+        else if (k == "hitmarks") clearMarks = n != 0;
+        else if (k == "transparency") transparency = std::clamp(n, 0, 3);
         else if (k == "scene4p") scene4p = v;
         else if (k == "scenecast") sceneCast = v;
         else if (k == "crt") crt.preset = std::max(crtPresetParse(v), 0);
@@ -329,6 +347,8 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "crt.bright") crt.bright = std::clamp(n, 0, 10);
         else if (k == "crt.crispsights") crt.crispSights = n != 0;
         else if (k == "crt.shotfiltered") crt.shotFiltered = n != 0;
+        else if (k == "gamma") { const int g = gammaParse(v.c_str()); if (g > 0) gamma = g; }
+        else if (k == "menugamma") { const int g = gammaParse(v.c_str()); if (g > 0) menuGamma = g; }   // (polish)
         else if (k == "music") music = n != 0;
         else if (k == "musicvolume") musicVolume = std::clamp(n, 0, 100) / 5 * 5;   // (prerel: 5 % steps)
         else if (k == "sfxvolume") sfxVolume = std::clamp(n, 0, 100) / 5 * 5;   // (prerel: 5 % steps)
@@ -356,6 +376,9 @@ bool LaunchConfig::load(const std::string& file)
     for (int s = 1; s < 4; ++s)   // firing range: an older launcher.ini (one crosshair for all): player 1's for everyone
         if (!sightSeen[s])
             sights[s] = sights[0];
+    gyroCursorSpeed = gyroSpeedSeen > 0 ? gyroSpeedSeen : cursorSpeed;   // (#36)
+    if (startLivesSeen > 0 || maxLivesSeen > 0)   // GitHub #30: the two settings over lives= (the same pair when both are there)
+        lives = livesCode(startLivesSeen > 0 ? startLivesSeen : livesStartOf(lives), maxLivesSeen > 0 ? maxLivesSeen : livesMostOf(lives));
     if (!chapterPlayable(chapter))   // a chapter of an older build that is not playable in this one
         chapter = 0;
     if (!bloodV2 && blood == 4)
@@ -412,22 +435,25 @@ void LaunchConfig::save(const std::string& file) const
     } c{std::ofstream(file + ".new"), file};
     std::ofstream& f = c.f;
     f << "arcade=" << toBase(arcade, base) << "\npc=" << toBase(pc, base) << "\nmodels=" << models << "\nsound=" << sound << "\nplayers=" << players << "\np2input=" << p2Input
-      << "\ndifficulty=" << difficulty << "\nlives=" << lives << "\nblood=" << blood << "\ncuts=" << (cuts ? 1 : 0) << "\ntitle=" << (title ? 1 : 0) << "\nfbi=" << (fbi ? 1 : 0) << "\npcsplash=" << (pcSplash ? 1 : 0) << "\ngametext=" << gameText << "\nlang=" << language
+      << "\ndifficulty=" << difficulty << "\nlives=" << lives << "\nstartlives=" << livesStartOf(lives) << "\nmaxlives=" << livesMostOf(lives) << "\nsoloseat=" << soloSeat << "\nchapterretry=" << (chapterRetry ? 1 : 0) << "\nblood=" << blood << "\ncuts=" << (cuts ? 1 : 0) << "\ntitle=" << (title ? 1 : 0) << "\nfbi=" << (fbi ? 1 : 0) << "\npcsplash=" << (pcSplash ? 1 : 0) << "\ngametext=" << gameText << "\nlang=" << language
       << "\naspect=" << aspect << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nflashlight=" << (flashlight ? 1 : 0) << "\nbigheads=" << (bigHeads ? 1 : 0) << "\nshotgun=" << (shotgun ? 1 : 0) << "\npartyboard=" << (partyBoard ? 1 : 0) << "\nhardcore=" << (hardcore ? 1 : 0) << "\nfreefire=" << (freeFire ? 1 : 0) << "\nmachinegun=" << (machineGun ? 1 : 0) << "\narsenal=" << (weaponSwitch ? 1 : 0) << "\nsuddendeath=" << (suddenDeath ? 1 : 0) << "\nvampire=" << (vampire ? 1 : 0) << "\nhostagecrisis=" << (hostageCrisis ? 1 : 0) << "\nroulette=" << (roulette ? 1 : 0) << "\nsurvival=" << (survival ? 1 : 0) << "\nexploding=" << (exploding ? 1 : 0) << "\nfunlook=" << funLook << "\nturbo=" << turbo << "\nbossrush=" << (bossRush ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
       << "\ndisplaymode=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? (exclusive ? 2 : 1) : 0)
       << "\nexclusive=" << (exclusive ? 1 : 0)
       << "\nresolution_fullscreen=" << util::sizeKey({resFullW, resFullH}) << "\nresolution_window=" << util::sizeKey({resWinW, resWinH})
       << "\ngamespeed=" << (gameSpeed < 0 ? "auto" : gameSpeed == 1 ? "60" : "arcade") << "\ncontinues=" << continues << "\nfreeplay=" << (freePlay ? 1 : 0) << "\nframerate=" << (frameRate == 0 ? std::string("display") : frameRate < 0 ? std::string("unlimited") : frameRate == kFrameRateArcade ? std::string("arcade") : std::to_string(frameRate))
-      << "\nvsync=" << (vsync ? 1 : 0) << "\nrenderer=" << (renderer == 1 ? "gl" : renderer == 2 ? "angle" : "auto") << "\nsmooth=" << (smooth ? 1 : 0) << "\nhitsparks=" << (hitSparks ? 1 : 0) << "\nmuzzleflash=" << (muzzleFlash ? 1 : 0) << "\nbloodparticles=" << (bloodParticles ? 1 : 0) << "\nnetname=" << netName << "\ndisplay=" << display << "\nnetinfo=" << netInfo << "\nnetpcmode=" << (netPcMode ? 1 : 0) << "\nnetbossmode=" << netBossMode << "\nnetpcchar=" << netPcChar[0] << ',' << netPcChar[1] << "\nsonicmode=" << sonicKey(sonic) << "\nboss4p=" << boss4p << "\nenemy4p=" << enemy4p << "\nteamflash=" << teamFlash << "\ntrailer=" << (trailer ? 1 : 0) << "\nscene4p=" << scene4p
+      << "\nvsync=" << (vsync ? 1 : 0) << "\nrenderer=" << (renderer == 1 ? "gl" : renderer == 2 ? "angle" : "auto") << "\nsmooth=" << (smooth ? 1 : 0) << "\nhitsparks=" << (hitSparks ? 1 : 0) << "\nmuzzleflash=" << (muzzleFlash ? 1 : 0) << "\nshotflashsize=" << shotFlashSize << "\nshowcrosshairs=" << (showCrosshairs ? 1 : 0) << "\nbloodparticles=" << (bloodParticles ? 1 : 0) << "\nhitmarks=" << (clearMarks ? 1 : 0) << "\ntransparency=" << transparency << "\nnetname=" << netName << "\ndisplay=" << display << "\nnetinfo=" << netInfo << "\nnetpcmode=" << (netPcMode ? 1 : 0) << "\nnetbossmode=" << netBossMode << "\nnetpcchar=" << netPcChar[0] << ',' << netPcChar[1] << "\nsonicmode=" << sonicKey(sonic) << "\nboss4p=" << boss4p << "\nenemy4p=" << enemy4p << "\nteamflash=" << teamFlash << "\ntrailer=" << (trailer ? 1 : 0) << "\nscene4p=" << scene4p
       << "\ncrt=" << crtPresetKey(crt.preset) << "\ncrt.scan=" << crt.scan << "\ncrt.mask=" << crt.mask << "\ncrt.masktype=" << crt.maskType
       << "\ncrt.curve=" << crt.curve << "\ncrt.bloom=" << crt.bloom << "\ncrt.bright=" << crt.bright
       << "\ncrt.crispsights=" << (crt.crispSights ? 1 : 0) << "\ncrt.shotfiltered=" << (crt.shotFiltered ? 1 : 0)
+      << "\ngamma=" << [this]() { char b[8]; return std::string(gammaText(gamma, b)); }()
+      << "\nmenugamma=" << [this]() { char b[8]; return std::string(gammaText(menuGamma, b)); }()
       << "\nmusic=" << (music ? 1 : 0) << "\nmusicvolume=" << musicVolume << "\nsfxvolume=" << sfxVolume << "\nmusicnumbering=" << musicNumbering << "\nmenumusic=" << menuMusic
       << "\nmenustyle=" << menuStyle << "\nlivebg=" << liveBackground << "\nmenufps=" << menuFps << "\nmenublood=" << menuBlood << "\ngallery=" << galleryEntry << "\ngallerybg=" << galleryBg << "\ngallerylayout=" << galleryLayout;
     f << "\nscenecast=" << sceneCast;   // actors2: the cut-scene viewer's Actors
     f << "\nguntype=" << gunKind << "\ngunflash=" << gunFlash << "\ngunborder=" << gunBorder;   // padpass: light guns
     f << "\npadprompts=" << padPrompts << "\nbuttonstyle=" << buttonStyle << "\niconoutline=" << iconOutline;
     f << "\ntouchcursor=" << touchCursor << "\ngyrocursor=" << gyroCursor << "\ncursorspeed=" << cursorSpeed;   // padglyphs   // padglyphs: Button Prompts / Style
+    f << "\ngyrocursorspeed=" << gyroCursorSpeed << "\nmousesens1=" << mouseSens[0] << "\nmousesens2=" << mouseSens[1];   // (#36)
     for (int i = 0; i < 5; ++i)
         f << "\nsteamart" << i << '=' << steamArt[i];
     for (int s = 0; s < 4; ++s) {   // firing range: each player's crosshair (player 1 without a number)
@@ -637,9 +663,12 @@ std::string mb(uint64_t bytes)
     return b;
 }
 
+// a path as the system writes it (Windows: backslashes; Linux / macOS: as it is)
 std::string backslashes(std::string s)
 {
+#ifdef _WIN32
     std::replace(s.begin(), s.end(), '/', '\\');
+#endif
     return s;
 }
 
@@ -871,10 +900,29 @@ void Launcher::checkZone(int which, const std::string& path)
 #ifdef _WIN32
             const char* root = std::getenv("SystemRoot");
             const std::string tar = std::string(root && *root ? root : "C:\\Windows") + "\\System32\\tar.exe";
-#else
-            const std::string tar = "tar";
-#endif
             const int rc = winshell::runHidden(tar, "-xf \"" + in + "\" -C \"" + dir + "\"", 600);
+#else
+            // linux (2026-11-03): libarchive's bsdtar (macOS' own tar; Linux: the libarchive-tools package), else
+            // 7-Zip (7zz / 7z / 7za: 7-Zip for Linux or p7zip); GNU tar cannot read .7z / .rar
+            int rc = -1;
+            std::string tool;
+#ifdef __APPLE__
+            const char* const tars[] = {"/usr/bin/tar", "bsdtar"};
+#else
+            const char* const tars[] = {"bsdtar"};
+#endif
+            for (const char* t : tars)
+                if (tool.empty() && !(tool = winshell::findProgram(t)).empty()) rc = winshell::runHidden(tool, "-xf \"" + in + "\" -C \"" + dir + "\"", 600);
+            for (const char* t : {"7zz", "7z", "7za"})
+                if (tool.empty() && !(tool = winshell::findProgram(t)).empty()) rc = winshell::runHidden(tool, "x -y \"-o" + dir + "\" \"" + in + "\"", 600);
+            if (tool.empty()) {
+                z.state = 4, z.line = lang::fmt("{file} could not be unpacked", {{"file", fileName(path)}});
+                z.more = {lang::tr("No program here unpacks .7z / .rar: install bsdtar (libarchive-tools) or 7-Zip (p7zip), or unpack it yourself and drop the folder here.")};
+                std::lock_guard<std::mutex> l(zoneMutex_);
+                if (zone_[which].path == path) zone_[which] = z;
+                return;
+            }
+#endif
             bool any = false;
             for (const auto& e : fs::recursive_directory_iterator(dir, ec))
                 any |= e.is_regular_file(ec) && e.path().filename() != "hotd_disc_copy.txt";
@@ -1319,8 +1367,16 @@ void Launcher::render(int ww, int wh)
             if (enabled) hotAt(L - 4, y - 6, std::max(300.0f, p.textW(label, 10) + 40), bs + 12, action);
             y += 40;
         };
+#if defined(_WIN32)
         box(optDesktop_, T("Desktop shortcut"), "", kOptDesk, true);
         box(optStartMenu_, T("Start menu entry"), "", kOptStart, true);
+#elif defined(__APPLE__)   // linux (2026-11-03): no shortcuts on macOS yet (the package's .app)
+        box(false, T("Desktop shortcut"), "", kOptDesk, false);
+        box(false, T("Start menu entry"), "", kOptStart, false);
+#else                      // Linux: desktop entries (~/Desktop, ~/.local/share/applications)
+        box(optDesktop_, T("Desktop shortcut"), "", kOptDesk, true);
+        box(optStartMenu_, T("Applications menu entry"), "", kOptStart, true);
+#endif
         box(optSteam_, T("Add to Steam"), T("(Steam must be closed)"), kOptSteam, true);
         box(optMusic_ && zp.music > 0, T("Import the CD music"),
             zp.music ? lang::fmt("({n} tracks found)", {{"n", std::to_string(zp.music)}}) : T("(none found in your PC game)"), kOptMusic, zp.music > 0);
@@ -1420,7 +1476,7 @@ void Launcher::render(int ww, int wh)
             p.raised(R - 18, by, 16, bh);
         }
         if (mode == Mode::Update) {
-            const bool canUpdate = !packageRoot.empty();
+            const bool canUpdate = util::kSelfUpdate && !packageRoot.empty();
             float yy = ty + th + 18;
             if (download_ && download_->state() == util::UpdateDownload::Running) {
                 progressBar(L, yy, CW, download_->progress());
@@ -1429,6 +1485,8 @@ void Launcher::render(int ww, int wh)
             } else if (!updateErr_.empty() || (download_ && download_->state() == util::UpdateDownload::Failed)) {
                 p.mark(4, L, yy, 11, kBad);
                 para(updateErr_.empty() ? download_->message() : updateErr_, L + 20, yy, CW - 20, 9, kBad);
+            } else if (!util::kSelfUpdate) {   // linux (2026-11-03): the notice and the download page only
+                para(T("On Linux and macOS the game does not update itself: get the new version from the download page."), L, yy, CW, 9, kFaint);
             } else if (!canUpdate) {
                 para(T("This copy cannot update itself (a developer build): use the download page."), L, yy, CW, 9, kFaint);
             }
@@ -1503,11 +1561,15 @@ void Launcher::click(int action, SDL_Window* window)
         click(kStart, window);
         return;
     }
+#ifdef _WIN32
     case kOpenFolder: SDL_OpenURL(("file:///" + backslashes(installDir_)).c_str()); break;
+#else
+    case kOpenFolder: SDL_OpenURL(("file://" + installDir_).c_str()); break;   // (an absolute path: file:///home/...)
+#endif
     case kDownloadPage: SDL_OpenURL(util::kReleasesPage); break;
     case kUpdate: {
         updateErr_.clear();
-        if (packageRoot.empty()) { SDL_OpenURL(util::kReleasesPage); break; }
+        if (packageRoot.empty() || !util::kSelfUpdate) { SDL_OpenURL(util::kReleasesPage); break; }
         if (!download_) download_ = std::make_unique<util::UpdateDownload>();
         download_->start(update_, packageRoot + "/settings/update");
         break;
@@ -1559,6 +1621,27 @@ void Launcher::handle(const SDL_Event& e, SDL_Window* window)
     }
     if (e.type == SDL_EVENT_MOUSE_WHEEL) {
         scroll_ = std::clamp(scroll_ - int(e.wheel.y * 40), 0, scrollMax_);
+        return;
+    }
+    // linux (2026-11-03, the Steam Deck's Game Mode: no keyboard): a pad's A / Start = Enter, B / Back = Esc, the d-pad's
+    // Up / Down = the arrows (the text pages scroll); the rest of the setup is the mouse's (the Deck's touch screen /
+    // trackpad)
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        SDL_Keycode k = 0;
+        switch (e.gbutton.button) {
+        case SDL_GAMEPAD_BUTTON_SOUTH: case SDL_GAMEPAD_BUTTON_START: k = SDLK_RETURN; break;
+        case SDL_GAMEPAD_BUTTON_EAST: case SDL_GAMEPAD_BUTTON_BACK: k = SDLK_ESCAPE; break;
+        case SDL_GAMEPAD_BUTTON_DPAD_UP: k = SDLK_UP; break;
+        case SDL_GAMEPAD_BUTTON_DPAD_DOWN: k = SDLK_DOWN; break;
+        default: break;
+        }
+        if (k) {
+            SDL_Event key{};
+            key.type = SDL_EVENT_KEY_DOWN;
+            key.key.key = k;
+            key.key.down = true;
+            handle(key, window);
+        }
         return;
     }
     if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {

@@ -17,11 +17,14 @@ namespace hotd::game {
 
 // the styles (LaunchConfig::crosshair): 0 auto, 1 arcade, 2 PC, 3 simple cross, 4 ring + dot, 6 corner brackets,
 // 7 gap cross, 10 capped cross (user 2026-10-31: a plus whose arms end in thin bars across; after the gap cross in the
-// menu), 9 a custom picture set (LaunchConfig::crosshairCustom). 5 (dotted ring) and 8 (pointer) were removed
-// (user 2026-10-19); their numbers stay unused so saved settings keep their meaning: a saved 5 / 8 becomes 4 / 3.
-constexpr int kSightStyles = 11;
+// menu), 9 a custom picture set (LaunchConfig::crosshairCustom), 11 off (gunfb, a light-gun player's feedback
+// 2026-11-03: no crosshair at all, as the arcade; the aim and the HUD prompts unchanged; after the capped cross in the
+// menu). 5 (dotted ring) and 8 (pointer) were removed (user 2026-10-19); their numbers stay unused so saved settings
+// keep their meaning: a saved 5 / 8 becomes 4 / 3.
+constexpr int kSightStyles = 12;
 constexpr int kSightCustom = 9;
 constexpr int kSightCapped = 10;
+constexpr int kSightOff = 11;
 inline int sightStyleKept(int style) { return style == 5 ? 4 : style == 8 ? 3 : style; }
 const char* sightStyleName(int style);   // "simple cross", "ring + dot", ...
 // the command-line word -> style (-1 unknown); "custom:<name>" is style 9 with the name in `custom`

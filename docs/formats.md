@@ -542,6 +542,38 @@ From MAME's `model2_v.cpp` / `model2rd.ipp` / `model2.cpp` (in `private\mame\`) 
   texel (15) takes its neighbour's value before filtering; discard below 50% alpha.
 - All of this is implemented in the viewer's shader (src/render/renderer.cpp).
 
+### Why the picture is darker than the cabinets (gamma, GitHub issue #23, 2026-11-03)
+
+People who played on the real cabinets say the game is too dark here, and darker than they remember in MAME too. What
+the renderer does (src/render/renderer.cpp, `uM2Gamma`, on by default: `RenderOptions::gamma`):
+1. the polygon's luma picks a brightness 0-63, the colour translation table (§19, the game's own, built at boot by
+   maincpu 0x1180: `y = ½(√x + x²)`) gives each channel's 8-bit value;
+2. then MAME's output curve `max((v − 64) × 255 / 191, 0)` (model2_v.cpp). The 2D layer goes through the same curve
+   (hud.cpp's bar colours do it on the CPU). The PC models (THOTD.EXE's colours) have no such curve.
+
+What is known:
+- **The game's table rises steeply off 0.** Its `√x` part lifts the dark end: base 1 at brightness 16 is 19, base 4
+  is 28, base 16 at brightness 32 is 71; brightness 63 of base 16 (a middle colour) is 120. So the game was written for a display that takes roughly the bottom quarter of the signal as black: the
+  monitor's black level (its brightness knob) does that, and MAME's `− 64` stands for it.
+- **MAME's curve is a guess.** Its own comment says it "works OK for most games"; it is a fixed straight line, not
+  read from the hardware. Every table value up to 64 is black, and the rest is stretched: base 16 at full brightness
+  120 -> 74, base 24 at half brightness 96 -> 42. If the cabinet's black sat a little lower than 64 (an operator's
+  brightness knob, an aged tube), all of those shades become visible dark greys and the middle tones are brighter:
+  that is the "brighter cabinet".
+- **Real cabinets were not calibrated alike** (MAME's note: per game, per operator), so there is no single right
+  value; there is no measurement of a real cabinet's output in this project.
+- How much brighter, as a power curve: the gamma that brings MAME's value back to the table's own value is about
+  1.4 (bright colours) to 1.6 (middle) to 2+ (dark ones), e.g. base 16 at full brightness 74 -> 120 needs 1.64.
+  A power curve cannot bring back the shades MAME's curve made 0 (they stay black: blacks stay black is the point of
+  a gamma slider); a "black level" control (the `64`) would, and is the more hardware-like knob: an open question
+  for later (it is the renderer's shader, the arcade path only).
+
+Options -> Video -> **Game Gamma** / **Menu Gamma** (src/render/gamma.h; launcher.ini `gamma=` / `menugamma=`, `--gamma` /
+`--menu-gamma`: the play / the menus, the Gallery and the front-end screens): `out = in ^ (1 / gamma)` on the
+final picture (both model sets, the 2D layer, the HUD, the menus, the VR eyes, screenshots and `--render`), 0.60 -
+2.00 in 0.05 steps, 1.00 = the picture unchanged (no pass at all). No "Arcade cabinet" preset: there is no measured
+cabinet footage to match (above), only "undo MAME's guess", which is not one number.
+
 ## 16. Texture sets in the viewer (2026-10-08, evening)
 
 The game reloads parts of texture RAM per area (§13): over the full-game replay, Chapter 1 has 3 texture RAM versions, Chapter 2: 3,
@@ -913,8 +945,11 @@ then checked by playing the samples in the rewrite (`hotd`, src/game/audio.cpp).
 | 4 | load `SOUND\O_<name>.RBH` into the bank's load area (0x401), then play it | sample number (0x40..0xD5) |
 | 5 | command: 1 = music off, 2 / 3 / 7 = every sample off (0x407), 4..6 nothing | command |
 
-**GAMESNDS.RBH** (PIFF / RBHF, §2): `RBHH`, BODY 0 = 214 sample entries of 40 bytes, BODY 1 = the bank (8-bit unsigned
-PCM, 0x80 = silence; its last 100,616 bytes are the load area the O_ files go into). Entry, little-endian:
+**GAMESNDS.RBH** (PIFF / RBHF, §2): `RBHH`, BODY 0 = 214 sample entries of 40 bytes, BODY 1 = the O_ files' 8-byte
+header (`{u32 load offset 0, u16 1, u16 1}`) then the bank (8-bit unsigned PCM, 0x80 = silence; its last 100,616 bytes
+are the load area the O_ files go into). The entries' offsets count from after that header (THOTD 0x57BFC0: BODY + 8 +
+offset - the load offset; read from the header on, each sample starts with 8 bytes of the one before, mostly 0x00:
+GitHub #3, the chainsaw's click). Entry, little-endian:
 
 | Offset | Size | Field |
 |---|---|---|

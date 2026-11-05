@@ -12,6 +12,7 @@
 // their task alone (bats, Murrers, rats, slugs, insects, falling frogs, the severed heads) from their models.
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <vector>
 #include <string>

@@ -29,8 +29,8 @@ struct PauseInput {
     bool down = false;       // a down-arrow (0xD0) or keypad 2 (0x50) edge
     bool activate = false;   // an Enter (0x1C) / keypad Enter (0x9C) / Space (0x39) edge or a mouse button (0x12FDB84)
     float mouseDy = 0;       // the mouse's vertical motion this frame (0x12FDB9C, DirectInput: mickeys; ours: pixels)
-    // ours (user 2026-10-17: the PC's mouse rule alone felt odd): the item under the pointer (0 Continue, 1 Exit,
-    // -1 none) and whether the pointer moved this frame; pointing at an item selects it, a click there chooses it
+    // ours (user 2026-10-17: the PC's mouse rule alone felt odd): the item under the pointer (its index in the pause's
+    // items, -1 none) and whether the pointer moved this frame; pointing at an item selects it, a click there chooses it
     int hover = -1;
     bool pointerMoved = false;
 };
@@ -52,14 +52,40 @@ public:
     // message 0xF (voice_message_frame_sub 0x4185BC; posted by 0x5633D0 from the window procedure's WM_ACTIVATEAPP):
     // inactive -> the pause with Continue selected; active -> the pause ends (whatever opened it)
     void focus(bool active);
-    void reset() { paused_ = false; selection_ = 0; }
+    void reset() { paused_ = false; selection_ = 0; over_ = false; }
     // ours (user 2026-10-26): the pause opens in a cut-scene too (shot_enable 0; the PC's 0x41ADF0 only with the shots
     // on). The host sets it for local games (online the PCs' lockstep keeps the original rule)
     bool cutScenes = false;   // a new game (0x4185BC message 0 clears 0x5CD358)
 
+    // GitHub #5 (user 2026-11-03: "Level retry ... from the pause menu like in the remake"): Gameplay > Chapter Retry on
+    // (the host sets `retry` for the games that can retry): the pause has Continue, Retry Chapter, Exit; after a game
+    // over openGameOver() shows GAME OVER with Retry Chapter, Exit (Escape / P do not close it). Off: the PC's pause
+    enum Item { kContinue, kExit, kRetry, kSettings };
+    bool retry = false;
+    std::function<void()> onRetry;               // Retry Chapter chosen (the host restarts the chapter)
+    void openGameOver();
+    bool gameOver() const { return paused_ && over_; }
+    // fxux (user 2026-11-03): Settings right below Continue (the host sets `settings`): the Options pages over the paused
+    // game (onSettings; the pause stays open, Back returns to it). The pause's items: Continue, Settings, Retry Chapter
+    // (#5), Exit; the game over's: Retry Chapter, Exit
+    bool settings = false;
+    std::function<void()> onSettings;
+    int itemCount() const { return over_ ? 2 : 2 + (retry ? 1 : 0) + (settings ? 1 : 0); }
+    Item itemAt(int i) const
+    {
+        if (over_)
+            return i == 0 ? kRetry : kExit;
+        if (i == 0)
+            return kContinue;
+        if (settings && i == 1)
+            return kSettings;
+        return retry && i == (settings ? 2 : 1) ? kRetry : kExit;
+    }
+
 private:
     bool paused_ = false;   // 0x5CD358
     int selection_ = 0;     // 0x5CE844
+    bool over_ = false;     // (#5: the game over's menu)
 };
 
 // 0x41B204: the screen fade is at rest at 1.0 (0xD5A5C0 +0x64 == +0x68 == 0x10000)

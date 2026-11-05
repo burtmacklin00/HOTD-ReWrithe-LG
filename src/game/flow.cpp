@@ -49,6 +49,8 @@ void Runtime::sound_cue(uint32_t cue)
 {
     if (boss_next_on())   // Boss Mode's undrawn walk-up: THOTD.EXE's sound_cue 0x412000 plays nothing while pc_boss_next
         return;
+    if (survival.active() && survival_cue(cue))   // Survival Mode: its silent lead-in, the SMG's own sound (survival.cpp)
+        return;
     if (!audio || !audio->boardOn()) {
         if (cueLog)
             cueLog->push_back(cue);
@@ -71,7 +73,7 @@ void Runtime::sound_cue(uint32_t cue)
 // 0x15590 sound_send3: straight to the board, past the queue
 void Runtime::sound_send3(uint32_t v)
 {
-    if (boss_next_on())   // (as sound_cue: the PC has one sound_cue)
+    if (boss_next_on() || survival.leadIn())   // (as sound_cue: the PC has one sound_cue; Survival's lead-in too)
         return;
     if (cueLog)
         cueLog->push_back(v);

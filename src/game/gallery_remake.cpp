@@ -212,6 +212,13 @@ void Frontend::screenGalleryRemake(const GalleryText& g, Widget* root)
         lines.push_back("");
         for (const std::string& l : wrapTr(g.status, 24, wrapLines)) lines.push_back(l);
     }
+    // gallery blood / gallery dismemberment: the Gallery's blood colour, the keys' body part and its damage state
+    lines.push_back("");
+    lines.push_back(T("Blood:") + " " + T(g.blood) + g.bloodHex() + (g.particles ? std::string() : "  " + T("(no particles)")));
+    if (!g.damageNote.empty())
+        for (const std::string& l : wrapTr(g.damageNote, 24, wrapLines)) lines.push_back(l);
+    else if (g.damagePart >= 0 && size_t(g.damagePart) < g.partNames.size() && size_t(g.damagePart) < g.partStates.size())
+        lines.push_back(T(g.partNames[size_t(g.damagePart)]) + ": " + T(g.partStates[size_t(g.damagePart)]));
     const std::vector<uint8_t>* card = galleryCard ? galleryCard() : nullptr;
     const int perPage = card ? 8 : 12;
     const int pages = std::max(1, (int(lines.size()) + perPage - 1) / perPage);
@@ -244,7 +251,8 @@ void Frontend::screenGalleryRemake(const GalleryText& g, Widget* root)
                            {"View", "Background"}}
         : std::vector<Row>{{"Drag", "Rotation"}, {"Wheel", "Zoom"}, {"WASD", "Navigation"}, {"R-drag", "Panning"},
                            {"T", "Hide UI"}, {"Space", g.playing ? "Pause Animation" : "Play Animation"}, {"M", "Next motion"},
-                           {"B", "Background"}, {"K", "Classic layout"}};
+                           {"B", "Background"}, {"K", "Classic layout"}, {"G/N", "Blood Color, Rainbow"},
+                           {"Z/X", "Damage: part, state"}};
     if (pages > 1) rows.push_back({g.pad ? "L3" : "Tab", "More text"});
     const int rowH = std::min(15, (436 - y) / std::max(1, int(rows.size())));
     for (const Row& r : rows) {

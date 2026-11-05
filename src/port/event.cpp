@@ -82,8 +82,10 @@ template <class P> void Game<P>::evt_run(uint32_t task)
     do {
         const uint32_t pc = mem.u32(G::evt_pc);
         const uint32_t op = mem.u32(pc);
-        if (pc != mem.u32(G::evt_last_pc))
+        if (pc != mem.u32(G::evt_last_pc)) {
             mem.set32(G::evt_last_pc, pc);
+            evt_attract_restore(pc);   // Attract Gore: the PC's prologue spawns Revision A dropped (off: nothing)
+        }
         mem.set32(G::evt_opcode, op);
         evt_call(mem.u32(G::evt_handlers + op * 4));
     } while (mem.u32(G::evt_yield) == 0);
@@ -201,7 +203,22 @@ template <class P> void Game<P>::evt_ENTB()
     uint32_t pc = mem.u32(G::evt_pc) + 4;
     mem.set32(G::evt_pc, pc);
     while (mem.u32(pc) != 0xFFFFFFFFu) {
-        const uint32_t rec = mem.u32(pc);
+        evt_entb_record(mem.u32(pc));
+        pc = mem.u32(G::evt_pc) + 4;
+        mem.set32(G::evt_pc, pc);
+    }
+    if constexpr (P::pc)
+        pcm_pop();
+    else
+        copro(0x06, nullptr, 0, none);
+    mem.set32(G::evt_pc, mem.u32(G::evt_pc) + 4);
+}
+
+// ENTB's body for one record (inside its camera matrix push)
+template <class P> void Game<P>::evt_entb_record(uint32_t rec)
+{
+    Tgp::Out none;
+    {
         const uint32_t t = task_create(mem.u32(G::obj_kinds + mem.u32(rec) * 4), P::pc ? 0x3D0 : 0x3C8);
         task_clear_work(t);
         of<uint8_t>(t, 0x3C4) &= uint8_t(0xFD);
@@ -263,14 +280,30 @@ template <class P> void Game<P>::evt_ENTB()
         of<uint32_t>(t, 0x2C) = mem.u32(rec + 0x14);
         of<uint32_t>(t, 0x30) = mem.u32(rec + 0x18);
         of<uint32_t>(t, 0x34) = mem.u32(rec + 0x1C);
-        pc = mem.u32(G::evt_pc) + 4;
-        mem.set32(G::evt_pc, pc);
+        evt_spawned(t, rec);   // (Survival Mode's lead-in; nothing otherwise)
     }
-    if constexpr (P::pc)
-        pcm_pop();
-    else
+}
+
+// Attract Gore (Gameplay option, port::gAttractGore; user 2026-11-03): the prologue's sewer scene (mode 9, scene 6) as
+// the 1998 PC plays it. The PC's EVTALL.RBH has "ENTB 0xFE310 0xFE340" there (list 5 event 0, offset 668, between
+// GGCOL 9 and GGSET 24): two kind-118 corpses (type 17, the dead researchers sitai_ken 0x5E8 / 0x5E6 with their blood).
+// Revision A took the instruction out of the ROM's script (GGCOL 9 106 at 0xFDC54 is followed by GGSET 24 at 0xFDC64)
+// but left both records in the ROM, referenced by nothing. Here: ENTB on them when the script reaches that GGSET.
+template <class P> void Game<P>::evt_attract_restore(uint32_t pc)
+{
+    if constexpr (!P::pc) {
+        if (!gAttractGore || pc != 0xFDC64 || mem.at<int16_t>(G::game_mode) != 9 || mem.at<int8_t>(G::chapter) != 5 ||
+            mem.u32(G::obj_kinds + 0x76 * 4) != 0x5C0A0 || mem.u32(0xFE310) != 0x76 || mem.u32(0xFE340) != 0x76)
+            return;
+        Tgp::Out none;
+        const uint32_t slot[1] = {1};
+        copro(0x74, slot, 1, none);
+        evt_entb_record(0xFE310);
+        evt_entb_record(0xFE340);
         copro(0x06, nullptr, 0, none);
-    mem.set32(G::evt_pc, mem.u32(G::evt_pc) + 4);
+    } else {
+        (void)pc;   // the PC's script has the instruction
+    }
 }
 
 // 0x31870: ENTB2 rec ... -1: scene objects from short records (kind, value -> +0x70 / +0x72)
@@ -330,6 +363,7 @@ template <class P> void Game<P>::evt_ENTB3()
                 of<uint32_t>(t, 0x20 + 4 * i) = mem.u32(rec + 8 + 4 * i);
             of<uint32_t>(t, 0x320) = mem.at<uint8_t>(rec + 0x26);
             of<uint32_t>(t, 0x324) = mem.at<uint8_t>(rec + 0x27);
+            evt_spawned(t, rec);   // (Survival Mode's lead-in; nothing otherwise)
         }
         pc = mem.u32(G::evt_pc) + 4;
         mem.set32(G::evt_pc, pc);
@@ -358,6 +392,7 @@ template <class P> void Game<P>::evt_ENTBE()
             of<uint32_t>(t, 0x35C) = rec + 0x24;
             of<uint16_t>(t, 0x72) = v;
             of<uint16_t>(t, 0x70) = v;
+            evt_spawned(t, rec);   // (Survival Mode's lead-in; nothing otherwise)
         }
         pc = mem.u32(G::evt_pc) + 4;
         mem.set32(G::evt_pc, pc);
@@ -696,8 +731,15 @@ template <class P> void Game<P>::evt_GGSET()
         const uint32_t list = n == -1 ? G::ggset_none
                                       : mem.u32(mem.u32(G::ggset_lists + uint32_t(n) * 4) + uint32_t(mem.at<uint8_t>(G::blood_color)) * 4);
         for (int32_t row = 0; row < 4; ++row)
-            if (mem.at<uint16_t>(list + uint32_t(row) * 2) != 0xFFFF)
+            if (mem.at<uint16_t>(list + uint32_t(row) * 2) != 0xFFFF) {
                 color_row_set(row + 2, mem.at<int16_t>(list + uint32_t(row) * 2));
+                // (host, display only: the custom blood colour) the row's red and green lists differ: a blood row
+                if (n != -1) {
+                    const uint32_t lists = mem.u32(G::ggset_lists + uint32_t(n) * 4);
+                    if (mem.at<uint16_t>(mem.u32(lists) + uint32_t(row) * 2) != mem.at<uint16_t>(mem.u32(lists + 4) + uint32_t(row) * 2))
+                        ggset_blood_row(row + 2);
+                }
+            }
         mem.set32(G::evt_pc, mem.u32(G::evt_pc) + 8);
     }
 }

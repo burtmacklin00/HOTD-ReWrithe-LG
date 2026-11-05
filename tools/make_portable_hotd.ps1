@@ -2,8 +2,12 @@
 # NO GAME DATA goes in: the player points the launcher at their own arcade ROM zip and PC install (the files check
 # verifies them). The originals are only read.
 #
-#   powershell -ExecutionPolicy Bypass -File tools\make_portable_hotd.ps1 [-Build <build folder>] [-Out <folder>] [-NoBuild]
+#   powershell -ExecutionPolicy Bypass -File tools\make_portable_hotd.ps1 [-Build <build folder>] [-Out <folder>] [-NoBuild] [-Release]
 #   -NoBuild: copy the exe the build folder already has (no cmake --build, nothing is rebuilt or locked).
+#   -Release: a public release package (docs/porting.md "Experimental modes"): built with HOTD_EXPERIMENTAL_MODES=OFF (no
+#     Typing of the Dead 0 or Horde; Survival Mode in, HOTD_SURVIVAL_MODE=ON) in its own build folder, build-release (configured the first time with
+#     the dev build's generator and dependency folders), into private\portable\HOTD ReWrithe Release; the exe is checked
+#     (--totd must be refused; Survival Mode stays in, labelled Very Experimental). Without -Release: the user's own copy from build\ (the modes ON, as build\Release).
 #
 # Default output: <repo>\private\portable\HOTD Teaser (inside private\, never committed).
 # The game needs nothing else: the work RAM is built from the ROM at the start and the textures / colours come from
@@ -12,11 +16,13 @@ param(
     [string]$Build = "",
     [string]$Out = "",
     [switch]$NoBuild,
-    [switch]$NoZip
+    [switch]$NoZip,
+    [switch]$Release
 )
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-if ($Build -eq "") { $Build = Join-Path $repo "build" }
+$devBuild = Join-Path $repo "build"
+if ($Build -eq "") { $Build = if ($Release) { Join-Path $repo "build-release" } else { $devBuild } }
 $priv = Join-Path $repo "private"
 if (-not (Test-Path -LiteralPath $priv)) {
     # a git worktree: private\ is in the main checkout
@@ -27,14 +33,53 @@ if (-not (Test-Path -LiteralPath $priv)) {
     }
 }
 
-if ($Out -eq "") { $Out = Join-Path $priv "portable\HOTD ReWrithe" }
+if ($Out -eq "") { $Out = if ($Release) { Join-Path $priv "portable\HOTD ReWrithe Release" } else { Join-Path $priv "portable\HOTD ReWrithe" } }
 
 # 1. Release build
 $cmake = (Get-Command cmake -ErrorAction SilentlyContinue).Source
 if (-not $cmake) { $cmake = "C:\Program Files\CMake\bin\cmake.exe" }
+if ($Release -and -not $NoBuild) {
+    if ((Resolve-Path -LiteralPath $Build -ErrorAction SilentlyContinue).Path -eq (Resolve-Path -LiteralPath $devBuild -ErrorAction SilentlyContinue).Path) {
+        throw "-Release builds in its own folder (build-release): not the dev build ($devBuild), which keeps the modes ON"
+    }
+    # the release package: HOTD_EXPERIMENTAL_MODES=OFF in its own build folder (the dev build keeps the modes)
+    $cfgArgs = @('-S', $repo, '-B', $Build, '-DHOTD_EXPERIMENTAL_MODES=OFF', '-DHOTD_SURVIVAL_MODE=ON', '-DHOTD_LOCAL_ICON=OFF')
+    if (-not (Test-Path -LiteralPath (Join-Path $Build "CMakeCache.txt"))) {
+        $devCache = Get-Content -LiteralPath (Join-Path $devBuild "CMakeCache.txt") -ErrorAction SilentlyContinue
+        $cfgArgs += @('-G', 'Visual Studio 17 2022', '-A', 'x64')
+        foreach ($k in 'HOTD_FETCH_SDL3', 'FETCHCONTENT_FULLY_DISCONNECTED', 'FETCHCONTENT_SOURCE_DIR_SDL3', 'HOTD_ANGLE_DIR',
+                       'HOTD_DR_LIBS_DIR', 'HOTD_MUSASHI_DIR', 'HOTD_SCSP_DIR', 'HOTD_STB_DIR', 'HOTD_ARCADE_SOUND', 'OpenXR_DIR') {
+            $line = $devCache | Where-Object { $_ -like "${k}:*" } | Select-Object -First 1
+            $v = if ($line) { $line -replace '^[^=]*=', '' } else { '' }
+            if ($v -and $v -notlike '*NOTFOUND') { $cfgArgs += "-D$k=$v" }
+        }
+        # the dev build fetched SDL3 once into its _deps (its cache keeps no source path): a disconnected release
+        # configure uses that copy
+        $sdlSrc = Join-Path $devBuild "_deps\sdl3-src"
+        if (-not ($cfgArgs -like '-DFETCHCONTENT_SOURCE_DIR_SDL3=*') -and (Test-Path -LiteralPath $sdlSrc)) {
+            $cfgArgs += "-DFETCHCONTENT_SOURCE_DIR_SDL3=$($sdlSrc -replace '\\', '/')"
+        }
+    }
+    & $cmake @cfgArgs
+    if ($LASTEXITCODE -ne 0) { throw "configure ($Build) failed" }
+}
 if (-not $NoBuild) {
-    & $cmake --build $Build --config Release --target hotd hotd_viewer -- /v:minimal /nologo
+    $targets = @('hotd', 'hotd_viewer')
+    if ($Release) { $targets += 'hotd_launch' }   # (its own build folder: the stub is built there too)
+    & $cmake --build $Build --config Release --target @targets -- /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { throw "build failed" }
+}
+# the experimental modes (docs/porting.md): a release package must have them OFF; the exe must refuse --totd (Survival Mode stays: HOTD_SURVIVAL_MODE)
+$expLine = Get-Content -LiteralPath (Join-Path $Build "CMakeCache.txt") -ErrorAction SilentlyContinue |
+    Where-Object { $_ -like "HOTD_EXPERIMENTAL_MODES:*" } | Select-Object -First 1
+$expOn = -not ($expLine -match '=(OFF|0|FALSE|NO)$')
+if ($Release) {
+    if ($expOn) { throw "$Build has HOTD_EXPERIMENTAL_MODES on: a release package must be built with it OFF" }
+    $said = (& (Join-Path $Build "Release\hotd.exe") --totd 2>&1 | Out-String)
+    if ($said -notmatch 'not in this version') { throw "the release exe did not refuse --totd: $said" }
+    Write-Host "experimental modes: OFF (Typing of the Dead 0 and Horde left out, Survival in; checked)"
+} else {
+    Write-Host ("experimental modes: " + $(if ($expOn) { "ON (the user's own copy)" } else { "OFF" }))
 }
 # robust-2: a build folder configured without stb_vorbis makes a package without music (the game only logs "built
 # without stb_vorbis"); say so before copying
@@ -84,6 +129,14 @@ if (Test-Path -LiteralPath (Join-Path $rel "libGLESv2.dll")) {
     foreach ($d in "libEGL.dll", "libGLESv2.dll", "z.dll") { Copy-One (Join-Path $rel $d) "bin\$d" }
 } else {
     Write-Warning "no ANGLE DLLs in $rel (HOTD_ANGLE_DIR): the package has no DirectX renderer (OpenGL only)"
+}
+# openxr (docs/vr.md): the Khronos OpenXR loader (Apache 2.0) beside the exe for VR headsets (--vr openxr), with its
+# licence text in licenses\ (NOTICE.md). A build without the SDK (HOTD_OPENXR off) has none: the preview only
+if (Test-Path -LiteralPath (Join-Path $rel "openxr_loader.dll")) {
+    Copy-One (Join-Path $rel "openxr_loader.dll") "bin\openxr_loader.dll"
+    Copy-One (Join-Path $repo "docs\release\LICENSE-OpenXR-Apache-2.0.txt") "licenses\OpenXR-LICENSE.txt"
+} else {
+    Write-Warning "no openxr_loader.dll in $rel (OpenXR SDK not found): the package has no VR headset support"
 }
 # relprep: the Build Tools' folder, else any Visual Studio 2022 vswhere finds (a GitHub runner has Enterprise)
 $vsRoots = @("C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools")
@@ -320,10 +373,10 @@ $readme = Join-Path $Out "README.txt"
 $pv = ((Get-Content -LiteralPath (Join-Path $Build "CMakeCache.txt") -ErrorAction SilentlyContinue) | Where-Object { $_ -like "CMAKE_PROJECT_VERSION:*" }) -replace '^[^=]*=', ''
 (Get-Content -LiteralPath $readme -Raw).Replace("@VERSION@", $(if ($pv) { "v$pv" } else { "" })) | Set-Content -LiteralPath $readme -Encoding ascii -NoNewline
 # the repo's shipped data (our own, no game data): data\ui (logo2: the Remake menu's "ReWrithe" wordmark, made with
-# Special Elite, Apache 2.0: NOTICE.md), data\fonts (Noto Sans for Korean / Japanese / Arabic / Hebrew, OFL.txt),
-# data\lang (the language files: en / ko / ja / ar / he), data\mods (the ragdoll mod and the example mod); every file
+# Special Elite, Apache 2.0: NOTICE.md), data\fonts (Noto Sans for Korean / Japanese / Chinese / Arabic / Hebrew /
+# Cyrillic, OFL.txt), data\lang (the language files: en / ko / ja / zh / ru / ar / he ...), data\mods (the ragdoll mod and the example mod); every file
 # the repo has there, so a new one comes along by itself
-foreach ($d in "ui", "fonts", "lang", "mods") {
+foreach ($d in "ui", "fonts", "lang", "mods", "vr") {   # (vr: vr.ini, the VR settings: docs/vr.md)
     $src = Join-Path $repo "data\$d"
     if (-not (Test-Path -LiteralPath $src)) { continue }
     Get-ChildItem -LiteralPath $src -Recurse -File | ForEach-Object {
@@ -331,6 +384,16 @@ foreach ($d in "ui", "fonts", "lang", "mods") {
         $dst = Join-Path $Out "data\$d\$rel"
         New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
         Copy-Item -LiteralPath $_.FullName -Destination $dst -Force
+    }
+}
+# -Release: the modes left out of the release builds (Typing of the Dead 0, Horde) are not shown anywhere: their menu
+# texts leave the language files too (the user, 2026-11-03: "don't even show them"); their data folders are not copied
+if ($Release) {
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    Get-ChildItem -LiteralPath (Join-Path $Out "data\lang") -Filter *.txt -File | ForEach-Object {
+        $lines = [IO.File]::ReadAllLines($_.FullName, $utf8)
+        $keep = $lines | Where-Object { $_ -notmatch '^\s*#' -and $_ -match ' = ' -and ($_ -split ' = ', 2)[0] -match '(?i)typing of the dead|totd|horde' }
+        if ($keep) { [IO.File]::WriteAllLines($_.FullName, ($lines | Where-Object { $keep -notcontains $_ }), $utf8) }
     }
 }
 # the license and the notice (what the license covers; no game data)

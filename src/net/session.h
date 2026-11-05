@@ -82,7 +82,7 @@ struct Settings {
     uint8_t players = 1;        // 1-2 at the start
     uint8_t models = 0;         // 0 arcade, 1 PC
     uint8_t difficulty = 2;     // 0-4
-    uint8_t lives = 0;          // 0-11 (the launcher's lives setting)
+    uint8_t lives = 0;          // 0-11 (the launcher's lives setting) or a (start, most) pair's code (game/lives.h, #30)
     uint8_t blood = 0;          // 0-5 (the launcher's blood setting)
     uint8_t sound = 0;          // 0-2 (LaunchConfig::sound)
     uint8_t livesKept = 0, cuts = 1, defaultRoute = 0, continueChapters = 0, chapterStart = 1;

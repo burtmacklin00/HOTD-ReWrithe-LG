@@ -1301,6 +1301,32 @@ all in tools/ghidra/types.tsv with every field used.
   therefore another version: the PC release (no game-mode test, above) most likely. PM: the damage is multiplied by the
   character's damage factor and truncated (`pc_float_chop`) before it is added. PC sound cues 0x37 (sparks) / 0x20
   (class 17) for the arcade's 0xA0122A / 0xA0120A.
+- **The prologue's sewer corpses (Revision A data edit; demo, 2026-11-03).** The "1998.12.18" prologue (mode 9,
+  chapter slot 5, event 0; PC EVTALL.RBH list 5 event 0) scene 6 is the sewer: the PC's script there is
+  `BGTB 16, GGCOL 6 110, GGCOL 8 94, GGCOL 9 106, ENTB 0xFE310 0xFE340, GGSET 24, GGSET 57, ENTB3 ...` (PC offset 668);
+  Revision A's ROM script (0xFDC3C..) has the same instructions **without the ENTB** (GGCOL 9 at 0xFDC54 is followed
+  by GGSET 24 at 0xFDC64). The two records are still in the ROM (0xFE310: kind 118, type 17, action 1, at
+  (-72, -75.5, 219), heading 0x6800; 0xFE340: action 0, (-63, -75.5, 140), 0x8800), referenced by nothing, as are two
+  more kind-118 records 0xF0624 / 0xF0654 (not in the PC data at all). Kind 118 (`kind118_corpse` 0x5C0A0 /
+  PC 0x4AD744, frame 0x5BF80 / 0x4AD678): kind 101's lying researcher (the `sitai_ken` models 0x5E8 / 0x5E6, with the
+  blood pool; 0x5E9 / 0x5E7 when blood_color != 0), kept until scene_number changes; in Revision A nothing spawns it.
+  The scene's camera (path 110) still ends on the empty floor where the first lies. No code test is involved (the PC
+  routines match the arcade's, plus the PC's draw-skip flag 0x5CD35C). ReWrithe: under **Attract Gore** (on) the
+  event interpreter runs that ENTB when the script reaches 0xFDC64 in mode 9 (`evt_attract_restore`, event.cpp); off
+  = Revision A (no spawn; frames identical to before).
+- **The attract, Revision A against the PC, everything compared (2026-11-04).** Every event of all 7 lists (ROM
+  0xE0000 against EVTALL.RBH.orig), instruction by instruction, with the records behind ENTB / ENTB2 / ENTB3 / ENTBE /
+  ET* / WLTB pointers compared by content (the PC packs its records tighter; only the packing differs), and all 142
+  camera paths (copro data against CAMALL.RBH, keys within rounding). Differences: (1) the prologue's sewer ENTB
+  (above); (2) **camera path 107** (the prologue's scene 7, the hostage held by two zombies, frames 0-94): the PC's
+  last key is higher (frame 100: eye y 13.79 / look-at y 18; ROM 10.79 / 16, copro words 0xC803 / 0xC7CC / 0xC7D0),
+  so its close-up ends with the raised hand in the picture; (3) the gore's game-mode-4 test (bullet damage row).
+  Outside the attract, not censorship: Chapter 2 event 10 SKYTB 1 (PC 0), Chapter 4 event 4 one more SNDON in the
+  PC, the ending list 6 (event 3 ENTB2 kind 0x6F, PC 0x6B; events 4-6 the PC waits 240 / 120 frames where the ROM
+  repeats a camera hold). The recorded demos (Chapter 1 events 5 / 15, Chapter 2 event 9) run the same scripts and
+  records in both. Two more kind-118 records in Chapter 2 event 9's data (0xF0624 / 0xF0654) are in neither script
+  (and not in the PC data): left out. ReWrithe, Attract Gore on: (1), (2) (`camera_path_eval` reads the PC's keys,
+  `Tgp::set_patch`), (3); off = Revision A.
 - **Player hits** (`player_hit` 0x6410 (player, shake, side), `player_hit_lose_life` 0x6520 (player, shake, side,
   ignore invulnerability, invulnerable frames)): a hit counts only when the player is in play (in game mode 4 the
   player state must be 1, 4 or 5; unverified which states those are on screen), not invulnerable

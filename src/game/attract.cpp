@@ -1180,8 +1180,10 @@ void Runtime::attract_game_new()
             ++players;
     if (players == 0)
         players = 1;
+    // GitHub #29: player 2's start alone plays in player 2's seat, as the arcade (was: player 1's seat always)
+    const int seat = players == 1 && mem.at<Player>(G::players, 0).state == 9 && mem.at<Player>(G::players, 1).state != 9 ? 1 : 0;
     if (prologueForGame_ == 0)
-        prologuePlayers_ = players;
+        prologuePlayers_ = players, prologueSeat_ = seat;
     // PC models: the PC release plays the prologue after the start, before the chapter card (PC 0x43BB28 =
     // set_mode(9)); a start during it skips to the chapter
     if (pcModels && prologueForGame_ == 0 && modeBeforeSet_ != 9) {   // (not when it was just playing)
@@ -1196,9 +1198,10 @@ void Runtime::attract_game_new()
         return;
     }
     players = prologuePlayers_;
+    soloSeat = players == 1 ? prologueSeat_ : 0;
     prologueForGame_ = 0;
     if (log)
-        log("attract: start pressed, Chapter 1 with " + std::to_string(players) + " player(s)");
+        log("attract: start pressed, Chapter 1 with " + std::to_string(players) + " player(s)" + (soloSeat ? " (player 2's seat)" : ""));
     attract = false;
     textureArea = -1;
     for (uint32_t p = 0; p < 2; ++p)   // the demo players' scores (a player joining later starts from 0)

@@ -31,7 +31,7 @@ const char* sightStyleName(int style)
 {
     static const char* const k[kSightStyles] = {"auto (follows the models)", "arcade style", "PC (its sight)", "simple cross",
                                                 "ring + dot", "dotted ring", "corner brackets", "gap cross", "pointer", "custom",
-                                                "capped cross"};
+                                                "capped cross", "off (none drawn)"};
     return k[std::clamp(style, 0, kSightStyles - 1)];
 }
 
@@ -40,10 +40,10 @@ int sightStyleFromWord(const std::string& word, std::string& custom)
     const std::string w = lower(word);
     if (w.rfind("custom:", 0) == 0) { custom = word.substr(7); return kSightCustom; }
     static const char* const k[kSightStyles] = {"auto", "arcade", "pc", "cross", "ring", "", "brackets", "gap", "", "",
-                                                "capped"};   // 5 / 8 removed, 9 custom:<name>
+                                                "capped", "off"};   // 5 / 8 removed, 9 custom:<name>
     for (int i = 0; i < kSightStyles; ++i)
         if (k[i][0] && w == k[i]) return i;
-    return -1;
+    return w == "none" ? kSightOff : -1;
 }
 
 float sightSizeFactor(int step) { static const float f[kSizeSteps] = {0.6f, 0.8f, 1.0f, 1.3f, 1.6f}; return f[std::clamp(step, 0, kSizeSteps - 1)]; }
@@ -95,8 +95,8 @@ void nextSight(int& style, std::string& custom, const std::vector<CustomSight>& 
         custom.clear();
         return;
     }
-    // the built-in styles in order, the capped cross (10) after the gap cross (7), then the custom sets
-    int n = style == 7 ? kSightCapped : style == kSightCapped ? kSightCustom : style + 1;
+    // the built-in styles in order, the capped cross (10) after the gap cross (7), Off (11) after it, then the custom sets
+    int n = style == 7 ? kSightCapped : style == kSightCapped ? kSightOff : style == kSightOff ? kSightCustom : style + 1;
     if (sightStyleKept(n) != n) ++n;   // skip the removed styles (5, 8)
     if (n != kSightCustom) { style = n; return; }
     if (!sets.empty()) { style = kSightCustom; custom = sets[0].name; return; }
