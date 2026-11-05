@@ -15228,20 +15228,23 @@ int main(int argc, char* argv[])
                 for (int k = 0; k < 4; ++k) {
                     std::string e;
                     wlOk = wlOk && wl[k].init(e);
-                    wl[k].setStyle(150, kCol[k][0], kCol[k][1], kCol[k][2]);
+                    wl[k].setStyle(110, kCol[k][0], kCol[k][1], kCol[k][2]);
                     wl[k].translate = false;
                 }
             }
             const float gw = cfg.aspect == 1 ? std::min(float(ww), float(wh) * 496.0f / 384.0f)
                            : cfg.aspect == 2 ? std::min(float(ww), float(wh) * 1.6f) : float(ww);
-            const float x0 = (float(ww) - gw) * 0.5f + wh * 0.02f, x1 = (float(ww) + gw) * 0.5f - wh * 0.02f;
+            // (user 2026-11-05: the name covered the bullets): beside the rounds, past the pistol's six bullets and the
+            // other weapons' count (cell 16 of the arcade's 62 from the HUD's own edge), on the bullets' row
+            const float su = float(wh) / 384.0f;
+            const float x0 = (float(ww) - gw) * 0.5f + 16.0f * 8.0f * su, x1 = (float(ww) + gw) * 0.5f - 16.0f * 8.0f * su;
             for (int p = 0; p < rt.seat_count() && wlOk; ++p) {
                 const port::a::Player& wpl = rt.mem.at<port::a::Player>(rt.player_rec(p));
                 if (wpl.state != 5) continue;
                 // the name (the rounds: the HUD's own bullets and count, Hud::drawArsenalAmmo)
                 wl[p].setText({game::Runtime::lgWeaponName(rt.lgWeapon[p])}, wh >= 1000 ? 2 : 1);
                 const bool left = (p & 1) == 0, top = p >= 2;
-                wl[p].drawAnchored(ww, wh, left ? x0 : x1, top ? wh * 0.19f : wh * 0.80f, left ? 0.0f : 1.0f, 0.5f);
+                wl[p].drawAnchored(ww, wh, left ? x0 : x1, top ? (1 * 8 + 8) * su : (0x26 * 8 + 8) * su, left ? 0.0f : 1.0f, 0.5f);
             }
         }
         if (rt.lgModes.vampire && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && !rt.clear.active &&
