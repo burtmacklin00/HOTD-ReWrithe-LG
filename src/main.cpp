@@ -1059,6 +1059,7 @@ static hotd::game::SonicClock gSonic;
 // Light Gun Edition: Married Mode (Killer Mods): this game's computer teammates in the seats not set to one (Normal);
 // a seat's teammate level: its own setting, else Married Mode's
 static int gMarriedBot[4] = {0, 0, 0, 0};
+static std::vector<std::string> gActiveModNames;   // the mods (Options > Mods) on now: their names (the start banner)
 static int seatBotOf(const hotd::game::LaunchConfig& c, int p) { return c.seatBot[p & 3] ? c.seatBot[p & 3] : gMarriedBot[p & 3]; }
 // the top 10's file of a preset: ranking.bin (off: the arcade's speed), ranking_frenzy.bin, ranking_overkill.bin, ...
 // The Typing of the Dead 0: its own, ranking_totd.bin, ranking_totd_frenzy.bin, ...
@@ -4107,6 +4108,9 @@ int main(int argc, char* argv[])
             for (ModPack& p : lp) p.id = "lang/" + lang::code() + "/" + p.id;
             act.insert(act.begin(), lp.begin(), lp.end());
         }
+        gActiveModNames.clear();   // (Light Gun Edition: the start banner's names)
+        for (const ModPack& p : act)
+            if (p.id.rfind("lang/", 0) != 0) gActiveModNames.push_back(p.name.empty() ? p.id : p.name);
         std::string names;
         for (const ModPack& p : act) names += (names.empty() ? "" : ", ") + p.id;
         SDL_Log("[mods] %zu mod(s) found, active: %s", allPacks.size(), names.empty() ? "none" : names.c_str());
@@ -4710,6 +4714,7 @@ int main(int argc, char* argv[])
         // title / attract demo: as normal too, below)
         r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0, r.lgMachineGun = false;   // (online: none)
         r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
+        r.lgBanner.clear();
         if (!gNet) {
             // Arsenal Mode: each player's own weapon (the middle button), every player starts with the pistol; the
             // whole-game Shotgun / Machine Gun modes are its weapons then
@@ -4721,6 +4726,27 @@ int main(int argc, char* argv[])
             r.lg_hostage_crisis = cfg.hostageCrisis, r.lg_crisis_fail = false;
             r.lg_roulette = cfg.roulette && !bossModeOpt;
             r.lgWeakFixed_.clear();
+            {   // the start banner (user 2026-11-05): the mods on (Options > Mods) and the Killer Mods on, by name
+                std::vector<std::string>& b = r.lgBanner;
+                b = gActiveModNames;
+                auto on = [&b](bool v, const char* n) { if (v) b.push_back(n); };
+                on(cfg.shotgun && !arsenal, "Shotgun Mode");
+                on(cfg.freeFire, "Free Fire");
+                on(cfg.machineGun && !arsenal, "Machine Gun");
+                on(arsenal, "Arsenal Mode");
+                on(cfg.hardcore && !bossModeOpt, "Hardcore");
+                on(cfg.suddenDeath && !bossModeOpt, "Sudden Death");
+                on(cfg.hostageCrisis, "Hostage Crisis");
+                on(cfg.roulette && !bossModeOpt, "Weak Point Mode");
+                on(cfg.exploding, "Exploding Zombies");
+                on(cfg.survival && !bossModeOpt, "Coin-Op Survival");
+                on(cfg.flashlight, "Flashlight Mode");
+                on(cfg.funLook == 1, "Night Vision");
+                on(cfg.funLook == 2, "VHS Camcorder");
+                on(cfg.funLook == 3, "Wireframe");
+                on(cfg.married && !gTotd && !bossModeOpt && gSurvivalArena < 0, "Married Mode");
+                r.lgBannerFrame = 0;
+            }
             r.lg_exploding = cfg.exploding;
             r.lgLook = cfg.funLook == 1 ? 1 : cfg.funLook == 2 ? 3 : cfg.funLook == 3 ? 2 : 0;   // (RenderOptions::look)
             r.lgClock = cfg.survival && !bossModeOpt ? 60.0 : -1.0;
@@ -4862,6 +4888,7 @@ int main(int argc, char* argv[])
                            : chapter == 0 && (titleOpt >= 0 ? titleOpt == 1 : launcher && cfg.title && inputTestFile.empty() && !autoStart);
         if (title) {   // Light Gun Edition: the attract demo as the original plays it (no fun modes)
             r.lgModes = {};
+            r.lgBanner.clear();
             r.lg_one_hit = false, r.lg_hit_scale = 1.0f;
             r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
             r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0, r.lgMachineGun = false;

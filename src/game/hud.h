@@ -204,6 +204,9 @@ private:
     // Light Gun Edition: Coin-Op Survival's clock: the seconds left in the game's own countdown digits (the CONTINUE?
     // ones), top centre of the picture; red and blinking under 10 s
     void drawClock(const Runtime& rt, int ww, int wh);
+    // Light Gun Edition: the mods on in this game (Runtime::lgBanner) for 5 s once play starts: their names in the PC's
+    // menu font, centred, one a line, white and red in turn
+    void drawModBanner(const Runtime& rt, int ww, int wh);
     int seatDy_[2] = {-0x25, -0x25};   // players 3 / 4's band offset as drawSeatHud placed it last
     SeatImg arsenalBullet_[4][2];      // [weapon][arcade, PC]
     SeatImg arsenalDigit_[4][10][2];   // [seat][digit][arcade, PC]

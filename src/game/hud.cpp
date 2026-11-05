@@ -1999,6 +1999,8 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     }
     if (!paused && !clean && rt.coop4_on())   // the 4P mode: players 3 / 4's HUD at the top corners
         drawSeatHud(rt, ww, wh);
+    if (!paused && !clean && !rt.lgBanner.empty())   // Light Gun Edition: the mods on in this game
+        drawModBanner(rt, ww, wh);
     if (!paused && !clean && rt.lgClock >= 0)   // Light Gun Edition: Coin-Op Survival's clock
         drawClock(rt, ww, wh);
     if (!paused && !clean && (rt.lgWeapon[0] >= 0 || rt.lgModes.shotgunShells > 0 || rt.lgMachineGun))   // Light Gun Edition: Arsenal / Shotgun Mode's rounds
@@ -2700,6 +2702,80 @@ void Hud::drawClock(const Runtime& rt, int ww, int wh)
         x += g.w + unit / 4;
     }
     upload(canvas, W, H, ww, wh);
+}
+
+void Hud::drawModBanner(const Runtime& rt, int ww, int wh)
+{
+    port::Mem& mem = rt.mem;
+    if (mem.at<int16_t>(G::game_mode) != 4)
+        return;
+    if (rt.lgBannerFrame == 0)
+        rt.lgBannerFrame = rt.frameCount;   // (from the game's first frame in play)
+    const uint64_t age = rt.frameCount - rt.lgBannerFrame;
+    constexpr uint64_t kShow = 288;   // 5 s of game frames
+    if (age >= kShow)
+        return;
+    const float fade = age + 30 > kShow ? float(kShow - age) / 30.0f : 1.0f;
+    const std::vector<std::string>& L = rt.lgBanner;
+    if (!pcTried_)
+        loadPcSprites();
+    if (!pcSprites_.loaded()) {   // (no PC sprites: the lines as text)
+        static Overlay o;
+        static bool ok = false, tried = false;
+        if (!tried) { tried = true; std::string e; ok = o.init(e); if (ok) o.setStyle(0, 255, 255, 255), o.translate = false; }
+        if (ok) {
+            o.setText(L, wh >= 1000 ? 3 : 2);
+            o.drawAnchored(ww, wh, ww * 0.5f, wh * 0.4f, 0.5f, 0.5f);
+        }
+        return;
+    }
+    const int W = assets::PcSprites::kWidth, H = assets::PcSprites::kHeight;   // (the PC's 640 x 480)
+    rgba_.assign(size_t(W) * H * 4, 0);
+    const int n = int(L.size()), gap = n > 12 ? 24 : 28;
+    const int top = std::max(24, 200 - n * gap / 2);
+    for (int r = 0; r < n; ++r) {
+        auto id = [](char c) { return c > ' ' && c <= '~' ? 0x19D + (c - 0x20) : 0; };   // (the menu's white 24)
+        int width = 0;
+        for (char c : L[size_t(r)])
+            width += id(c) == 0 || pcSprites_.width(id(c)) == 0 ? 8 : pcSprites_.width(id(c)) + 1;
+        int x = (0x280 - width) / 2;
+        const int y = top + r * gap;
+        for (char c : L[size_t(r)]) {
+            if (id(c) == 0 || pcSprites_.width(id(c)) == 0) { x += 8; continue; }
+            pcSprites_.draw(rgba_, id(c), x, y);
+            x += pcSprites_.width(id(c)) + 1;
+        }
+        if (r & 1)   // every second line red (the white letters' shades kept)
+            for (int yy = std::max(0, y - 2); yy < std::min(H, y + gap); ++yy)
+                for (int xx = 0; xx < W; ++xx) {
+                    uint8_t* d = &rgba_[(size_t(yy) * W + size_t(xx)) * 4];
+                    if (!d[3]) continue;
+                    const int l = std::max({d[0], d[1], d[2]});
+                    d[0] = uint8_t(std::min(255, l + 20)), d[1] = uint8_t(l * 12 / 100), d[2] = uint8_t(l * 8 / 100);
+                }
+    }
+    // a black edge round the letters (as the pause menu's: the menu font has none of its own), then the fade
+    std::vector<uint8_t> a(size_t(W) * H, 0);
+    for (size_t p = 0; p < a.size(); ++p) a[p] = rgba_[p * 4 + 3];
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            if (a[size_t(y) * W + size_t(x)]) continue;
+            int edge = 0;
+            for (int dy = -2; dy <= 2 && edge < 255; ++dy)
+                for (int dx = -2; dx <= 2; ++dx) {
+                    const int sx = x + dx, sy = y + dy;
+                    if (sx < 0 || sy < 0 || sx >= W || sy >= H || !a[size_t(sy) * W + size_t(sx)]) continue;
+                    const int d = std::abs(dx) + std::abs(dy);
+                    edge = std::max(edge, std::max(std::abs(dx), std::abs(dy)) <= 1 ? 255 : d <= 3 ? 120 : 0);
+                }
+            if (!edge) continue;
+            uint8_t* d = &rgba_[(size_t(y) * W + size_t(x)) * 4];
+            d[0] = d[1] = d[2] = 0;
+            d[3] = uint8_t(edge);
+        }
+    if (fade < 1.0f)
+        for (size_t p = 3; p < rgba_.size(); p += 4) rgba_[p] = uint8_t(float(rgba_[p]) * fade);
+    upload(rgba_, W, H, ww, wh);
 }
 
 } // namespace hotd::game

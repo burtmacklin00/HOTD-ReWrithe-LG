@@ -427,6 +427,9 @@ public:
     // the looks (Night Vision 1, Wireframe 2, VHS 3: RenderOptions::look); Night Vision: the creatures in heat colours
     int lgLook = 0;
     bool lgSolo = false;
+    // the mods on in this game, their names, shown for 5 s once play starts (user 2026-11-05); the frame it started
+    std::vector<std::string> lgBanner;
+    mutable uint64_t lgBannerFrame = 0;
     bool lgMachineGun = false;   // Machine Gun mode (not Arsenal's): its rounds drawn as the machine gun's (silver)   // a one-player mode (The Typing of the Dead 0): seats 2-4 never join
     // Coin-Op Survival: the clock (seconds left; < 0 off), what was counted so far, the last change (shown by the clock)
     double lgClock = -1;
