@@ -325,7 +325,7 @@ struct LaunchConfig {
     bool flashlight = false;   // the screen dark, each player's gun a light where it aims (draws only)
     bool bigHeads = false;     // the creatures' heads drawn larger (draws only)
     bool shotgun = false;      // a wider blast (the shot test's radius x2.5), 3 shells a load
-    bool partyBoard = true;    // co-op: each player's score, shots, hits and accuracy at a chapter's end, the MVP
+    bool partyBoard = false;   // (off by default, user 2026-11-05) co-op: each player's score, shots, hits and accuracy at a chapter's end, the MVP
     bool hardcore = false;     // one life, no continues, its own high scores
     bool freeFire = false;     // unlimited ammo, no reloading
     bool machineGun = false;   // hold the trigger: automatic fire (about 9 shots a second), unlimited ammo
