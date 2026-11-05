@@ -758,7 +758,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { c.hardcore = !c.hardcore; save(); },
                      "one life each, no continues, no joining back in; its own high scores"});
         killerBy(r);
-        r.push_back({"Sudden Death", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { c.suddenDeath = !c.suddenDeath; save(); },
+        r.push_back({"One Shot Kill", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { c.suddenDeath = !c.suddenDeath; save(); },
                      "one shot kills any zombie (bosses fight as normal); lives and continues as a normal game. Its own high scores"});
         killerBy(r);
         r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { c.hostageCrisis = !c.hostageCrisis; save(); },

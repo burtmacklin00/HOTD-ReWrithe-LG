@@ -4741,7 +4741,7 @@ int main(int argc, char* argv[])
                 on(cfg.machineGun && !arsenal, "Machine Gun");
                 on(arsenal, "Arsenal Mode");
                 on(cfg.hardcore && !bossModeOpt, "Hardcore");
-                on(cfg.suddenDeath && !bossModeOpt, "Sudden Death");
+                on(cfg.suddenDeath && !bossModeOpt, "One Shot Kill");
                 on(cfg.hostageCrisis, "Hostage Crisis");
                 on(cfg.roulette && !bossModeOpt, "Weak Point Mode");
                 on(cfg.exploding, "Exploding Zombies");
@@ -15364,48 +15364,92 @@ int main(int argc, char* argv[])
             }
         }
         if (!rt.lgBlasts.empty() && !gScene.active()) {
-            // Light Gun Edition: Exploding Zombies: each blast: a fireball and its rings growing and fading (the shot
-            // test's projection), a flash at the start
+            // Light Gun Edition: the blasts (Exploding Zombies, Arsenal's rocket; user 2026-11-05: "an actual explosion"):
+            // a fireball flipbook made once (fractal noise: a white-hot core, yellow / orange / red flames, black smoke
+            // rolling out), each blast as a main ball and three smaller ones a moment later round it, a flash at the start
             static Overlay fire, flash;
-            static SkipRing ring;
             static bool bOk = false, bTried = false;
+            constexpr int FS = 112, FN = 24;
+            static std::vector<std::vector<uint8_t>> book;
             if (!bTried) {
                 bTried = true;
                 std::string e;
-                bOk = fire.init(e) && flash.init(e) && ring.init(e);
-                if (bOk) flash.setImage({255, 200, 120, 255}, 1, 1);
+                bOk = fire.init(e) && flash.init(e);
+                auto hash = [](int x, int y, int z) {
+                    uint32_t h = uint32_t(x) * 374761393u + uint32_t(y) * 668265263u + uint32_t(z) * 2147483647u;
+                    h = (h ^ (h >> 13)) * 1274126177u;
+                    return float((h ^ (h >> 16)) & 0xFFFF) / 65535.0f;
+                };
+                auto noise = [&](float x, float y, float z) {
+                    const int xi = int(std::floor(x)), yi = int(std::floor(y)), zi = int(std::floor(z));
+                    const float fx = x - xi, fy = y - yi, fz = z - zi;
+                    auto sm = [](float t) { return t * t * (3 - 2 * t); };
+                    const float u = sm(fx), v = sm(fy), w = sm(fz);
+                    float c[2];
+                    for (int k = 0; k < 2; ++k) {
+                        const float a0 = hash(xi, yi, zi + k) + (hash(xi + 1, yi, zi + k) - hash(xi, yi, zi + k)) * u;
+                        const float a1 = hash(xi, yi + 1, zi + k) + (hash(xi + 1, yi + 1, zi + k) - hash(xi, yi + 1, zi + k)) * u;
+                        c[k] = a0 + (a1 - a0) * v;
+                    }
+                    return c[0] + (c[1] - c[0]) * w;
+                };
+                auto fbm = [&](float x, float y, float z) {
+                    float v = 0, amp = 0.5f, f = 1;
+                    for (int o = 0; o < 4; ++o, amp *= 0.5f, f *= 2.0f) v += amp * noise(x * f, y * f, z * f);
+                    return v / 0.9375f;
+                };
+                for (int fr = 0; fr < FN; ++fr) {
+                    const float t = float(fr) / float(FN - 1);
+                    std::vector<uint8_t> img(size_t(FS) * FS * 4, 0);
+                    const float r = 0.30f + 0.62f * std::sqrt(t);
+                    for (int y = 0; y < FS; ++y)
+                        for (int x = 0; x < FS; ++x) {
+                            const float dx = (x + 0.5f) / FS * 2 - 1, dy = (y + 0.5f) / FS * 2 - 1, d = std::sqrt(dx * dx + dy * dy);
+                            const float n = fbm(dx * 3.4f + 7.0f, dy * 3.4f - t * 1.5f + 3.0f, t * 2.2f);
+                            const float edge = r * (0.62f + 0.70f * n);
+                            if (d >= edge) continue;
+                            const float heat = std::clamp((1.0f - d / edge) * (1.35f - t * 1.9f) + (n - 0.5f) * 0.6f, 0.0f, 1.0f);
+                            static const float kRamp[6][3] = {{48, 44, 40}, {120, 30, 8}, {225, 80, 15}, {255, 160, 40}, {255, 225, 120}, {255, 252, 230}};
+                            const float k = heat * 5.0f;
+                            const int i0 = std::min(4, int(k));
+                            const float f = k - float(i0);
+                            uint8_t* q = &img[(size_t(y) * FS + x) * 4];
+                            for (int c = 0; c < 3; ++c)
+                                q[c] = uint8_t(kRamp[i0][c] + (kRamp[i0 + 1][c] - kRamp[i0][c]) * f);
+                            float al = std::clamp((edge - d) / (edge * 0.18f), 0.0f, 1.0f);
+                            if (heat < 0.2f) al *= 0.55f + 2.0f * heat;    // (the smoke thinner)
+                            al *= t < 0.55f ? 1.0f : std::max(0.0f, 1.0f - (t - 0.55f) / 0.45f);
+                            q[3] = uint8_t(std::clamp(al, 0.0f, 1.0f) * 255);
+                        }
+                    book.push_back(std::move(img));
+                }
             }
             for (const auto& b : rt.lgBlasts) {
                 if (!bOk || b.z <= 1.0f) continue;
-                const float t = std::clamp(float(rt.frameCount - b.frame) / 30.0f, 0.0f, 1.0f);
-                if (t >= 1.0f) continue;
+                const float age = float(rt.frameCount - b.frame);
                 float px, py, qx, qy;
                 view->fromArcade(496.0f * b.x / b.z, 496.0f * b.y / b.z, ww, wh, px, py);
                 view->fromArcade(496.0f * (b.x + 45.0f) / b.z, 496.0f * b.y / b.z, ww, wh, qx, qy);
-                const float reach = std::clamp(std::fabs(qx - px) * 2.0f, wh * 0.10f, wh * 0.9f);
-                if (t < 0.12f) {   // the flash
+                const float reach = std::clamp(std::fabs(qx - px) * 2.2f, wh * 0.14f, wh * 0.9f);
+                if (age < 4.0f) {   // the flash
                     static std::vector<uint8_t> one(4);
-                    one = {255, 200, 120, uint8_t(110 * (1.0f - t / 0.12f))};
+                    one = {255, 220, 150, uint8_t(90 * (1.0f - age / 4.0f))};
                     flash.setImage(one, 1, 1);
                     flash.drawIn(ww, wh, 0, 0, float(ww), float(wh));
                 }
-                constexpr int FS = 64;
-                static std::vector<uint8_t> img(size_t(FS) * FS * 4);
-                for (int y = 0; y < FS; ++y)
-                    for (int x = 0; x < FS; ++x) {
-                        const float dx = (x + 0.5f) / FS * 2 - 1, dy = (y + 0.5f) / FS * 2 - 1, d = std::sqrt(dx * dx + dy * dy);
-                        uint8_t* q = &img[size_t(y * FS + x) * 4];
-                        const float core = std::clamp(1.0f - d, 0.0f, 1.0f);
-                        q[0] = 255, q[1] = uint8_t(90 + 165 * core * core * (1.0f - t)), q[2] = uint8_t(40 * core * (1.0f - t));
-                        q[3] = uint8_t(std::clamp(core * 1.6f, 0.0f, 1.0f) * (1.0f - t) * 235);
-                    }
-                fire.setImage(img, FS, FS, true);
-                const float fs = reach * (0.35f + 0.75f * t);
-                fire.drawIn(ww, wh, px - fs * 0.5f, py - fs * 0.5f, fs, fs);
-                ring.setColor(1.0f, 0.55f, 0.1f, 1.0f - t);
-                ring.draw(ww, wh, px, py, reach * (0.4f + 1.0f * t), 1.0f);
-                ring.setColor(1.0f, 0.9f, 0.4f, (1.0f - t) * 0.8f);
-                ring.draw(ww, wh, px, py, reach * (0.2f + 0.7f * t), 1.0f);
+                // the puffs: (delay frames, offset x / y in the reach, size)
+                const uint32_t seed = uint32_t(b.frame * 2654435761u) ^ uint32_t(px * 7.0f);
+                for (int k = 0; k < 4; ++k) {
+                    const float delay = k == 0 ? 0.0f : float(2 + 3 * k);
+                    const float tt = (age - delay) / 40.0f;
+                    if (tt < 0.0f || tt >= 1.0f) continue;
+                    const float ang = float((seed >> (k * 5)) & 31) / 31.0f * 6.2832f;
+                    const float off = k == 0 ? 0.0f : reach * 0.28f;
+                    const float sz = reach * (k == 0 ? 1.0f : 0.62f);
+                    const float cx = px + std::cos(ang) * off, cy = py + std::sin(ang) * off * 0.8f - (k ? reach * 0.05f : 0.0f);
+                    fire.setImage(book[size_t(std::min(FN - 1, int(tt * FN)))], FS, FS, true);
+                    fire.drawIn(ww, wh, cx - sz * 0.5f, cy - sz * 0.5f - tt * reach * 0.15f, sz, sz);
+                }
             }
         }
         // (Coin-Op Survival's clock: the HUD's, Hud::drawClock, in the game's own digits)

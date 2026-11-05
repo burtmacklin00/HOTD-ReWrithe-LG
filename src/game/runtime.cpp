@@ -1156,6 +1156,8 @@ void Runtime::lg_bodies_frame()
             b.part = d.part, b.x = bp.view_pos[0], b.y = bp.view_pos[1], b.z = bp.view_pos[2], b.r = bp.hit_radius;
         }
     }
+    lgBlasts.erase(std::remove_if(lgBlasts.begin(), lgBlasts.end(), [&](const LgBlast& b) { return b.frame + 60 < frameCount; }),
+                   lgBlasts.end());   // (the blasts' puffs: the last one ends 51 frames in)
     if (!lg_exploding)
         return;
     std::map<uint32_t, bool> vol;
@@ -1176,8 +1178,6 @@ void Runtime::lg_bodies_frame()
     for (DrawModel& d : drawList)
         if (d.body != 0 && !d.shadow && lg_volatile(d.body))
             d.ramp = 3;   // the glow
-    lgBlasts.erase(std::remove_if(lgBlasts.begin(), lgBlasts.end(), [&](const LgBlast& b) { return b.frame + 45 < frameCount; }),
-                   lgBlasts.end());
 }
 
 bool Runtime::lg_volatile(uint32_t body) const
