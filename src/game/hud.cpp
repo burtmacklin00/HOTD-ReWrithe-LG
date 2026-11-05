@@ -1999,7 +1999,7 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     }
     if (!paused && !clean && rt.coop4_on())   // the 4P mode: players 3 / 4's HUD at the top corners
         drawSeatHud(rt, ww, wh);
-    if (!paused && !clean && rt.lgWeapon[0] >= 0)   // Light Gun Edition: Arsenal Mode's rounds
+    if (!paused && !clean && (rt.lgWeapon[0] >= 0 || rt.lgModes.shotgunShells > 0))   // Light Gun Edition: Arsenal / Shotgun Mode's rounds
         drawArsenalAmmo(rt, ww, wh);
     if (!paused && !clean && rt.mem.at<uint8_t>(G::max_lives) > 5)   // GitHub #25: "x N" beside the torch
         drawLivesCount(rt, ww, wh);
@@ -2153,7 +2153,7 @@ void Hud::drawArsenalAmmo(const Runtime& rt, int ww, int wh)
     for (int side = 0; side < 2; ++side) {   // the left seats (1, 3) and the right ones (2, 4): each side to its edge
         std::vector<uint8_t> canvas;
         for (int seat = side; seat < rt.seat_count(); seat += 2) {
-            const int w = rt.lgWeapon[seat];
+            const int w = rt.lgWeapon[seat] >= 0 ? rt.lgWeapon[seat] : rt.lgModes.shotgunShells > 0 ? 1 : -1;   // (Shotgun Mode: the shotgun's)
             const port::a::Player& pl = mem.at<port::a::Player>(rt.player_rec(seat));
             if (w <= 0 || pl.state != 5 || mem.u32(G::ammo_enabled) == 0) continue;
             if (canvas.empty()) canvas.assign(size_t(W) * H * 4, 0);

@@ -743,7 +743,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // its name as the Mods page's mods have (local games; online games are always played as normal)
         // Weapons
         r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { c.shotgun = !c.shotgun; save(); },
-                     "each shot hits a much wider area, but the gun holds only 3 shells"});
+                     "each blast hits everything in a wide spread (several zombies at once), but the gun holds only 3 shells"});
         killerBy(r);
         r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { c.freeFire = !c.freeFire; save(); },
                      "unlimited ammo, no reloading (for young players and parties)"});

@@ -4724,7 +4724,7 @@ int main(int argc, char* argv[])
             r.lgModes.flashlight = cfg.flashlight;
             r.lgModes.bigHeads = false;   // (v1.2.0: the Big Head mod, Options > Mods, instead)
             r.lgModes.shotgunShells = cfg.shotgun && !arsenal ? 3 : 0;
-            r.lg_hit_scale = cfg.shotgun && !arsenal ? 2.5f : 1.0f;
+            r.lg_hit_scale = cfg.shotgun && !arsenal ? 3.0f : 1.0f;
             for (int k = 0; k < 4; ++k)
                 r.lgWeapon[k] = arsenal ? 0 : -1;
             if (r.lgModes.hardcore) {

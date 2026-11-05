@@ -939,8 +939,10 @@ void Runtime::lg_modes_frame()
         port::a::Player& pl = mem.at<port::a::Player>(player_rec(p));
         const int w = lgWeapon[p & 3];
         if (w >= 0) {   // Arsenal Mode: the weapon's blast, splash and magazine (a reload refills to it)
-            lg_seat_scale[p & 3] = w == 1 ? 2.5f : w == 3 ? 5.0f : 1.0f;
-            lg_splash[p & 3] = w == 3;
+            // (user 2026-11-05: the shotgun did not feel much different: its spread now hits everything in it, as the
+            // rocket's blast does, a little wider)
+            lg_seat_scale[p & 3] = w == 1 ? 3.0f : w == 3 ? 5.0f : 1.0f;
+            lg_splash[p & 3] = w == 1 || w == 3;
             lg_hide_bullets[p & 3] = w > 0;
             const int mag = lgMagazine(w);
             if (pl.rounds == pm_full_rounds(p) && lgLastRounds_[p & 3] < pl.rounds && mag > pl.rounds)
@@ -957,6 +959,11 @@ void Runtime::lg_modes_frame()
             }
             if (lgModes.shotgunShells > 0 && pl.rounds > lgModes.shotgunShells)   // Shotgun Mode: a load is 3 shells
                 pl.rounds = uint8_t(lgModes.shotgunShells);
+            // Shotgun Mode as Arsenal's shotgun: everything in the spread is hit; the red shells and their count drawn by
+            // the HUD (the game's own six bullets erased: a reload drew six and three were left on the screen)
+            lg_splash[p & 3] = lgModes.shotgunShells > 0;
+            lg_hide_bullets[p & 3] = lgModes.shotgunShells > 0;
+            lg_seat_scale[p & 3] = 1.0f;
         }
         if (lgModes.vampire) {
             // Vampire Mode: the meter drains in about 15 s in play; a hit gives 8 %, a kill 30 %; empty: a life lost (as an
