@@ -768,7 +768,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "each zombie has one weak point, marked by a pulsing target: only shots there hurt it (bosses fight as normal)"});
         killerBy(r);
         r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { c.exploding = !c.exploding; save(); },
-                     "some zombies glow orange: shoot them in the head! Hit one anywhere else and it blows up: everything near it and you get hurt"});
+                     "about one zombie in three glows orange. Head shot: it blows up every zombie on the screen! Anywhere else: only it blows up, and it hurts you"});
         killerBy(r);
         r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { c.survival = !c.survival; save(); },
                      "a 60 s clock: kills +2 s, rescues +15 s, a hit -10 s, a miss -1.5 s; time up = game over. Its own high scores"});

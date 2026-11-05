@@ -834,8 +834,8 @@ void Runtime::frame_one()
     for (uint32_t k = 0; k < 12; ++k)
         camera[k] = mem.f32(slot + 4 * k);
     ragdoll_frame();   // the Ragdoll mod (game/ragdoll.h): the dead bodies' drawn poses (draws only; after the camera: it needs it)
-    if (lg_exploding || lgLook == 1)
-        lg_bodies_frame();   // Light Gun Edition: Exploding Zombies / Night Vision (the bodies, their colours)
+    if (lg_exploding || lgLook == 1 || lgWeapon[0] >= 0)
+        lg_bodies_frame();   // (Arsenal: the rocket's targets)   // Light Gun Edition: Exploding Zombies / Night Vision (the bodies, their colours)
     if (lg_roulette)
         lg_roulette_frame();   // Light Gun Edition: Weak-Point Roulette (the glowing parts for the next shots)
     if (lgModes.bigHeads)
@@ -1143,7 +1143,7 @@ void Runtime::lg_bodies_frame()
             vol[b.body] = it->second;
         } else {
             lgVolSeed_ = lgVolSeed_ * 1664525u + 1013904223u;
-            vol[b.body] = (lgVolSeed_ >> 16) % 100 < 25;
+            vol[b.body] = (lgVolSeed_ >> 16) % 100 < 35;   // (about one zombie in three)
         }
     }
     lgVol_.swap(vol);
@@ -1162,9 +1162,36 @@ bool Runtime::lg_volatile(uint32_t body) const
     return lg_exploding && it != lgVol_.end() && it->second && !lgBoomed_.count(body);
 }
 
-// the shot (shot_resolve): a glowing zombie hit, not on its head: it blows up; every creature within the blast is hit
-// by the shooter (zombies with one hit point left: they die; hostages / scientists: shot, the penalty as usual), and
-// glowing ones in it go off too (a chain); the shooter loses a life. The bosses' fights: hits only
+// a body taken out by a blast: hit by the shooter on its biggest part (as a shot there); a zombie with one hit point
+// left, so the hit kills (the bosses' fights: hits only)
+void Runtime::lg_blast_hit(int player, const LgBody& b)
+{
+    const uint32_t bit = 1u << ((player & 1) + 1);
+    port::a::BodyPart& bp = mem.at<port::a::BodyPart>(b.part);
+    bp.flags |= bit | 0x100u;
+    mem.at<port::a::Obj>(b.body).flags |= bit | 0x100u;
+    if (coop4_on()) {
+        coop4_hit_add(b.part, player);
+        coop4_hit_add(b.body, player);
+    }
+    if (lgZombieType(b.type) && mem.at<uint8_t>(0x543530) == 0 && mem.at<int16_t>(b.body + 0x70) > 1)
+        mem.at<int16_t>(b.body + 0x70) = 1;
+}
+
+// every zombie on the screen blown up by the shooter (a blast drawn on each); bodies blown up here glow no more
+void Runtime::lg_blast_all(int player)
+{
+    for (const LgBody& b : lgBodies_) {
+        if (!lgZombieType(b.type))
+            continue;   // (zombies only: never the hostages / scientists)
+        lgBoomed_.insert(b.body);
+        lgBlasts.push_back({b.x, b.y, b.z, frameCount});
+        lg_blast_hit(player, b);
+    }
+}
+
+// the shot (shot_resolve): a glowing zombie hit (user 2026-11-05): on its head, it blows up with every zombie on the
+// screen (the reward); anywhere else, only it blows up, and the blast hurts the shooter (a life, as an enemy's hit)
 void Runtime::lg_explode(int player, uint32_t part)
 {
     if (!mem.mapped(part))
@@ -1174,48 +1201,26 @@ void Runtime::lg_explode(int player, uint32_t part)
     if (!lg_volatile(body) || !mem.mapped(body))
         return;
     const int type = mem.at<int16_t>(body + 0xCC);
-    if (type >= 0 && type <= 0x7F && hp.role >= 0 && hp.role < 31 &&
-        mem.at<int8_t>(0x1184E0u + uint32_t(type) * 0xF8 + uint32_t(hp.role) * 8 + 3) == 1)
-        return;   // a head shot: a clean kill
-    static const float kReach = [] { const char* e = std::getenv("HOTD_BLAST_R"); return e ? float(std::atof(e)) : 45.0f; }();
-    const bool bossUp = mem.at<uint8_t>(0x543530) != 0;
-    const uint32_t bit = 1u << ((player & 1) + 1);
-    // (user 2026-11-04: "you should be punished if you don't shoot them in the head"): the shooter is caught in it: a
-    // life lost, as an enemy's hit (the shake, 90 frames safe; chains cost no more)
-    player_hit_lose_life(player, 1, 0, 1, 0x5A);
-    std::vector<uint32_t> todo = {body};
-    while (!todo.empty()) {
-        const uint32_t b0 = todo.back();
-        todo.pop_back();
-        if (lgBoomed_.count(b0))
-            continue;
-        lgBoomed_.insert(b0);
-        float cx = 0, cy = 0, cz = 0;
-        bool found = false;
-        for (const LgBody& b : lgBodies_)
-            if (b.body == b0) cx = b.x, cy = b.y, cz = b.z, found = true;
-        if (!found) {
-            if (b0 != body) continue;
-            cx = hp.view_pos[0], cy = hp.view_pos[1], cz = hp.view_pos[2];
-        }
-        lgBlasts.push_back({cx, cy, cz, frameCount});
-        for (const LgBody& b : lgBodies_) {
-            const float dx = b.x - cx, dy = b.y - cy, dz = b.z - cz;
-            if (dx * dx + dy * dy + dz * dz > (kReach + b.r) * (kReach + b.r))
-                continue;
-            port::a::BodyPart& bp = mem.at<port::a::BodyPart>(b.part);
-            bp.flags |= bit | 0x100u;
-            mem.at<port::a::Obj>(b.body).flags |= bit | 0x100u;
-            if (coop4_on()) {
-                coop4_hit_add(b.part, player);
-                coop4_hit_add(b.body, player);
-            }
-            if (lgZombieType(b.type) && !bossUp && mem.at<int16_t>(b.body + 0x70) > 1)
-                mem.at<int16_t>(b.body + 0x70) = 1;   // (the hit kills)
-            if (lg_volatile(b.body))
-                todo.push_back(b.body);
-        }
+    const bool head = type >= 0 && type <= 0x7F && hp.role >= 0 && hp.role < 31 &&
+                      mem.at<int8_t>(0x1184E0u + uint32_t(type) * 0xF8 + uint32_t(hp.role) * 8 + 3) == 1;
+    if (head) {
+        lg_blast_all(player);
+        return;
     }
+    lgBoomed_.insert(body);
+    LgBody me{body, part, hp.view_pos[0], hp.view_pos[1], hp.view_pos[2], hp.hit_radius, type};
+    for (const LgBody& b : lgBodies_)
+        if (b.body == body) me = b;
+    lgBlasts.push_back({me.x, me.y, me.z, frameCount});
+    lg_blast_hit(player, me);
+    player_hit_lose_life(player, 1, 0, 1, 0x5A);
+}
+
+// Arsenal Mode's rocket launcher (user 2026-11-05): every shot fired kills every zombie on the screen
+void Runtime::lg_fired(int player)
+{
+    if (lgWeapon[player & 3] == 3 && mem.at<int16_t>(G::game_mode) == 4)
+        lg_blast_all(player);
 }
 
 // Coin-Op Survival: the clock runs down in play (not in cut-scenes, the results, the continue countdowns); a kill +2 s,

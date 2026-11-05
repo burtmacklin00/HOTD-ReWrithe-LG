@@ -420,6 +420,9 @@ public:
     uint32_t lgVolSeed_ = 0x9E3779B9u;   // (our own sequence: the game's rand() is not touched)
     bool lg_volatile(uint32_t body) const;
     void lg_explode(int player, uint32_t part) override;
+    void lg_fired(int player) override;
+    void lg_blast_hit(int player, const LgBody& b);
+    void lg_blast_all(int player);
     void lg_bodies_frame();   // (the bodies' list, the glow / heat colours)
     // the looks (Night Vision 1, Wireframe 2, VHS 3: RenderOptions::look); Night Vision: the creatures in heat colours
     int lgLook = 0;

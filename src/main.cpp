@@ -15153,6 +15153,37 @@ int main(int argc, char* argv[])
         }
         view->opt.clearColor = !hud.drawUnder(rt, ww, wh, view->opt.clear);
         view->draw(rt, ww, wh, blendFrom, alpha);   // rate: the 3D picture blended; the HUD / sights below are not
+        if (rt.lg_exploding && !gScene.active() && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && ww > 0 && wh > 0) {
+            // Light Gun Edition: Exploding Zombies: a pulsing orange glow round each glowing zombie (with its orange
+            // colours: plain to see on any renderer and with the PC models)
+            static Overlay halo;
+            static bool hOk = false, hTried = false;
+            if (!hTried) {
+                hTried = true;
+                std::string e;
+                if ((hOk = halo.init(e))) {
+                    constexpr int G = 64;
+                    std::vector<uint8_t> img(size_t(G) * G * 4);
+                    for (int y = 0; y < G; ++y)
+                        for (int x = 0; x < G; ++x) {
+                            const float dx = (x + 0.5f) / G * 2 - 1, dy = (y + 0.5f) / G * 2 - 1, d = std::sqrt(dx * dx + dy * dy);
+                            const float a = std::clamp(1.0f - d, 0.0f, 1.0f);
+                            uint8_t* q = &img[size_t(y * G + x) * 4];
+                            q[0] = 255, q[1] = uint8_t(120 + 100 * a), q[2] = 20, q[3] = uint8_t(a * a * 200);
+                        }
+                    halo.setImage(img, G, G, true);
+                }
+            }
+            const float pulse = 0.85f + 0.15f * std::sin(float(SDL_GetTicks()) * 0.008f);
+            for (const auto& b : rt.lgBodies_) {
+                if (!hOk || !rt.lg_volatile(b.body) || b.z <= 1.0f) continue;
+                float px, py, qx, qy;
+                view->fromArcade(496.0f * b.x / b.z, 496.0f * b.y / b.z, ww, wh, px, py);
+                view->fromArcade(496.0f * (b.x + b.r) / b.z, 496.0f * b.y / b.z, ww, wh, qx, qy);
+                const float sz = std::clamp(std::fabs(qx - px) * 6.0f, wh * 0.06f, wh * 0.6f) * pulse;
+                halo.drawIn(ww, wh, px - sz * 0.5f, py - sz * 0.6f, sz, sz * 1.2f);
+            }
+        }
         if (view->opt.look == 1 && ww > 0 && wh > 0) {
             // Light Gun Edition: Night Vision: the picture's grain (fresh each frame) and the dark round edge of a scope
             static Overlay nv;
