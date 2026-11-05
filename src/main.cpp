@@ -4779,7 +4779,8 @@ int main(int argc, char* argv[])
             r.log = [&r](const std::string& s) { std::printf("[runtime %llu] %s\n", (unsigned long long)r.frameCount, s.c_str()); };
         r.continueUnplayable = continueChapters;
         // the experimental 4P mode (docs/coop4.md): seats 3 / 4; online the host's settings decide (each PC two seats)
-        r.seats4 = (gNet ? gNet->gameSettings().seats == 4 : cfg.players >= 3) ? 1 : 0;
+        r.seats4 = (gNet ? gNet->gameSettings().seats == 4 : cfg.players >= 3 && !gTotd) ? 1 : 0;
+        r.lgSolo = gTotd != 0;   // Light Gun Edition: The Typing of the Dead 0 is player 1's alone (no other gun joins)
         // Game Text (gametext): the JAPAN region's texts, text only (the RAM differs: online the host's for both PCs)
         r.jaText = (gNet ? gNet->gameSettings().gameText : cfg.gameText) == 1;
         r.teammateFlash = cfg.teamFlash;   // Teammate Flashes (draws only; each PC its own)
