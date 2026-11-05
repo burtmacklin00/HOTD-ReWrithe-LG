@@ -1056,6 +1056,10 @@ static int gNetFrames = -1;   // headless netplay: --frames counts the lockstep'
 static Uint64 netSkipNoteUntil = 0;   // a joiner's trigger in a cut-scene: "Only the host can skip" until then (SDL ticks)
 // Sonic Mode (game/sonic.h): the play-time tick schedule (its preset set when a game starts; online: the host's)
 static hotd::game::SonicClock gSonic;
+// Light Gun Edition: Married Mode (Killer Mods): this game's computer teammates in the seats not set to one (Normal);
+// a seat's teammate level: its own setting, else Married Mode's
+static int gMarriedBot[4] = {0, 0, 0, 0};
+static int seatBotOf(const hotd::game::LaunchConfig& c, int p) { return c.seatBot[p & 3] ? c.seatBot[p & 3] : gMarriedBot[p & 3]; }
 // the top 10's file of a preset: ranking.bin (off: the arcade's speed), ranking_frenzy.bin, ranking_overkill.bin, ...
 // The Typing of the Dead 0: its own, ranking_totd.bin, ranking_totd_frenzy.bin, ...
 static std::string rankingName(int preset)
@@ -1530,7 +1534,7 @@ void outputsFrame(game::Runtime& rt, const game::LaunchConfig& cfg)
     for (int out = 0; out < 4; ++out) {
         const int p = seats[out];
         game::OutputSeat& o = f.seat[out];
-        if (p < 0 || p >= rt.seat_count() || cfg.seatBot[p & 3] != 0) continue;
+        if (p < 0 || p >= rt.seat_count() || seatBotOf(cfg, p) != 0) continue;
         const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
         o.valid = true;
         o.state = pl.state;
@@ -4657,7 +4661,7 @@ int main(int argc, char* argv[])
         game::Runtime& r = host.runtime();
         r.livesKept = livesKept;
         // GitHub #29: one player in player 2's seat (offline; not with a CPU player 2: that seat is the teammate's)
-        r.soloSeat = gNet || cfg.players != 1 || cfg.seatBot[1] > 0 ? 0 : cfg.soloSeat;
+        r.soloSeat = gNet || cfg.players != 1 || cfg.seatBot[1] > 0 || cfg.married ? 0 : cfg.soloSeat;
         {   // pmbody: PC Mode's camera paths and motion table from the PC's own files (pmData: CAMALL.RBH, THOTD.EXE);
             // without them PC Mode evaluates the ROM's keys
             const PmData& pm = pmData(cfg.pc);
@@ -4722,7 +4726,7 @@ int main(int argc, char* argv[])
             r.lgTimeUp = r.lgSvInit_ = false;
             r.lgVol_.clear(), r.lgBoomed_.clear(), r.lgBlasts.clear();
             gSonic.turbo = cfg.turbo;
-            r.lgModes.vampire = cfg.vampire;
+            r.lgModes.vampire = false;   // (user 2026-11-05: Vampire Mode removed; Married Mode in its place)
             r.lgModes.flashlight = cfg.flashlight;
             r.lgModes.bigHeads = false;   // (v1.2.0: the Big Head mod, Options > Mods, instead)
             r.lgModes.shotgunShells = cfg.shotgun && !arsenal ? 3 : 0;
@@ -4819,10 +4823,13 @@ int main(int argc, char* argv[])
             // (player 3 or 4 set to CPU on this PC), the free seats of a host of up to four PCs; their input goes
             // through the lockstep (netTeamSeat). Seeded from the seats and levels, never the clock: runs repeat
             uint8_t mask = 0;
-            int level[4] = {cfg.seatBot[0], cfg.seatBot[1], cfg.seatBot[2], cfg.seatBot[3]};
+            // Light Gun Edition: Married Mode: every seat but player 1's a computer teammate (Normal) unless set to one
+            for (int p = 0; p < 4; ++p)
+                gMarriedBot[p] = cfg.married && !gNet && p > 0 && !gTotd && !bossModeOpt && gSurvivalArena < 0 ? 2 : 0;
+            int level[4] = {seatBotOf(cfg, 0), seatBotOf(cfg, 1), seatBotOf(cfg, 2), seatBotOf(cfg, 3)};
             if (!gNet) {
                 for (int p = 1; p < 4; ++p)
-                    if (cfg.seatBot[p] > 0 && (p == 1 || r.seats4) && (!r.pcmode || gPcCpuSeats < 0 || (gPcCpuSeats >> p & 1)))
+                    if (level[p] > 0 && (p == 1 || r.seats4) && (!r.pcmode || gPcCpuSeats < 0 || (gPcCpuSeats >> p & 1)))
                         mask = uint8_t(mask | (1u << p));
             } else if (r.seats4 && gNet->multi()) {
                 for (int p = 1; p < 4; ++p)
@@ -14343,7 +14350,7 @@ int main(int argc, char* argv[])
         // (online: this PC's seats, through the lockstep's start bits)
         if (!paused)
             for (int p = 0; p < rt.seat_count(); ++p)
-                if (guns[p].trigger && cfg.seatBot[p & 3] == 0) {
+                if (guns[p].trigger && seatBotOf(cfg, p) == 0) {
                     const int st = gNet ? (p == 0 ? gNet->localPlayer() : p == 1 ? gNet->secondSeat() : -1) : p;
                     if (st < 0 || st >= rt.seat_count()) continue;
                     const int32_t s = rt.mem.at<port::a::Player>(rt.player_rec(st)).state;
@@ -14674,7 +14681,7 @@ int main(int argc, char* argv[])
             {   // padpass: the arcade's shot flash cycle (draw-only: the host's counter, the picture white after it)
                 bool pulled = false;
                 for (int p = 0; p < rt.seat_count(); ++p)
-                    pulled = pulled || (rt.gun[p].trigger && cfg.seatBot[p & 3] == 0);   // (people only, not a CPU teammate)
+                    pulled = pulled || (rt.gun[p].trigger && seatBotOf(cfg, p) == 0);   // (people only, not a CPU teammate)
                 gunFlash.tick(pulled, game::gunFlashOn(cfg) && rt.mem.at<int16_t>(game::A::G::game_mode) == 4);
             }
             if (!gNet)   // Boss Mode's clock: the tick's real time (Sonic Mode: its share); online fixed at the start
@@ -15477,7 +15484,7 @@ int main(int argc, char* argv[])
             std::vector<Row> rows;
             for (int p = 0; p < rt.seat_count(); ++p) {
                 const uint32_t shots = rt.lg_shots[p], hits = std::min(rt.lg_hits[p], shots);
-                if (shots == 0 || cfg.seatBot[p] != 0) continue;
+                if (shots == 0 || seatBotOf(cfg, p) != 0) continue;
                 rows.push_back({p, rt.mem.u32(rt.player_rec(p) + 8), shots, hits, rt.lg_kills[p]});
             }
             if (boardOk && rows.size() >= 2) {

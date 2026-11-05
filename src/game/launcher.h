@@ -336,6 +336,7 @@ struct LaunchConfig {
     bool exploding = false;     // Exploding Zombies (launcher.ini exploding=): some zombies glow and blow up when hit (not on the head)
     int funLook = 0;            // the fun look (launcher.ini funlook=): 0 off, 1 Night Vision, 2 VHS Camcorder, 3 Wireframe
     int turbo = 0;              // Turbo Speed Run (launcher.ini turbo=): 0 off, 1 x1.5, 2 x2: the whole game, cut-scenes and music too
+    bool married = false;       // Married Mode (launcher.ini married=): player 1 plus computer teammates in every other seat
     bool bossRush = false;      // Boss Rush (launcher.ini bossrush=): Arcade = the four bosses back to back, lives carried on
     bool roulette = false;      // Weak-Point Roulette (launcher.ini roulette=): a zombie takes hits only on its glowing part (moves every 2 s)
     bool weaponSwitch = false; // Arsenal Mode (launcher.ini arsenal=): the middle button: Pistol > Shotgun > Machine Gun > Rocket Launcher, each player their own

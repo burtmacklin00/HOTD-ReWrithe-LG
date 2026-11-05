@@ -271,12 +271,12 @@ void menuReset(LaunchConfig& c, int page)
     case kCatGameplay:
         c.lives = d.lives;   // (#30: Starting Lives / Max Lives)
         c.chapterRetry = d.chapterRetry;   // (#5)
-        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
+        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.married = d.married, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
         break;
     case kCatKiller:
         c.flashlight = d.flashlight, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire;
-        c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.vampire = d.vampire;
+        c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.married = d.married;
         c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding;
         c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush;
         break;
@@ -761,9 +761,6 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         r.push_back({"Sudden Death", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { c.suddenDeath = !c.suddenDeath; save(); },
                      "one shot kills any zombie (bosses fight as normal); lives and continues as a normal game. Its own high scores"});
         killerBy(r);
-        r.push_back({"Vampire Mode", [&c]() { return onOff(c.vampire); }, [&c, save]() { c.vampire = !c.vampire; save(); },
-                     "your blood meter drains all the time; hits and kills fill it, and an empty meter costs a life"});
-        killerBy(r);
         r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { c.hostageCrisis = !c.hostageCrisis; save(); },
                      "shoot a hostage or scientist and it's game over for everyone: no continues. Aim carefully!"});
         killerBy(r);
@@ -792,6 +789,9 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "Night Vision: green with glowing heat; VHS Camcorder: tracking lines, static, a REC time stamp; Wireframe: 80s neon vector lines"});
         killerBy(r);
         // Co-op
+        r.push_back({"Married Mode", [&c]() { return onOff(c.married); }, [&c, save]() { c.married = !c.married; save(); },
+                     "Married? You don't have to play by yourself anymore! You play player 1, computer teammates fill every other seat"});
+        killerBy(r);
         r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
                      "Co-op: each player's score, shots, hits and accuracy at the end of a chapter, and the MVP"});
         killerBy(r);
