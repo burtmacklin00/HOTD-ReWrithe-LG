@@ -1619,7 +1619,11 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
         for (int q = 0; q < rt.seat_count(); ++q)
             anyPlaying = anyPlaying || mem.at<Player>(rt.player_rec(q)).state == 5;
         if (pl.state == 4 && !anyPlaying) {
-            // (nothing at the corner: the team's countdown is the big one)
+            // (the team's countdown is the big one): PRESS START BUTTON at the corner, blinking with players 1 / 2's
+            // (user 2026-11-05: theirs showed, players 3 / 4 could continue too but had no prompt)
+            const int sx0 = left ? 2 : 0x24, sy0 = 0x27 + dy;
+            if (startOn && !pc && (!rt.pm_on() || rt.pm_can_continue()))
+                pieces.push_back({sx0, sy0, 0x40, 0});
         } else if (pl.state == 4) {
             const int d = std::clamp(pl.continue_timer / 4096, 0, 9);
             const int x = left ? 2 : 0x24;
