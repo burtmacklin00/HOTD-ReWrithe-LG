@@ -4876,7 +4876,7 @@ int main(int argc, char* argv[])
             r.survival.maxAlive = gSurvivalCap;
             r.survival.cutCreatures = gSurvivalCut;
             r.survival.testBuyer = gSurvivalBuyer;
-            r.survival.startGame(r, cfg.players);
+            r.survival.startGame(r, 1);   // Light Gun Edition: player 1 starts, the others join with their triggers
             SDL_Log("Survival Mode: %s, %d player(s) (Very Experimental / Proof of Concept)", game::survivalArenas()[size_t(gSurvivalArena)].name, cfg.players);
             gSurvivalNote = std::max<uint64_t>(SDL_GetTicks(), 1);   // (polish: its notice for 6 s)
         } else if (title && chapterStart) {
