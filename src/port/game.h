@@ -68,6 +68,7 @@ public:
     bool lg_crisis_fail = false;              // (a hostage was shot: the runtime ends the game)
     bool lg_roulette = false;                 // Weak-Point Roulette: a zombie takes hits only on its glowing part
     virtual bool lg_part_ok(uint32_t part) { (void)part; return true; }   // (the runtime's: the glowing part)
+    float lg_dmg_scale[4] = {1.0f, 1.0f, 1.0f, 1.0f};   // each seat's damage x (the shotgun's: 2)
     bool lg_exploding = false;                // Exploding Zombies: some zombies glow; a hit not on the head blows them up
     virtual void lg_explode(int player, uint32_t part) { (void)player, (void)part; }   // (the runtime's: the blast)
     virtual void lg_fired(int player) { (void)player; }   // a gun shot fired (the runtime's: Arsenal's rocket)

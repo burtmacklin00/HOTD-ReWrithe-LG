@@ -4759,7 +4759,7 @@ int main(int argc, char* argv[])
             r.lgModes.shotgunShells = cfg.shotgun && !arsenal ? 3 : 0;
             r.lg_hit_scale = cfg.shotgun && !arsenal ? 3.0f : 1.0f;
             for (int k = 0; k < 4; ++k)
-                r.lgWeapon[k] = arsenal ? 0 : -1, r.lgRockets[k] = 5, r.lgRocketLoaded[k] = true;
+                r.lgWeapon[k] = arsenal ? 0 : -1, r.lgRockets[k] = 5, r.lgRocketLoaded[k] = true, r.lg_dmg_scale[k] = 1.0f;
             if (r.lgModes.hardcore) {
                 r.settings.lives = 0;          // (the lives table's first row: 1 life)
                 r.bossNoContinue = true;       // (everyone out: game over at once, no team countdown)
@@ -4892,7 +4892,7 @@ int main(int argc, char* argv[])
             r.lg_one_hit = false, r.lg_hit_scale = 1.0f;
             r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
             r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0, r.lgMachineGun = false;
-            for (int k = 0; k < 4; ++k) r.lgWeapon[k] = -1, r.lg_seat_scale[k] = 1.0f, r.lg_splash[k] = r.lg_hide_bullets[k] = false;
+            for (int k = 0; k < 4; ++k) r.lgWeapon[k] = -1, r.lg_seat_scale[k] = 1.0f, r.lg_dmg_scale[k] = 1.0f, r.lg_splash[k] = r.lg_hide_bullets[k] = false;
             r.settings.lives = cfg.lives;
             r.bossNoContinue = false;
         }

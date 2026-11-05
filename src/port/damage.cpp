@@ -67,6 +67,18 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
         part_hit(mem.u32(list));
     if (coop4_on())   // 4P, 3 / 4 players: the creatures take more shots (docs/coop4.md "Enemy pressure")
         coop4_enemy_damage();
+    // Light Gun Edition: the shotgun (Shotgun Mode, Arsenal's): each seat's damage this frame x lg_dmg_scale (its tally
+    // and the total, so the killer is chosen on the real damage)
+    for (int s = 0; s < (coop4_on() ? 4 : 2); ++s) {
+        if (lg_dmg_scale[s] <= 1.0f)
+            continue;
+        int16_t& t = mem.at<int16_t>(part_tally_at(s));
+        if (t <= 0)
+            continue;
+        const int extra = int(float(t) * (lg_dmg_scale[s] - 1.0f) + 0.5f);
+        t = int16_t(std::min(0x7FFF, t + extra));
+        mem.at<int16_t>(G::hit_damage) = int16_t(std::min(0x7FFF, int(mem.at<int16_t>(G::hit_damage)) + extra));
+    }
     Obj& b = mem.at<Obj>(mem.u32(G::body_current));
     const int32_t life = b.param;
     // PC: every killer chosen here is also the last killer

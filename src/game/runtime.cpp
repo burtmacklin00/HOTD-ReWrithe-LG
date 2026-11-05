@@ -942,6 +942,7 @@ void Runtime::lg_modes_frame()
             // (user 2026-11-05: the shotgun did not feel much different: its spread now hits everything in it, as the
             // rocket's blast does, a little wider)
             lg_seat_scale[p & 3] = w == 1 ? 3.0f : w == 3 ? 5.0f : 1.0f;
+            lg_dmg_scale[p & 3] = w == 1 ? 2.0f : 1.0f;   // (user 2026-11-05: the shotgun a bit more powerful)
             lg_splash[p & 3] = w == 1 || w == 3;
             lg_hide_bullets[p & 3] = w > 0;
             const int mag = lgMagazine(w);
@@ -982,6 +983,7 @@ void Runtime::lg_modes_frame()
             lg_splash[p & 3] = lgModes.shotgunShells > 0;
             lg_hide_bullets[p & 3] = lgModes.shotgunShells > 0 || lgMachineGun;   // (Machine Gun mode: silver rounds)
             lg_seat_scale[p & 3] = 1.0f;
+            lg_dmg_scale[p & 3] = lgModes.shotgunShells > 0 ? 2.0f : 1.0f;   // (Shotgun Mode: double damage)
         }
         if (lgModes.vampire) {
             // Vampire Mode: the meter drains in about 15 s in play; a hit gives 8 %, a kill 30 %; empty: a life lost (as an
