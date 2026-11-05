@@ -759,7 +759,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "one life each, no continues, no joining back in; its own high scores"});
         killerBy(r);
         r.push_back({"Sudden Death", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { c.suddenDeath = !c.suddenDeath; save(); },
-                     "one hit kills a zombie, and one hit kills you: one life, no continues (bosses fight as normal); its own high scores"});
+                     "one shot kills any zombie (bosses fight as normal); lives and continues as a normal game. Its own high scores"});
         killerBy(r);
         r.push_back({"Vampire Mode", [&c]() { return onOff(c.vampire); }, [&c, save]() { c.vampire = !c.vampire; save(); },
                      "your blood meter drains all the time; hits and kills fill it, and an empty meter costs a life"});

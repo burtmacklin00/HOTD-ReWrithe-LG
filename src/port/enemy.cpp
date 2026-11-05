@@ -184,8 +184,10 @@ template <class P> uint32_t Game<P>::return_false() { return 0; }
 template <class P> void Game<P>::enemy_check_death(uint32_t obj)
 {
     Enemy& e = mem.at<Enemy>(obj);
-    // (Light Gun Edition: Sudden Death: one hit is enough)
-    const uint32_t nl = lg_one_hit ? 0u : uint32_t(uint16_t(e.life)) - uint32_t(mem.at<uint16_t>(G::hit_damage));
+    // (Light Gun Edition: Sudden Death: one hit is enough; only a frame with a hit: this runs every frame, damage 0
+    // without one (user 2026-11-05: zombies died that nobody shot))
+    const uint16_t dmg = mem.at<uint16_t>(G::hit_damage);
+    const uint32_t nl = lg_one_hit && dmg != 0 ? 0u : uint32_t(uint16_t(e.life)) - uint32_t(dmg);
     e.life = int16_t(nl);
     if (!(0 >= int32_t(nl << 16))) {
         if (!((uint16_t(e.flags) >> 8) & 1) || e.one_hit_kill == 0) {

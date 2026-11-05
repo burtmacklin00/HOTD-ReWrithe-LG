@@ -4679,6 +4679,7 @@ int main(int argc, char* argv[])
             SDL_Log("Sonic Mode: %s", game::sonicName(gSonic.preset));
         r.rankingFile = !rankingFileOpt.empty() ? rankingFileOpt : frames < 0 ? cacheDir() + rankingName(gSonic.preset) : std::string();
         if (!r.rankingFile.empty() && rankingFileOpt.empty() && (cfg.hardcore || cfg.suddenDeath || cfg.survival) && !gNet && !bossModeOpt)
+            // (Sudden Death: its own table still: one-shot kills make bigger scores than a normal game's)
             r.rankingFile += cfg.survival ? "_survival" : cfg.suddenDeath ? "_suddendeath" : "_hardcore";   // Light Gun Edition: their own top 10s
         if (gTotd && !gNet) {   // The Typing of the Dead 0 (game/typing.h): the prompts, a new game's stats, the typist
             if (!gTyping)
@@ -4711,7 +4712,7 @@ int main(int argc, char* argv[])
             const bool arsenal = cfg.weaponSwitch;
             r.lgModes.freeFire = cfg.freeFire || (cfg.machineGun && !arsenal);   // (Machine Gun: unlimited ammo too)
             r.lgMachineGun = cfg.machineGun && !arsenal;
-            r.lgModes.hardcore = (cfg.hardcore || cfg.suddenDeath) && !bossModeOpt;   // (Sudden Death: Hardcore's one life too)
+            r.lgModes.hardcore = cfg.hardcore && !bossModeOpt;   // (Sudden Death: a normal game's lives and continues, user 2026-11-05)
             r.lg_one_hit = cfg.suddenDeath && !bossModeOpt;
             r.lg_hostage_crisis = cfg.hostageCrisis, r.lg_crisis_fail = false;
             r.lg_roulette = cfg.roulette && !bossModeOpt;
