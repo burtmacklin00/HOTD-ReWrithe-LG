@@ -15506,6 +15506,9 @@ int main(int argc, char* argv[])
         // Light Gun Edition: the Windows pointer never in the game (the pause menu: player 1's crosshair, Hud::pauseSight);
         // only Trailer Mode's pause menu keeps it
         hud.pauseSight = !(trailerNow && paused);
+        // (the cut-scene bars inside the 4:3 / 16:10 picture: the bezel / side bars stay as they are)
+        hud.barWidth = cfg.aspect == 1 ? std::min(float(ww), float(wh) * 496.0f / 384.0f)
+                     : cfg.aspect == 2 ? std::min(float(ww), float(wh) * 1.6f) : 0.0f;
         if (const bool hideCursor = !(trailerNow && paused); hideCursor == SDL_CursorVisible()) {
             if (hideCursor) SDL_HideCursor();
             else SDL_ShowCursor();

@@ -1950,8 +1950,14 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
             barRows_ = rows;
             bar_.setText(std::vector<std::string>(size_t(rows), std::string(size_t(4096 / 8), ' ')), 1);
         }
-        bar_.drawAnchored(ww, wh, 0.0f, 0.0f, 0.0f, 0.0f);
-        bar_.drawAnchored(ww, wh, 0.0f, float(wh), 0.0f, 1.0f);
+        if (barWidth > 0 && barWidth < float(ww)) {   // (Light Gun Edition: inside the game's picture, not over the bezel)
+            const float bx = (float(ww) - barWidth) * 0.5f, bh = bar_.drawnHeight();
+            bar_.drawIn(ww, wh, bx, 0.0f, barWidth, bh);
+            bar_.drawIn(ww, wh, bx, float(wh) - bh, barWidth, bh);
+        } else {
+            bar_.drawAnchored(ww, wh, 0.0f, 0.0f, 0.0f, 0.0f);
+            bar_.drawAnchored(ww, wh, 0.0f, float(wh), 0.0f, 1.0f);
+        }
         // flash: the bars show 2D palette entry 0x92 (Runtime::backdrop555; black but in the Magician's death fades,
         // MAME fullgame_us t14360..t14440), through the tile layers' colour curve (brightness 0x40: about c x 255 / 31,
         // fullgame_us t14340's table) and MAME's output gamma; over the black panel, its height (11 px a row + 9)

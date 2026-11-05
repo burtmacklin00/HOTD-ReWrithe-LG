@@ -154,6 +154,11 @@ private:
     bool signLit_[SurvivalMode::kItems] = {};
     void drawSurvival(const Runtime& rt, int ww, int wh, int scale);
     int barRows_ = -1;
+public:
+    // Light Gun Edition: the game picture's width in window pixels (4:3 / 16:10 with the bezel: the cut-scene bars stay
+    // inside it, not over the bezel); 0: the whole window
+    float barWidth = 0;
+private:
     // the arcade 2D layer: one 496 x 384 texture, drawn over the 3D picture
     unsigned program_ = 0, vao_ = 0, texture_ = 0;
     int uRect_ = -1;
