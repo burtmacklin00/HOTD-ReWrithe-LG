@@ -10900,7 +10900,7 @@ int main(int argc, char* argv[])
             openCategory = [&](int k) {
                 fe.extras = game::menuCategoryRows(k, menu.cfg, hooks);
                 fe.extrasTitle = game::menuCategoryName(k);
-                fe.extrasTab = k;
+                fe.extrasTab = game::menuTabOf(k);   // (Light Gun Edition: the strip's order, Killer Mods in it)
                 fe.extrasExit = nullptr;   // Exit: Options
                 fe.screenExtras();
             };
@@ -10911,9 +10911,9 @@ int main(int argc, char* argv[])
                 fe.extrasExit = [&]() { fe.screenMainMenu(); };
                 fe.screenExtras();
             };
-            for (int k = 0; k < game::kMenuCategories; ++k)
-                fe.tabs.push_back(game::menuCategoryName(k));
-            fe.onTab = [&](int k) { openCategory(k); };
+            for (int k = 0; k < game::menuTabCount(); ++k)
+                fe.tabs.push_back(game::menuCategoryName(game::menuTabCategory(k)));
+            fe.onTab = [&](int k) { openCategory(game::menuTabCategory(k)); };
             fe.onCoop = [&]() { coopPage(); };
             // playerpick: the players' quick choice before a local game (screen 22): the last one from launcher.ini
             // (players= / p2bot..p4bot), kept on Start; never online (the session's seats decide there)

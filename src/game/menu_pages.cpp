@@ -29,7 +29,20 @@ namespace hotd::game {
 const char* menuCategoryName(int category)
 {
     static const char* const k[kMenuCategories] = {"Video", "Audio", "Controls", "Gameplay", "Mods", "System"};
+    if (category == kCatKiller)
+        return "Killer Mods";
     return category >= 0 && category < kMenuCategories ? k[category] : "";
+}
+
+// the tab strip's order: Video, Audio, Controls, Gameplay, Killer Mods, Mods, System
+static const int kTabCats[] = {kCatVideo, kCatAudio, kCatControls, kCatGameplay, kCatKiller, kCatMods, kCatSystem};
+int menuTabCount() { return int(sizeof kTabCats / sizeof kTabCats[0]); }
+int menuTabCategory(int tab) { return tab >= 0 && tab < menuTabCount() ? kTabCats[tab] : kCatVideo; }
+int menuTabOf(int category)
+{
+    for (int i = 0; i < menuTabCount(); ++i)
+        if (kTabCats[i] == category) return i;
+    return -1;
 }
 
 namespace {
@@ -169,6 +182,15 @@ std::vector<Frontend::Extra> menuGunAssignRows(LaunchConfig& c, const MenuHooks&
 
 // menufb (user 2026-10-26: "you should add a reset to default option"): a page's last row: Reset to Defaults (the host
 // asks first: MenuHooks::resetPage, then menuReset)
+// Light Gun Edition: Killer Mods: the grey line under each mode, as the Mods page's "Built-in mod, by ..." (its help:
+// the mode's own, the row above)
+static void killerBy(std::vector<X>& r)
+{
+    const std::string help = r.empty() ? std::string() : r.back().help;
+    r.push_back({"  Killer Mod, by NF", []() { return std::string("v1"); }, nullptr, help});
+    r.back().raw = true;
+}
+
 static void resetRow(std::vector<X>& r, const MenuHooks& h, int page)
 {
     r.push_back({"Reset to Defaults", nullptr, [h, page]() { if (h.resetPage) h.resetPage(page); },
@@ -185,7 +207,7 @@ void menuInGameRows(std::vector<Frontend::Extra>& rows, const std::string& title
     static const char* const kNext = " (In a game: from the next game.)";
     static const char* const kLocked = "Not in a game: Exit to the main menu to change it";
     static const char* const kOnline = "Online: the host's settings are used in this game";
-    const bool rules = title == "Gameplay" || title == "Advanced" || title == "Options";   // ("Options": the Remake's Game tab)
+    const bool rules = title == "Gameplay" || title == "Advanced" || title == "Options" || title == "Killer Mods";   // ("Options": the Remake's Game tab)
     // the rules rows that still apply at once (draw-only or this PC's own)
     static const char* const kLive[] = {"Hold to Skip Cut-scenes", "Score Display", "Teammate Crosshair Flashes", "Auto Reload",
                                         "Edge Reload", "Chapter Retry", "Advanced", "Music Numbering"};
@@ -251,6 +273,12 @@ void menuReset(LaunchConfig& c, int page)
         c.chapterRetry = d.chapterRetry;   // (#5)
         c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
+        break;
+    case kCatKiller:
+        c.flashlight = d.flashlight, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire;
+        c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.vampire = d.vampire;
+        c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding;
+        c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush;
         break;
     case kResetAdvanced:
         c.gameSpeed = d.gameSpeed, c.musicNumbering = d.musicNumbering, c.teamFlash = d.teamFlash, c.trailer = d.trailer;
@@ -677,42 +705,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "An empty gun reloads by itself (not in the originals): every player, 3P / 4P too; online the host's"});
         r.push_back({"Edge Reload", [&c]() { return onOff(c.edgeReload); }, [&c, save]() { c.edgeReload = !c.edgeReload; save(); },
                      "As The House of the Dead 2: moving the mouse crosshair onto the screen's edge reloads, no shot needed"});
-        // Light Gun Edition: the fun modes (local games; online games are always played as normal)
-        r.push_back({"Flashlight Mode", [&c]() { return onOff(c.flashlight); }, [&c, save]() { c.flashlight = !c.flashlight; save(); },
-                     "Fun mode: the mansion goes dark and each player's gun lights the screen where it aims"});
-        // (Light Gun Edition: Big Heads: the ReWrithe's own Big Head mod since v1.2.0, Options > Mods)
-        r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { c.shotgun = !c.shotgun; save(); },
-                     "Fun mode: each shot hits a much wider area, but the gun holds only 3 shells"});
-        r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { c.freeFire = !c.freeFire; save(); },
-                     "Fun mode: unlimited ammo, no reloading (for young players and parties)"});
-        r.push_back({"Machine Gun", [&c]() { return onOff(c.machineGun); }, [&c, save]() { c.machineGun = !c.machineGun; save(); },
-                     "Fun mode: hold the trigger for automatic fire (recoil on every shot), unlimited ammo"});
-        r.push_back({"Arsenal Mode", [&c]() { return onOff(c.weaponSwitch); }, [&c, save]() { c.weaponSwitch = !c.weaponSwitch; save(); },
-                     "Fun mode: the gun's middle button switches weapons: Pistol, Shotgun, Machine Gun, Rocket Launcher (each player their own)"});
-        r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { c.hardcore = !c.hardcore; save(); },
-                     "Fun mode: one life each, no continues, no joining back in; its own high scores"});
-        r.push_back({"Sudden Death", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { c.suddenDeath = !c.suddenDeath; save(); },
-                     "Fun mode: one hit kills a zombie, and one hit kills you: one life, no continues (bosses fight as normal); its own high scores"});
-        r.push_back({"Vampire Mode", [&c]() { return onOff(c.vampire); }, [&c, save]() { c.vampire = !c.vampire; save(); },
-                     "Fun mode: your blood meter drains all the time; hits and kills fill it, and an empty meter costs a life"});
-        r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { c.hostageCrisis = !c.hostageCrisis; save(); },
-                     "Fun mode: shoot a hostage or scientist and it's game over for everyone: no continues. Aim carefully!"});
-        r.push_back({"Weak-Point Roulette", [&c]() { return onOff(c.roulette); }, [&c, save]() { c.roulette = !c.roulette; save(); },
-                     "Fun mode: each zombie can only be hurt where a red ring glows; the ring moves to another body part every 2 seconds"});
-        r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { c.exploding = !c.exploding; save(); },
-                     "Fun mode: some zombies glow orange: shoot them in the head! Hit one anywhere else and it blows up: everything near it and you get hurt"});
-        r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { c.survival = !c.survival; save(); },
-                     "Fun mode: a 60 s clock: kills +2 s, rescues +15 s, a hit -10 s, a miss -1.5 s; time up = game over. Its own high scores"});
-        r.push_back({"Turbo Speed Run", [&c]() { return std::string(c.turbo == 1 ? "x1.5" : c.turbo == 2 ? "x2" : "Off"); },
-                     [&c, save]() { c.turbo = (c.turbo + 1) % 3; save(); },
-                     "Fun mode: the whole game faster: play, cut-scenes, voices and music (higher pitch). Menus at normal speed"});
-        r.push_back({"Boss Rush", [&c]() { return onOff(c.bossRush); }, [&c, save]() { c.bossRush = !c.bossRush; save(); },
-                     "Fun mode: Arcade becomes the four bosses back to back, no hallways; your lives carry over and never refill, no continues"});
-        r.push_back({"Fun Look", [&c]() { return std::string(c.funLook == 1 ? "Night Vision" : c.funLook == 2 ? "VHS Camcorder" : c.funLook == 3 ? "Wireframe" : "Off"); },
-                     [&c, save]() { c.funLook = (c.funLook + 1) % 4; save(); },
-                     "Night Vision: green with glowing heat; VHS Camcorder: tracking lines, static, a REC time stamp; Wireframe: 80s neon vector lines"});
-        r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
-                     "Co-op: each player's score, shots, hits and accuracy at the end of a chapter, and the MVP"});
+        // (Light Gun Edition: its game modes: the Killer Mods tab, kCatKiller)
         // skipfix (user 2026-10-27): the hold-to-skip of the cut-scenes the arcade cannot skip (main.cpp)
         // feat29 (user 2026-10-29: "Add Free Play in the settings"): the Cheat screen's Free-Play (THOTD.EXE 0xD5B35C,
         // launcher.ini freeplay=): PC Mode's continues never run out. Arcade games are free play already (no coins)
@@ -744,6 +737,64 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // advopt (2026-10-21): the rarely changed rows on their own page (the tab strip has no room for a 7th tab)
         r.push_back({"Advanced", []() { return page("Open"); }, [h]() { if (h.advancedPage) h.advancedPage(); },
                      "Rarely changed settings: Game Speed, Music Numbering, Teammate Flashes, 4P Boss Hit Points, Guards"});
+        break;
+    case kCatKiller:
+        // Light Gun Edition (user 2026-11-05: "Killer Mods"): the edition's own game modes, each with who made it under
+        // its name as the Mods page's mods have (local games; online games are always played as normal)
+        // Weapons
+        r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { c.shotgun = !c.shotgun; save(); },
+                     "each shot hits a much wider area, but the gun holds only 3 shells"});
+        killerBy(r);
+        r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { c.freeFire = !c.freeFire; save(); },
+                     "unlimited ammo, no reloading (for young players and parties)"});
+        killerBy(r);
+        r.push_back({"Machine Gun", [&c]() { return onOff(c.machineGun); }, [&c, save]() { c.machineGun = !c.machineGun; save(); },
+                     "hold the trigger for automatic fire (recoil on every shot), unlimited ammo"});
+        killerBy(r);
+        r.push_back({"Arsenal Mode", [&c]() { return onOff(c.weaponSwitch); }, [&c, save]() { c.weaponSwitch = !c.weaponSwitch; save(); },
+                     "the gun's middle button switches weapons: Pistol, Shotgun, Machine Gun, Rocket Launcher (each player their own)"});
+        killerBy(r);
+        // Challenges
+        r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { c.hardcore = !c.hardcore; save(); },
+                     "one life each, no continues, no joining back in; its own high scores"});
+        killerBy(r);
+        r.push_back({"Sudden Death", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { c.suddenDeath = !c.suddenDeath; save(); },
+                     "one hit kills a zombie, and one hit kills you: one life, no continues (bosses fight as normal); its own high scores"});
+        killerBy(r);
+        r.push_back({"Vampire Mode", [&c]() { return onOff(c.vampire); }, [&c, save]() { c.vampire = !c.vampire; save(); },
+                     "your blood meter drains all the time; hits and kills fill it, and an empty meter costs a life"});
+        killerBy(r);
+        r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { c.hostageCrisis = !c.hostageCrisis; save(); },
+                     "shoot a hostage or scientist and it's game over for everyone: no continues. Aim carefully!"});
+        killerBy(r);
+        r.push_back({"Weak-Point Roulette", [&c]() { return onOff(c.roulette); }, [&c, save]() { c.roulette = !c.roulette; save(); },
+                     "each zombie can only be hurt where a red ring glows; the ring moves to another body part every 2 seconds"});
+        killerBy(r);
+        r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { c.exploding = !c.exploding; save(); },
+                     "some zombies glow orange: shoot them in the head! Hit one anywhere else and it blows up: everything near it and you get hurt"});
+        killerBy(r);
+        r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { c.survival = !c.survival; save(); },
+                     "a 60 s clock: kills +2 s, rescues +15 s, a hit -10 s, a miss -1.5 s; time up = game over. Its own high scores"});
+        killerBy(r);
+        r.push_back({"Boss Rush", [&c]() { return onOff(c.bossRush); }, [&c, save]() { c.bossRush = !c.bossRush; save(); },
+                     "Arcade becomes the four bosses back to back, no hallways; your lives carry over and never refill, no continues"});
+        killerBy(r);
+        // Speed and looks
+        r.push_back({"Turbo Speed Run", [&c]() { return std::string(c.turbo == 1 ? "x1.5" : c.turbo == 2 ? "x2" : "Off"); },
+                     [&c, save]() { c.turbo = (c.turbo + 1) % 3; save(); },
+                     "the whole game faster: play, cut-scenes, voices and music (higher pitch). Menus at normal speed"});
+        killerBy(r);
+        r.push_back({"Flashlight Mode", [&c]() { return onOff(c.flashlight); }, [&c, save]() { c.flashlight = !c.flashlight; save(); },
+                     "the mansion goes dark and each player's gun lights the screen where it aims"});
+        killerBy(r);
+        r.push_back({"Screen Filter", [&c]() { return std::string(c.funLook == 1 ? "Night Vision" : c.funLook == 2 ? "VHS Camcorder" : c.funLook == 3 ? "Wireframe" : "Off"); },
+                     [&c, save]() { c.funLook = (c.funLook + 1) % 4; save(); },
+                     "Night Vision: green with glowing heat; VHS Camcorder: tracking lines, static, a REC time stamp; Wireframe: 80s neon vector lines"});
+        killerBy(r);
+        // Co-op
+        r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
+                     "Co-op: each player's score, shots, hits and accuracy at the end of a chapter, and the MVP"});
+        killerBy(r);
         break;
     case kCatMods:
         if (h.modsRows)

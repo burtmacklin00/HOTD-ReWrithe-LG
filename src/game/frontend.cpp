@@ -3823,8 +3823,8 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         return findMods(dirs);
     }();
     hooks.modsRows = []() { return menuModRows(cfg, mods, nullptr, nullptr); };
-    for (int k = 0; k < kMenuCategories; ++k)
-        fe.tabs.push_back(menuCategoryName(k));
+    for (int k = 0; k < menuTabCount(); ++k)
+        fe.tabs.push_back(menuCategoryName(menuTabCategory(k)));
     fe.sonicValue = []() { return std::string(sonicName(cfg.sonic)); };
     fe.onSonic = []() {};
     fe.onCoop = []() {};
@@ -3854,10 +3854,11 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         fe.chapterEnabled[k] = chapterPlayable(k);
     fe.chapterEnabled[4] = chapterPlayable(3);
     fe.rankingTables = menuRankingTables();
-    fe.onTab = [&fe, hooks](int k) {   // (as the host's openCategory)
+    fe.onTab = [&fe, hooks](int t) {   // (as the host's openCategory)
+        const int k = menuTabCategory(t);
         fe.extras = menuCategoryRows(k, cfg, hooks);
         fe.extrasTitle = menuCategoryName(k);
-        fe.extrasTab = k;
+        fe.extrasTab = t;
         fe.extrasExit = nullptr;
         fe.screenExtras();
     };
@@ -4001,7 +4002,7 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         const int cat = screen == 3 ? 0 : screen == 115 ? kCatSystem : screen - 10;   // (3: Video; 115: System)
         fe.extras = menuCategoryRows(cat, cfg, hooks);
         fe.extrasTitle = menuCategoryName(cat);
-        fe.extrasTab = cat;
+        fe.extrasTab = menuTabOf(cat);
         fe.extrasPage = pg;
         fe.screenExtras();
     } else if (screen == 19) {   // the Gallery's Cut-scenes page (the host's list; HOTD_FE_PAGE: the chosen row)

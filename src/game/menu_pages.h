@@ -18,6 +18,12 @@
 namespace hotd::game {
 
 enum MenuCategory { kCatVideo, kCatAudio, kCatControls, kCatGameplay, kCatMods, kCatSystem, kMenuCategories };
+// Light Gun Edition: the Killer Mods page (its own game modes), a category past kMenuCategories (the classic screens
+// 10 .. 15 stay the six), placed in the tab strip between Gameplay and Mods: menuTab* give the strip's order
+constexpr int kCatKiller = kMenuCategories;
+int menuTabCount();
+int menuTabCategory(int tab);   // the category of the strip's tab
+int menuTabOf(int category);    // the strip's tab of a category (-1: none)
 // menufb: the pages with a Reset to Defaults row past the categories: Gameplay's Advanced page, the Firing Range
 enum : int { kResetAdvanced = 100, kResetRange = 101 };
 // menufb: page's settings (a category, kResetAdvanced, kResetRange) back to their defaults (LaunchConfig's)
