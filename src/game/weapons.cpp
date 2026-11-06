@@ -401,6 +401,12 @@ bool Weapons::select(Runtime& rt, int p, int w)
         return false;
     port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
     s.mag[s.cur] = pl.rounds;   // (the magazine stays in that gun)
+    // Light Gun Edition (user 2026-11-06): the rocket launcher put away fired and not reloaded is reloaded on the way
+    // (a rocket from its reserve), so it is ready when it comes back
+    if (mode == Arsenal && s.cur == kRocket && s.mag[kRocket] == 0 && s.reserve[kRocket] > 0) {
+        s.mag[kRocket] = 1;
+        --s.reserve[kRocket];
+    }
     s.cur = w;
     s.reload = 0, s.timer = 0, s.burst = 0;
     ++s.switches;
