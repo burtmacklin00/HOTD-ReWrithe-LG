@@ -67,7 +67,6 @@ const PadField* padFields(int& n)
     static const char* const kTurbo[] = {"Off", "Low", "High"};
     static const char* const kTighten[] = {"Off", "1 deg/s", "2 deg/s", "3 deg/s"};
     static const char* const kShake[] = {"Off", "Low", "Medium", "High"};
-    static const char* const kTen[] = {"10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"};
     static const char* const kVert[] = {"50%", "60%", "70%", "80%", "90%", "100%", "110%", "120%", "130%", "140%", "150%"};
     static const char* const kInvert[] = {"Off", "X", "Y", "X + Y"};
     static const char* const kLevel[] = {"Off", "Light", "Medium", "Strong"};
@@ -77,17 +76,19 @@ const PadField* padFields(int& n)
     static const char* const kSpace[] = {"Player", "World", "Local"};
     static const char* const kTouch[] = {"Auto", "Off", "Pointer", "Trackpad"};
     static const char* const kClick[] = {"Reload", "Shoot"};
-    static const char* const kAim[] = {"50%", "60%", "70%", "80%", "90%", "100%", "110%", "120%", "130%", "140%", "150%", "160%",
-                                       "170%", "180%", "190%", "200%"};
     static const char* const kTrig[] = {"5%", "10%", "15%", "20%", "25%", "30%", "35%", "40%", "45%"};
     constexpr unsigned C = 1, M = 2, X = 4, T = 8, All = 15;
     static const PadField k[] = {
         {"style", "Style", nullptr, &PadProfile::style, 0, kPadStyles, kPadStyleNames, 0},
-        {"speed", "Sensitivity", &PadStyle::speed, nullptr, 1, 10, nullptr, All},
+        // sens36 (GitHub #36): each input its own whole speed (was: "speed" Sensitivity 1-10 for all of them, "fine"
+        // Fine Aim Speed x 10 % of it, the player's aimsens / sticksens / gyrosens / touchsens on top)
+        {"aimstick", "Stick Sensitivity", &PadStyle::stickSens, nullptr, kPadSensLo, kPadSensHi, nullptr, C, kPadSensStep},
+        {"aimfine", "Fine Stick Sensitivity", &PadStyle::fineSens, nullptr, kPadSensLo, kPadSensHi, nullptr, C | X, kPadSensStep},
+        {"aimgyro", "Gyro Sensitivity", &PadStyle::gyroSens, nullptr, kPadSensLo, kPadSensHi, nullptr, M | X, kPadSensStep},
+        {"aimtouch", "Trackpad Sensitivity", &PadStyle::touchSens, nullptr, kPadSensLo, kPadSensHi, nullptr, All, kPadSensStep},
         {"vert", "Vertical", &PadStyle::vert, nullptr, 5, 15, kVert, All},
         {"invert", "Invert", &PadStyle::invert, nullptr, 0, 3, kInvert, All},
         {"stick", "Sticks", &PadStyle::stick, nullptr, 0, 1, kStick, C | X},
-        {"fine", "Fine Aim Speed", &PadStyle::fine, nullptr, 1, 10, kTen, C | X},
         {"dead", "Stick Dead Zone", &PadStyle::dead, nullptr, 0, 6, kDead, C | X},
         {"curve", "Stick Curve", &PadStyle::curve, nullptr, 0, 3, kCurve, C | X},
         {"turbo", "Stick Edge Turbo", &PadStyle::turbo, nullptr, 0, 2, kTurbo, C},
@@ -99,10 +100,6 @@ const PadField* padFields(int& n)
         {"shoot", "Shoot Button", &PadStyle::shoot, nullptr, 0, 5, kShoot, All},
         {"touch", "Touchpad", &PadStyle::touch, nullptr, 0, 3, kTouch, All},
         {"touchclick", "Touchpad Click", &PadStyle::touchClick, nullptr, 0, 1, kClick, All},
-        {"aimsens", "Aim Sensitivity", nullptr, &PadProfile::aimSens, 5, 20, kAim, 0},   // (padfix: also on Controls)
-        {"sticksens", "Stick Sensitivity", nullptr, &PadProfile::stickSens, 5, 20, kAim, 0},      // (GitHub #36: each its own)
-        {"gyrosens", "Gyro Sensitivity", nullptr, &PadProfile::gyroSens, 5, 20, kAim, 0},
-        {"touchsens", "Trackpad Sensitivity", nullptr, &PadProfile::touchSens, 5, 20, kAim, 0},
         {"trigger", "Trigger Point", nullptr, &PadProfile::trigger, 1, 9, kTrig, 0},
         {"adaptive", "Adaptive Trigger", nullptr, &PadProfile::adaptive, 0, 3, kLevel, 0},
         {"rumblehit", "Vibration: Hit", nullptr, &PadProfile::rumbleHit, 0, 3, kLevel, 0},
@@ -116,7 +113,44 @@ const PadField* padFields(int& n)
 
 const char* const kPadPresetNames[kPadPresets + 1] = {"Custom", "Precise", "Balanced", "Fast"};
 
-// the presets' feel values (the rest of a style, its buttons / invert / touchpad / shake, is kept)
+std::string padFieldText(const PadField& f, int v)
+{
+    v = std::clamp(v, f.lo, f.hi);
+    if (f.names)
+        return f.names[v - f.lo];
+    return std::to_string(v) + (f.step > 1 ? "%" : "");
+}
+
+int padFieldNext(const PadField& f, int v, int dir)
+{
+    const int st = std::max(f.step, 1);
+    if (dir > 0)   // (a value between the steps, a converted older one: to the next step)
+        return v >= f.hi ? f.lo : std::min(f.hi, (v / st + 1) * st);
+    return v <= f.lo ? f.hi : std::max(f.lo, ((v + st - 1) / st - 1) * st);
+}
+
+// sens36: the old aim's tables (pads.cpp before #36): Sensitivity 1-10 = the stick's top speed (screen heights / s)
+// and the gyro's factor; the trackpad's x Sensitivity / 5 in the Touchpad style only; Fine Aim Speed x 10 % of the
+// stick's (Classic: its Sensitivity's, Motion + stick: Sensitivity 5's)
+PadSpeeds legacyPadSpeeds(int style, int speed, int fine, int aim, int stick, int gyro, int touch)
+{
+    static const float kTop[10] = {1.1f, 1.3f, 1.6f, 2.0f, 2.4f, 2.9f, 3.5f, 4.1f, 4.8f, 5.8f};
+    static const float kGyro[10] = {0.5f, 0.6f, 0.7f, 0.85f, 1.0f, 1.2f, 1.4f, 1.7f, 2.0f, 2.5f};
+    const int sp = std::clamp(speed, 1, 10);
+    const float a = float(std::clamp(aim, 5, 20)) / 10.0f, fn = float(std::clamp(fine, 1, 10)) / 10.0f;
+    const float sk = float(std::clamp(stick, 5, 20)) / 10.0f, gk = float(std::clamp(gyro, 5, 20)) / 10.0f;
+    const float tk = float(std::clamp(touch, 5, 20)) / 10.0f;
+    auto pct = [](float f) { return std::clamp(int(std::lround(f * 100.0f)), kPadSensLo, kPadSensHi); };
+    PadSpeeds r;
+    r.stick = pct(kTop[sp - 1] / 2.4f * sk * a);
+    r.fine = pct((style == 1 ? kTop[sp - 1] : 2.4f) * fn / 0.96f * sk * a);
+    r.gyro = pct(kGyro[sp - 1] * gk * a);
+    r.touch = pct((style == 4 ? float(sp) / 5.0f : 1.0f) * tk * a);
+    return r;
+}
+
+// the presets' feel values (the rest of a style, its buttons / invert / touchpad / shake, is kept). sens36: the speeds
+// as before (Sensitivity / Fine Aim Speed: legacyPadSpeeds), so an older file's preset converts to the same preset
 namespace {
 struct PadFeel { int speed, fine, dead, curve, turbo, smooth, tighten, gaccel; };
 constexpr PadFeel kPadFeel[kPadPresets] = {
@@ -124,23 +158,39 @@ constexpr PadFeel kPadFeel[kPadPresets] = {
     {5, 4, 2, 2, 1, 1, 0, 0},   // Balanced: the defaults (PadStyle)
     {7, 5, 2, 1, 2, 1, 0, 1},   // Fast: 1.4x gyro / a faster stick, curve 1.5, the high turbo, low acceleration
 };
+// the speeds a preset sets in a style 1-4 (bits: stick, fine, gyro, touch): only the inputs that style aims with
+unsigned presetSpeeds(int style)
+{
+    return style == 1 ? 1 | 2 : style == 2 ? 4 : style == 3 ? 2 | 4 : 8;
+}
 } // namespace
 
-void applyPadPreset(PadStyle& s, int preset)
+void applyPadPreset(PadStyle& s, int preset, int style)
 {
     if (preset < 1 || preset > kPadPresets)
         return;
     const PadFeel& f = kPadFeel[preset - 1];
-    s.speed = f.speed, s.fine = f.fine, s.dead = f.dead, s.curve = f.curve, s.turbo = f.turbo, s.smooth = f.smooth;
+    const PadSpeeds v = legacyPadSpeeds(style, f.speed, f.fine);
+    const unsigned m = presetSpeeds(style);
+    if (m & 1) s.stickSens = v.stick;
+    if (m & 2) s.fineSens = v.fine;
+    if (m & 4) s.gyroSens = v.gyro;
+    if (m & 8) s.touchSens = v.touch;
+    s.dead = f.dead, s.curve = f.curve, s.turbo = f.turbo, s.smooth = f.smooth;
     s.tighten = f.tighten, s.gaccel = f.gaccel;
 }
 
-int padPresetOf(const PadStyle& s)
+int padPresetOf(const PadStyle& s, int style)
 {
+    const unsigned m = presetSpeeds(style);
     for (int i = 0; i < kPadPresets; ++i) {
         const PadFeel& f = kPadFeel[i];
-        if (s.speed == f.speed && s.fine == f.fine && s.dead == f.dead && s.curve == f.curve && s.turbo == f.turbo &&
-            s.smooth == f.smooth && s.tighten == f.tighten && s.gaccel == f.gaccel)
+        const PadSpeeds v = legacyPadSpeeds(style, f.speed, f.fine);
+        if (((m & 1) && s.stickSens != v.stick) || ((m & 2) && s.fineSens != v.fine) || ((m & 4) && s.gyroSens != v.gyro) ||
+            ((m & 8) && s.touchSens != v.touch))
+            continue;
+        if (s.dead == f.dead && s.curve == f.curve && s.turbo == f.turbo && s.smooth == f.smooth && s.tighten == f.tighten &&
+            s.gaccel == f.gaccel)
             return i + 1;
     }
     return 0;
@@ -174,12 +224,20 @@ bool LaunchConfig::load(const std::string& file)
     bool bloodV2 = false;   // launcher.ini from before yellow (4) had the custom colour at 4
     int padV = 1;           // padv=2: the aim's feel values of worker "padfeel" (2026-10-20); older ones are reset
                             // padv=3 (relpad): no Sideways style (the Touchpad 5 -> 4)
+                            // padv=4 (sens36): each input its own speed (older: converted)
     int padStyleRaw[4] = {-1, -1, -1, -1};   // relpad: pad1.style= as written (padv < 3: 4 was Sideways, 5 Touchpad)
     bool enemy4pSeen = false;   // enemy4p= (cpuai 2026-10-26) not there yet: boss4p= at the old default 25 becomes the new 50
     bool sightSeen[4] = {};     // firing range: a player's crosshair keys there (else player 1's)
     int displayModeSeen = -1, exclusiveSeen = -1;   // rescrash: displaymode= / exclusive= (Video > Display Mode)
     int startLivesSeen = 0, maxLivesSeen = 0;   // GitHub #30: startlives= / maxlives= (an older file: lives= alone)
-    int gyroSpeedSeen = 0;                      // GitHub #36: gyrocursorspeed= (an older file: the one Cursor Speed's)
+    // GitHub #36: the menu cursor's cursorspeed= / gyrocursorspeed= (1-10, before sens36; an older file still: the one
+    // Cursor Speed's for both) and touchcursorsens= / gyrocursorsens= (%, sens36)
+    int cursorSpeedSeen = 0, gyroSpeedSeen = 0, touchCursorSensSeen = 0, gyroCursorSensSeen = 0;
+    // sens36: the pad's older speed settings (padv < 4), converted after the loop: per style Sensitivity speed= and
+    // Fine Aim Speed fine=, the player's aimsens= / sticksens= / gyrosens= / touchsens=; a pad with any of the new
+    // pad1.<style>.aimstick= .. aimtouch= lines is not converted
+    struct OldPad { int speed[kPadStyles] = {5, 5, 5, 5}, fine[kPadStyles] = {4, 4, 4, 4}; int aim = 10, stick = 10, gyro = 10, touch = 10; bool fresh = false; };
+    OldPad oldPad[4];
     while (std::getline(f, line)) {
         const size_t eq = line.find('=');
         if (eq == std::string::npos)
@@ -241,6 +299,14 @@ bool LaunchConfig::load(const std::string& file)
                 rest = rest.substr(dot + 1);
             }
             if (st < 0 && rest == "style") padStyleRaw[k[3] - '1'] = n;
+            OldPad& op = oldPad[k[3] - '1'];   // (sens36: the older speeds)
+            if (st >= 0 && rest == "speed") op.speed[st] = std::clamp(n, 1, 10);
+            else if (st >= 0 && rest == "fine") op.fine[st] = std::clamp(n, 1, 10);
+            else if (st < 0 && rest == "aimsens") op.aim = std::clamp(n, 5, 20);
+            else if (st < 0 && rest == "sticksens") op.stick = std::clamp(n, 5, 20);
+            else if (st < 0 && rest == "gyrosens") op.gyro = std::clamp(n, 5, 20);
+            else if (st < 0 && rest == "touchsens") op.touch = std::clamp(n, 5, 20);
+            else if (st >= 0 && rest.rfind("aim", 0) == 0) op.fresh = true;
             for (int i = 0; i < nf; ++i) {
                 if (rest != pfs[i].key) continue;
                 if (st >= 0 && pfs[i].styleMember) pp.s[st].*pfs[i].styleMember = std::clamp(n, pfs[i].lo, pfs[i].hi);
@@ -287,6 +353,7 @@ bool LaunchConfig::load(const std::string& file)
             sightSeen[s] = true;
         }
         else if (k == "aspect") aspect = std::clamp(n, 0, 2);
+        else if (k == "widen2d") widen2d = std::clamp(n, 0, 1);
         else if (k == "fullscreen") fullscreen = n != 0;
         else if (k == "displaymode") displayModeSeen = std::clamp(n, 0, 2);
         else if (k == "exclusive") exclusiveSeen = n != 0;
@@ -327,8 +394,10 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "iconoutline") iconOutline = n ? 1 : 0;   // menus3: Icon Outline
         else if (k == "touchcursor") touchCursor = std::clamp(n, 0, 1);   // padglyphs: the pad cursor
         else if (k == "gyrocursor") gyroCursor = std::clamp(n, 0, 2);
-        else if (k == "cursorspeed") cursorSpeed = std::clamp(n, 1, 10);
+        else if (k == "cursorspeed") cursorSpeedSeen = std::clamp(n, 1, 10);
         else if (k == "gyrocursorspeed") gyroSpeedSeen = std::clamp(n, 1, 10);   // (#36)
+        else if (k == "touchcursorsens") touchCursorSensSeen = std::clamp(n, kCursorSensLo, kCursorSensHi);   // (sens36)
+        else if (k == "gyrocursorsens") gyroCursorSensSeen = std::clamp(n, kCursorSensLo, kCursorSensHi);
         else if (k.size() == 10 && k.rfind("mousesens", 0) == 0 && (k[9] == '1' || k[9] == '2')) mouseSens[k[9] - '1'] = std::clamp(n, 5, 20);
         else if (k == "gunborder") gunBorder = std::clamp(n, 0, 4); // padpass: the white border
         else if (k == "trailer") trailer = n != 0;
@@ -350,6 +419,8 @@ bool LaunchConfig::load(const std::string& file)
         else if (k == "crt.shotfiltered") crt.shotFiltered = n != 0;
         else if (k == "gamma") { const int g = gammaParse(v.c_str()); if (g > 0) gamma = g; }
         else if (k == "menugamma") { const int g = gammaParse(v.c_str()); if (g > 0) menuGamma = g; }   // (polish)
+        else if (k == "blacklevel") blackLevel = std::clamp(n, int(kBlackMin), int(kBlackMax));   // (bugs4, #23)
+        else if (k == "vrr") vrr = n != 0;   // (bugs4, #20)
         else if (k == "music") music = n != 0;
         else if (k == "musicvolume") musicVolume = std::clamp(n, 0, 100) / 5 * 5;   // (prerel: 5 % steps)
         else if (k == "sfxvolume") sfxVolume = std::clamp(n, 0, 100) / 5 * 5;   // (prerel: 5 % steps)
@@ -377,7 +448,13 @@ bool LaunchConfig::load(const std::string& file)
     for (int s = 1; s < 4; ++s)   // firing range: an older launcher.ini (one crosshair for all): player 1's for everyone
         if (!sightSeen[s])
             sights[s] = sights[0];
-    gyroCursorSpeed = gyroSpeedSeen > 0 ? gyroSpeedSeen : cursorSpeed;   // (#36)
+    // (#36, sens36) the menu cursor: the % lines, else the older 1-10 (x 20 %: 5 = 100 %; no gyrocursorspeed=: the one
+    // Cursor Speed's)
+    {
+        const int oldTouch = cursorSpeedSeen > 0 ? cursorSpeedSeen : 5, oldGyro = gyroSpeedSeen > 0 ? gyroSpeedSeen : oldTouch;
+        touchCursorSens = touchCursorSensSeen > 0 ? touchCursorSensSeen : std::clamp(oldTouch * 20, kCursorSensLo, kCursorSensHi);
+        gyroCursorSens = gyroCursorSensSeen > 0 ? gyroCursorSensSeen : std::clamp(oldGyro * 20, kCursorSensLo, kCursorSensHi);
+    }
     if (startLivesSeen > 0 || maxLivesSeen > 0)   // GitHub #30: the two settings over lives= (the same pair when both are there)
         lives = livesCode(startLivesSeen > 0 ? startLivesSeen : livesStartOf(lives), maxLivesSeen > 0 ? maxLivesSeen : livesMostOf(lives));
     if (!chapterPlayable(chapter))   // a chapter of an older build that is not playable in this one
@@ -398,12 +475,28 @@ bool LaunchConfig::load(const std::string& file)
     if (!enemy4pSeen && boss4p == 25)   // the 4P bosses: +25 % a player was too easy (docs/coop4.md "Enemy pressure")
         boss4p = 50;
     if (padV < 2)   // the speed / dead zone / curve / smoothing / space scales changed: their new defaults
-        for (PadProfile& pp : pad)
-            for (PadStyle& st : pp.s) {
+        for (int p = 0; p < 4; ++p)
+            for (int s = 0; s < kPadStyles; ++s) {
                 const PadStyle def;
-                st.speed = def.speed, st.fine = def.fine, st.dead = def.dead, st.curve = def.curve, st.smooth = def.smooth;
+                PadStyle& st = pad[p].s[s];
+                oldPad[p].speed[s] = 5, oldPad[p].fine[s] = 4;
+                st.dead = def.dead, st.curve = def.curve, st.smooth = def.smooth;
                 st.space = def.space;
             }
+    // sens36 (GitHub #36): padv < 4 had one Sensitivity (and Fine Aim Speed) per style and the player's Aim / Stick /
+    // Gyro / Trackpad Sensitivity multiplied on top: each input's speed now its own %, the same speed as before
+    // (rounded to 1 %, kPadSensLo..Hi). The older keys are not written again (an older build reads its defaults)
+    if (padV < 4)
+        for (int p = 0; p < 4; ++p) {
+            const OldPad& op = oldPad[p];
+            if (op.fresh)
+                continue;
+            for (int s = 0; s < kPadStyles; ++s) {
+                const PadSpeeds v = legacyPadSpeeds(s + 1, op.speed[s], op.fine[s], op.aim, op.stick, op.gyro, op.touch);
+                PadStyle& st = pad[p].s[s];
+                st.stickSens = v.stick, st.fineSens = v.fine, st.gyroSens = v.gyro, st.touchSens = v.touch;
+            }
+        }
     // relpad (user 2026-10-30): the Sideways grip style is gone. Older files (padv < 3) had it at 4 and the Touchpad at
     // 5: Sideways loads as Motion + stick (the pad held normally), the Touchpad as 4
     for (int p = 0; p < 4; ++p)
@@ -437,7 +530,7 @@ void LaunchConfig::save(const std::string& file) const
     std::ofstream& f = c.f;
     f << "arcade=" << toBase(arcade, base) << "\npc=" << toBase(pc, base) << "\nmodels=" << models << "\nsound=" << sound << "\nplayers=" << players << "\np2input=" << p2Input
       << "\ndifficulty=" << difficulty << "\nlives=" << lives << "\nstartlives=" << livesStartOf(lives) << "\nmaxlives=" << livesMostOf(lives) << "\nsoloseat=" << soloSeat << "\nchapterretry=" << (chapterRetry ? 1 : 0) << "\nblood=" << blood << "\ncuts=" << (cuts ? 1 : 0) << "\ntitle=" << (title ? 1 : 0) << "\nfbi=" << (fbi ? 1 : 0) << "\npcsplash=" << (pcSplash ? 1 : 0) << "\ngametext=" << gameText << "\nlang=" << language
-      << "\naspect=" << aspect << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nflashlight=" << (flashlight ? 1 : 0) << "\nbigheads=" << (bigHeads ? 1 : 0) << "\nshotgun=" << (shotgun ? 1 : 0) << "\npartyboard=" << (partyBoard ? 1 : 0) << "\nhardcore=" << (hardcore ? 1 : 0) << "\nfreefire=" << (freeFire ? 1 : 0) << "\nmachinegun=" << (machineGun ? 1 : 0) << "\narsenal=" << (weaponSwitch ? 1 : 0) << "\nsuddendeath=" << (suddenDeath ? 1 : 0) << "\nvampire=" << (vampire ? 1 : 0) << "\nhostagecrisis=" << (hostageCrisis ? 1 : 0) << "\nroulette=" << (roulette ? 1 : 0) << "\nsurvival=" << (survival ? 1 : 0) << "\nexploding=" << (exploding ? 1 : 0) << "\nfunlook=" << funLook << "\nturbo=" << turbo << "\nbossrush=" << (bossRush ? 1 : 0) << "\nmarried=" << (married ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
+      << "\naspect=" << aspect << "\nwiden2d=" << widen2d << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nflashlight=" << (flashlight ? 1 : 0) << "\nbigheads=" << (bigHeads ? 1 : 0) << "\nshotgun=" << (shotgun ? 1 : 0) << "\npartyboard=" << (partyBoard ? 1 : 0) << "\nhardcore=" << (hardcore ? 1 : 0) << "\nfreefire=" << (freeFire ? 1 : 0) << "\nmachinegun=" << (machineGun ? 1 : 0) << "\narsenal=" << (weaponSwitch ? 1 : 0) << "\nsuddendeath=" << (suddenDeath ? 1 : 0) << "\nvampire=" << (vampire ? 1 : 0) << "\nhostagecrisis=" << (hostageCrisis ? 1 : 0) << "\nroulette=" << (roulette ? 1 : 0) << "\nsurvival=" << (survival ? 1 : 0) << "\nexploding=" << (exploding ? 1 : 0) << "\nfunlook=" << funLook << "\nturbo=" << turbo << "\nbossrush=" << (bossRush ? 1 : 0) << "\nmarried=" << (married ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
       << "\ndisplaymode=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? (exclusive ? 2 : 1) : 0)
       << "\nexclusive=" << (exclusive ? 1 : 0)
       << "\nresolution_fullscreen=" << util::sizeKey({resFullW, resFullH}) << "\nresolution_window=" << util::sizeKey({resWinW, resWinH})
@@ -448,13 +541,18 @@ void LaunchConfig::save(const std::string& file) const
       << "\ncrt.crispsights=" << (crt.crispSights ? 1 : 0) << "\ncrt.shotfiltered=" << (crt.shotFiltered ? 1 : 0)
       << "\ngamma=" << [this]() { char b[8]; return std::string(gammaText(gamma, b)); }()
       << "\nmenugamma=" << [this]() { char b[8]; return std::string(gammaText(menuGamma, b)); }()
+      << "\nblacklevel=" << blackLevel << "\nvrr=" << (vrr ? 1 : 0)
       << "\nmusic=" << (music ? 1 : 0) << "\nmusicvolume=" << musicVolume << "\nsfxvolume=" << sfxVolume << "\nmusicnumbering=" << musicNumbering << "\nmenumusic=" << menuMusic
       << "\nmenustyle=" << menuStyle << "\nlivebg=" << liveBackground << "\nmenufps=" << menuFps << "\nmenublood=" << menuBlood << "\ngallery=" << galleryEntry << "\ngallerybg=" << galleryBg << "\ngallerylayout=" << galleryLayout;
     f << "\nscenecast=" << sceneCast;   // actors2: the cut-scene viewer's Actors
     f << "\nguntype=" << gunKind << "\ngunflash=" << gunFlash << "\ngunborder=" << gunBorder;   // padpass: light guns
     f << "\npadprompts=" << padPrompts << "\nbuttonstyle=" << buttonStyle << "\niconoutline=" << iconOutline;
-    f << "\ntouchcursor=" << touchCursor << "\ngyrocursor=" << gyroCursor << "\ncursorspeed=" << cursorSpeed;   // padglyphs   // padglyphs: Button Prompts / Style
-    f << "\ngyrocursorspeed=" << gyroCursorSpeed << "\nmousesens1=" << mouseSens[0] << "\nmousesens2=" << mouseSens[1];   // (#36)
+    f << "\ntouchcursor=" << touchCursor << "\ngyrocursor=" << gyroCursor;   // padglyphs   // padglyphs: Button Prompts / Style
+    // (#36, sens36) the menu cursor's % and, for an older build, its nearest 1-10
+    f << "\ntouchcursorsens=" << touchCursorSens << "\ngyrocursorsens=" << gyroCursorSens
+      << "\ncursorspeed=" << std::clamp(int(std::lround(touchCursorSens / 20.0)), 1, 10)
+      << "\ngyrocursorspeed=" << std::clamp(int(std::lround(gyroCursorSens / 20.0)), 1, 10);
+    f << "\nmousesens1=" << mouseSens[0] << "\nmousesens2=" << mouseSens[1];   // (#36)
     for (int i = 0; i < 5; ++i)
         f << "\nsteamart" << i << '=' << steamArt[i];
     for (int s = 0; s < 4; ++s) {   // firing range: each player's crosshair (player 1 without a number)
@@ -464,7 +562,7 @@ void LaunchConfig::save(const std::string& file) const
           << ss.size << "\ncrossthick" << n << '=' << ss.thick << "\ncrosscolour" << n << '=' << ss.colour;
     }
     f << "\np1input=" << p1Input << "\np3input=" << p3Input << "\np4input=" << p4Input << "\np2bot=" << seatBot[1]
-      << "\np3bot=" << seatBot[2] << "\np4bot=" << seatBot[3] << "\npadv=3";
+      << "\np3bot=" << seatBot[2] << "\np4bot=" << seatBot[3] << "\npadv=4";   // (sens36: 4, each input its own speed)
     int nf = 0;
     const PadField* pf = padFields(nf);
     for (int p = 0; p < 4; ++p) {

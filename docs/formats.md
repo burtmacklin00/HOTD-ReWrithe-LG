@@ -565,8 +565,12 @@ What is known:
 - How much brighter, as a power curve: the gamma that brings MAME's value back to the table's own value is about
   1.4 (bright colours) to 1.6 (middle) to 2+ (dark ones), e.g. base 16 at full brightness 74 -> 120 needs 1.64.
   A power curve cannot bring back the shades MAME's curve made 0 (they stay black: blacks stay black is the point of
-  a gamma slider); a "black level" control (the `64`) would, and is the more hardware-like knob: an open question
-  for later (it is the renderer's shader, the arcade path only).
+  a gamma slider); a "black level" control (the `64`) would, and is the more hardware-like knob. Done (bugs4,
+  2026-11-04): Options -> Video -> **Black Level** (render/gamma.h `blackLevel()`, launcher.ini `blacklevel=`,
+  `--black-level`): the curve is `max(v − b, 0) × 255 / (255 − b)`, b = 64 (default: the shader's original line, every
+  frame bit-identical) down to 0, per pixel before the 8-bit output in the shader (`uM2Gamma` 2, `uM2Black`), in the
+  2D layer's table (sprites_arcade.cpp) and the cut-scene bars' flash (hud.cpp). Not yet matched to the C-CRX
+  real-hardware video of issue #23 (no preset).
 
 Options -> Video -> **Game Gamma** / **Menu Gamma** (src/render/gamma.h; launcher.ini `gamma=` / `menugamma=`, `--gamma` /
 `--menu-gamma`: the play / the menus, the Gallery and the front-end screens): `out = in ^ (1 / gamma)` on the

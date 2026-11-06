@@ -190,6 +190,8 @@ bool aimPoint(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y, floa
 // The Typing of the Dead 0 (game/typing.h): a body part of the object that takes damage, on the screen (the biggest
 // hit spheres first, `pick` going round them); false: none (no part tree, or none on the screen)
 bool partAim(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y);
+// totd5: a landed shot's hit of `player` on the object's biggest body part that takes damage (no shot fired); false: no body
+bool partHit(Runtime& rt, uint32_t obj, int player);
 
 void installCrashHandler(const uint64_t* frameCounter);   // a crash prints "ROBUST: result=crash" and exits 3
 

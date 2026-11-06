@@ -5,9 +5,9 @@
 # Builds Windows x64, Linux x64 (also the SteamOS / Steam Deck build), macOS universal (arm64 + x86_64, unsigned),
 # runs the tests that need no game data (--version, --mods-test, hotd_nettest; --gl-check on Mesa's software driver) and uploads each package as an artifact.
 # NO GAME DATA is used or packaged. Nothing is published: making the GitHub Release from the artifacts stays manual.
-# Every package is built with HOTD_EXPERIMENTAL_MODES=OFF (no Typing of the Dead 0 or Horde until they are
-# polished: docs/porting.md "Experimental modes"); the tests check that --totd is refused. Survival Mode is in (HOTD_SURVIVAL_MODE=ON, labelled Very
-# Experimental / Proof of Concept).
+# Every package is built with HOTD_EXPERIMENTAL_MODES=OFF (no unreleased mode: docs/porting.md "Experimental
+# modes"); the tests check that --totd-test is accepted. The Typing of the Dead 0 is in
+# (HOTD_TOTD_MODE=ON, labelled Experimental / Proof of Concept); Survival Mode is in (HOTD_SURVIVAL_MODE=ON).
 #
 # Third-party sources fetched at build time (pinned; licences in NOTICE.md): SDL3 release-3.2.10 (zlib), stb_vorbis
 # (public domain), dr_mp3 51e61d3 (public domain), Musashi 313ebf1 (MIT; its m68kfpu.c / m68kmmu.h / softfloat are
@@ -83,7 +83,7 @@ jobs:
           -DHOTD_LOCAL_ICON=OFF -DHOTD_FETCH_SDL3=ON -DHOTD_SDL3_TAG=$SDL3_TAG
           -DHOTD_STB_DIR="$PWD/deps/stb" -DHOTD_DR_LIBS_DIR="$PWD/deps/dr_libs"
           -DHOTD_ARCADE_SOUND=ON -DHOTD_MUSASHI_DIR="$PWD/deps/musashi" -DHOTD_SCSP_DIR="$PWD/deps/mame_scsp"
-          -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON
+          -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MODE=ON -DHOTD_SURVIVAL_MODE=ON
       - name: Build
         run: cmake --build build --config Release --parallel --target hotd hotd_viewer hotd_nettest
       - name: Tests (no game data)
@@ -94,7 +94,7 @@ jobs:
           build/Release/hotd.exe --version | tee version.txt
           grep -q "v${GITHUB_REF_NAME#v}" version.txt || [ "$GITHUB_REF_TYPE" != tag ]
           build/Release/hotd.exe --mods-test
-          (build/Release/hotd.exe --totd 2>&1 || true) | grep -q "not in this version"   # (TotD / Horde left out; Survival stays)
+          ! (build/Release/hotd.exe --totd-test --frames 1 --arcade nonexistent.zip 2>&1 || true) | grep -q "not in this version"
           build/Release/hotd_nettest.exe
       - name: Graphics test on Mesa's software driver (no game data)
         # compat (2026-10-29): mesa-dist-win's llvmpipe (strict OpenGL, no GPU on the runner) next to a copy of hotd.exe:
@@ -169,7 +169,7 @@ jobs:
           -DHOTD_FETCH_SDL3=ON -DHOTD_SDL3_TAG=$SDL3_TAG \
           -DHOTD_STB_DIR="$PWD/deps/stb" -DHOTD_DR_LIBS_DIR="$PWD/deps/dr_libs" \
           -DHOTD_ARCADE_SOUND=ON -DHOTD_MUSASHI_DIR="$PWD/deps/musashi" -DHOTD_SCSP_DIR="$PWD/deps/mame_scsp" \
-          -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON
+          -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MODE=ON -DHOTD_SURVIVAL_MODE=ON
       - name: Build
         run: cmake --build build-linux --parallel --target hotd hotd_viewer hotd_nettest
       - name: Tests (no game data)
@@ -178,7 +178,7 @@ jobs:
           export HOTD_PREF_DIR="$RUNNER_TEMP/pref"
           ./build-linux/hotd --version
           ./build-linux/hotd --mods-test
-          (./build-linux/hotd --totd 2>&1 || true) | grep -q "not in this version"
+          ! (./build-linux/hotd --totd-test --frames 1 --arcade nonexistent.zip 2>&1 || true) | grep -q "not in this version"
           ./build-linux/hotd_nettest
           # SteamOS / older distributions: only glibc and the bundled SDL (libstdc++ linked in: HOTD_STATIC_CXX_RUNTIME;
           # SDL built from source loads X11 / Wayland / audio at run time)
@@ -216,7 +216,7 @@ jobs:
           export HOTD_PREF_DIR="$RUNNER_TEMP/pref_pkg"
           "$p/hotd.sh" --version
           "$p/bin/hotd" --mods-test
-          ("$p/bin/hotd" --totd 2>&1 || true) | grep -q "not in this version"
+          ! ("$p/bin/hotd" --totd-test --frames 1 --arcade nonexistent.zip 2>&1 || true) | grep -q "not in this version"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64
@@ -254,7 +254,7 @@ jobs:
           -DHOTD_FETCH_SDL3=ON -DHOTD_SDL3_TAG=$SDL3_TAG
           -DHOTD_STB_DIR="$PWD/deps/stb" -DHOTD_DR_LIBS_DIR="$PWD/deps/dr_libs"
           -DHOTD_ARCADE_SOUND=ON -DHOTD_MUSASHI_DIR="$PWD/deps/musashi" -DHOTD_SCSP_DIR="$PWD/deps/mame_scsp"
-          -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_SURVIVAL_MODE=ON
+          -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MODE=ON -DHOTD_SURVIVAL_MODE=ON
       - name: Build
         run: cmake --build build-mac --parallel --target hotd hotd_viewer hotd_nettest
       - name: Tests (no game data)
@@ -263,7 +263,7 @@ jobs:
           export HOTD_PREF_DIR="$RUNNER_TEMP/pref"
           ./build-mac/hotd --version
           ./build-mac/hotd --mods-test
-          (./build-mac/hotd --totd 2>&1 || true) | grep -q "not in this version"
+          ! (./build-mac/hotd --totd-test --frames 1 --arcade nonexistent.zip 2>&1 || true) | grep -q "not in this version"
           ./build-mac/hotd_nettest
           lipo -archs build-mac/hotd | grep -q "x86_64 arm64\|arm64 x86_64"
       - name: Package (folder + a small unsigned .app that starts bin/hotd)
@@ -276,13 +276,12 @@ jobs:
           sdl="$(find build-mac/_deps -name 'libSDL3.0.dylib' | head -1)"
           cp -L "$sdl" "$out/bin/libSDL3.0.dylib"
           echo "The House of the Dead: ReWrithe, portable package (no game data)." > "$out/hotd_package.txt"
-          for d in ui fonts lang mods; do mkdir -p "$out/data/$d"; cp -R "data/$d/." "$out/data/$d/"; done
-          # the modes left out (Typing of the Dead 0, Horde) leave the language files too (as the Windows package)
+          for d in ui fonts lang mods typing; do mkdir -p "$out/data/$d"; cp -R "data/$d/." "$out/data/$d/"; done
+          # the modes left out leave the language files too (their "# [unreleased]" sections, as the Windows package)
           for f in "$out"/data/lang/*.txt; do
-            awk '{ if ($0 !~ /^[ \t]*#/ && index($0, " = ")) { k = tolower(substr($0, 1, index($0, " = ") - 1));
-                   if (k ~ /typing of the dead|totd|horde/) next } print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+            awk '/^[ \t]*#[ \t]*\[unreleased\]/ { s = 1; next } /^[ \t]*#[ \t]*\[\/unreleased\]/ { s = 0; next } !s' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
           done
-          ! grep -rqiE "^[^#]*(typing of the dead|horde)" "$out/data/lang"
+          ! grep -rq "\[unreleased\]" "$out/data/lang"
           mkdir -p "$out/data/arcade" "$out/data/pc" "$out/data/music"
           echo "Put your own arcade ROM zip here (MAME's 'hotd' set, Revision A)." > "$out/data/arcade/put the arcade ROM zip here.txt"
           echo "Put your own 1998 PC game here (its installed folder's contents, or a .zip of it)." > "$out/data/pc/put the PC game here.txt"
@@ -350,7 +349,7 @@ jobs:
           HOTD_PREF_DIR="$RUNNER_TEMP/pref_pkg" "$app/Contents/MacOS/hotd-launcher" --version
           rm -rf "$out/settings"   # (the two runs above made it: the package ships without one)
           # no game data
-          ! find "$out" -type f \( -iname '*.zip' -o -iname '*.ogg' -o -iname '*.mp3' -o -iname '*.wav' -o -iname '*.rbh' -o -iname '*.bin' -o -iname 'thotd.exe' \) | grep -q .
+          ! find "$out" -type f -not -path '*/data/typing/ding.wav' \( -iname '*.zip' -o -iname '*.ogg' -o -iname '*.mp3' -o -iname '*.wav' -o -iname '*.rbh' -o -iname '*.bin' -o -iname 'thotd.exe' \) | grep -q .
           (cd "$root" && ditto -c -k --keepParent "HOTD ReWrithe macOS" "hotd-rewrithe-v${ver}-macos-universal.zip" \
             && shasum -a 256 "hotd-rewrithe-v${ver}-macos-universal.zip" > SHA256SUMS-macos.txt)
       - uses: actions/upload-artifact@v4

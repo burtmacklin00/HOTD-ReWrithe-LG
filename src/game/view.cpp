@@ -324,6 +324,19 @@ bool GameView::finish(std::unique_ptr<Prepared> p, std::string& err)
     skins_ = std::move(p->skins);
     stage_ = std::move(p->stage);
     pcStage_ = std::move(p->pcStage);
+    // developer (weapons: the in-game models to pick): HOTD_DUMP_MODEL_NAMES=<file>: every model of the stage (id, name,
+    // triangles, bounds) and each creature type's skeleton models
+    if (const char* dump = std::getenv("HOTD_DUMP_MODEL_NAMES"))
+        if (FILE* f = std::fopen(dump, "w")) {
+            for (const auto& [id, m] : stage_->models)
+                std::fprintf(f, "%#x %s tris %zu bounds %.2f..%.2f %.2f..%.2f %.2f..%.2f\n", id, m.name.c_str(), size_t(m.triangleCount()), m.boundsMin[0],
+                             m.boundsMax[0], m.boundsMin[1], m.boundsMax[1], m.boundsMin[2], m.boundsMax[2]);
+            for (int t = 0; t < anim_.typeCount(); ++t)
+                for (const SkeletonNode& n : anim_.skeleton(t).nodes)
+                    if (n.model)
+                        std::fprintf(f, "type %d node model %#x\n", t, n.model);
+            std::fclose(f);
+        }
     for (int s = 0; s < 2; ++s)   // 4P: players 3 / 4's colour ramps (player_colours.h) for their shot sparks
         for (int k = 0; k < 5; ++k)
             for (int c = 0; c < 3; ++c)
@@ -441,6 +454,7 @@ bool GameView::finish(std::unique_ptr<Prepared> p, std::string& err)
             walls_.objs.push_back(std::move(o));
         }
         staticWalls_ = walls_.objs.size();
+        walls_.statics = staticWalls_;
         SDL_Log("view: the ragdolls' walls: %zu triangles, ground %zu, in %zu world objects (%.1f ms)", total, floors,
                 walls_.objs.size(), double(SDL_GetTicksNS() - w0) / 1e6);
     }

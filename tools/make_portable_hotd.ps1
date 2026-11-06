@@ -5,9 +5,9 @@
 #   powershell -ExecutionPolicy Bypass -File tools\make_portable_hotd.ps1 [-Build <build folder>] [-Out <folder>] [-NoBuild] [-Release]
 #   -NoBuild: copy the exe the build folder already has (no cmake --build, nothing is rebuilt or locked).
 #   -Release: a public release package (docs/porting.md "Experimental modes"): built with HOTD_EXPERIMENTAL_MODES=OFF (no
-#     Typing of the Dead 0 or Horde; Survival Mode in, HOTD_SURVIVAL_MODE=ON) in its own build folder, build-release (configured the first time with
+#     unreleased mode; The Typing of the Dead 0 in, HOTD_TOTD_MODE=ON; Survival Mode in, HOTD_SURVIVAL_MODE=ON) in its own build folder, build-release (configured the first time with
 #     the dev build's generator and dependency folders), into private\portable\HOTD ReWrithe Release; the exe is checked
-#     (--totd must be refused; Survival Mode stays in, labelled Very Experimental). Without -Release: the user's own copy from build\ (the modes ON, as build\Release).
+#     (--totd-test accepted). Without -Release: the user's own copy from build\ (the modes ON, as build\Release).
 #
 # Default output: <repo>\private\portable\HOTD Teaser (inside private\, never committed).
 # The game needs nothing else: the work RAM is built from the ROM at the start and the textures / colours come from
@@ -43,7 +43,7 @@ if ($Release -and -not $NoBuild) {
         throw "-Release builds in its own folder (build-release): not the dev build ($devBuild), which keeps the modes ON"
     }
     # the release package: HOTD_EXPERIMENTAL_MODES=OFF in its own build folder (the dev build keeps the modes)
-    $cfgArgs = @('-S', $repo, '-B', $Build, '-DHOTD_EXPERIMENTAL_MODES=OFF', '-DHOTD_SURVIVAL_MODE=ON', '-DHOTD_LOCAL_ICON=OFF')
+    $cfgArgs = @('-S', $repo, '-B', $Build, '-DHOTD_EXPERIMENTAL_MODES=OFF', '-DHOTD_TOTD_MODE=ON', '-DHOTD_SURVIVAL_MODE=ON', '-DHOTD_LOCAL_ICON=OFF')
     if (-not (Test-Path -LiteralPath (Join-Path $Build "CMakeCache.txt"))) {
         $devCache = Get-Content -LiteralPath (Join-Path $devBuild "CMakeCache.txt") -ErrorAction SilentlyContinue
         $cfgArgs += @('-G', 'Visual Studio 17 2022', '-A', 'x64')
@@ -75,9 +75,18 @@ $expLine = Get-Content -LiteralPath (Join-Path $Build "CMakeCache.txt") -ErrorAc
 $expOn = -not ($expLine -match '=(OFF|0|FALSE|NO)$')
 if ($Release) {
     if ($expOn) { throw "$Build has HOTD_EXPERIMENTAL_MODES on: a release package must be built with it OFF" }
-    $said = (& (Join-Path $Build "Release\hotd.exe") --totd 2>&1 | Out-String)
-    if ($said -notmatch 'not in this version') { throw "the release exe did not refuse --totd: $said" }
-    Write-Host "experimental modes: OFF (Typing of the Dead 0 and Horde left out, Survival in; checked)"
+    # (the unreleased modes' code: not compiled at all with the experimental modes OFF, CMake HOTD_UNRELEASED)
+    if (Select-String -LiteralPath (Join-Path $Build "hotd.vcxproj") -Pattern 'src[\\/]unreleased' -Quiet) {
+        throw "$Build compiles src\unreleased: a release package must not"
+    }
+    # rel130 (v1.3.0): The Typing of the Dead 0 ships (HOTD_TOTD_MODE, "Experimental / Proof of Concept"): accepted
+    # (a headless test without game files: it stops at the files, after the options)
+    # (its log lines go to stderr: Windows PowerShell 5.1 makes them errors under "Stop")
+    $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    $said = (& (Join-Path $Build "Release\hotd.exe") --totd-test --frames 1 --arcade "nonexistent.zip" 2>&1 | Out-String)
+    $ErrorActionPreference = $eap
+    if ($said -match 'not in this version') { throw "the release exe refused The Typing of the Dead 0: $said" }
+    Write-Host "experimental modes: OFF (the unreleased modes left out; The Typing of the Dead 0 and Survival in; checked)"
 } else {
     Write-Host ("experimental modes: " + $(if ($expOn) { "ON (the user's own copy)" } else { "OFF" }))
 }
@@ -376,7 +385,7 @@ $pv = ((Get-Content -LiteralPath (Join-Path $Build "CMakeCache.txt") -ErrorActio
 # Special Elite, Apache 2.0: NOTICE.md), data\fonts (Noto Sans for Korean / Japanese / Chinese / Arabic / Hebrew /
 # Cyrillic, OFL.txt), data\lang (the language files: en / ko / ja / zh / ru / ar / he ...), data\mods (the ragdoll mod and the example mod); every file
 # the repo has there, so a new one comes along by itself
-foreach ($d in "ui", "fonts", "lang", "mods", "vr") {   # (vr: vr.ini, the VR settings: docs/vr.md)
+foreach ($d in "ui", "fonts", "lang", "mods", "vr", "typing") {   # (vr: vr.ini, the VR settings: docs/vr.md; typing: The Typing of the Dead 0's typing.ini, dictionary, ding: docs/typing.md)
     $src = Join-Path $repo "data\$d"
     if (-not (Test-Path -LiteralPath $src)) { continue }
     Get-ChildItem -LiteralPath $src -Recurse -File | ForEach-Object {
@@ -386,14 +395,24 @@ foreach ($d in "ui", "fonts", "lang", "mods", "vr") {   # (vr: vr.ini, the VR se
         Copy-Item -LiteralPath $_.FullName -Destination $dst -Force
     }
 }
-# -Release: the modes left out of the release builds (Typing of the Dead 0, Horde) are not shown anywhere: their menu
-# texts leave the language files too (the user, 2026-11-03: "don't even show them"); their data folders are not copied
+# weapons (docs/weapons.md): data\weapons.ini, Survival's weapon numbers (the user's own sounds go in data\weapons)
+if (Test-Path -LiteralPath (Join-Path $repo "data\weapons.ini")) {
+    Copy-Item -LiteralPath (Join-Path $repo "data\weapons.ini") -Destination (Join-Path $Out "data\weapons.ini") -Force
+}
+# -Release: the modes left out of the release builds are not shown anywhere: their menu texts leave the language files
+# too (the user, 2026-11-03: "don't even show them"): each file's "# [unreleased]" .. "# [/unreleased]" section
 if ($Release) {
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     Get-ChildItem -LiteralPath (Join-Path $Out "data\lang") -Filter *.txt -File | ForEach-Object {
         $lines = [IO.File]::ReadAllLines($_.FullName, $utf8)
-        $keep = $lines | Where-Object { $_ -notmatch '^\s*#' -and $_ -match ' = ' -and ($_ -split ' = ', 2)[0] -match '(?i)typing of the dead|totd|horde' }
-        if ($keep) { [IO.File]::WriteAllLines($_.FullName, ($lines | Where-Object { $keep -notcontains $_ }), $utf8) }
+        $kept = New-Object System.Collections.Generic.List[string]
+        $skip = $false
+        foreach ($l in $lines) {
+            if ($l -match '^\s*#\s*\[unreleased\]') { $skip = $true; continue }
+            if ($l -match '^\s*#\s*\[/unreleased\]') { $skip = $false; continue }
+            if (-not $skip) { $kept.Add($l) }
+        }
+        if ($kept.Count -ne $lines.Count) { [IO.File]::WriteAllLines($_.FullName, $kept, $utf8) }
     }
 }
 # the license and the notice (what the license covers; no game data)
@@ -424,7 +443,8 @@ if ($icon -ne "OFF" -and $icon -ne "NO") {
     Write-Warning "this build was not configured with -DHOTD_LOCAL_ICON=OFF: it may carry the PC game's icon (not for release)"
 }
 $game = Get-ChildItem -LiteralPath $Out -Recurse -File | Where-Object {
-    $_.Extension -match '^\.(zip|7z|rar|ogg|mp3|wav|rbh|vmc|bin|rom|iso)$' -or $_.Name -match '^(epr|mpr)-' -or $_.Name -ieq "THOTD.EXE" }
+    ($_.Extension -match '^\.(zip|7z|rar|ogg|mp3|wav|rbh|vmc|bin|rom|iso)$' -or $_.Name -match '^(epr|mpr)-' -or $_.Name -ieq "THOTD.EXE") -and
+    $_.FullName -notlike "*\data\typing\ding.wav" }   # (rel130: The Typing of the Dead 0's bell: a CC0 sound, NOTICE.md)
 if ($game) { throw "game data in the package: $($game.FullName -join ', ')" }
 "checks: VERSIONINFO '$($vi.ProductName)' $($vi.FileVersion), asInvoker, no game data, icon setting '$icon'"
 if (-not $NoZip) {

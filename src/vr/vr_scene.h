@@ -26,7 +26,7 @@ namespace hotd::vr {
 
 // the hands drawn on the controllers: the game's own models from the player's game data (arcade ROMs or the PC
 // files, whichever source draws the game), no models of ours. 0x719 `ter00a`: the AMS agents' right hand holding the
-// handgun (joint 19 of every player skeleton, the cut-scenes'); 0x717 `tel00a`: Rogan's left hand. Horde Mode's SMG
+// handgun (joint 19 of every player skeleton, the cut-scenes'); 0x717 `tel00a`: Rogan's left hand. The SMG
 // has no model in the game: the handgun is drawn then too
 constexpr uint32_t kGunHandModel = 0x719, kLeftHandModel = 0x717;
 
@@ -63,8 +63,20 @@ public:
         bool reload = false;
         bool held = false;
         bool start = false;   // openxr: the left hand's primary button (X; Index: left A; Vive / WMR: left trackpad)
+        // dual pistols (docs/vr.md "Dual pistols"): the fields above are the right gun's; the left gun's own here
+        bool dual = false;
+        struct Gun {
+            bool valid = false;
+            float x = 0, y = 0;
+            bool onScreen = false;
+            int pulls = 0;
+            bool held = false;     // (its reloads, pointing down / its grip / Y, are `reload`: one magazine for both)
+        } left;
     };
     Aim takeAim();
+    // dual pistols now (main.cpp each tick: vr.ini dual_pistols, or Survival's Double Pistols in player 1's
+    // hands): the left controller holds the mirrored gun hand, aims and fires for itself
+    bool dual = false;
     // a controller's menu button pressed since the last take (main.cpp: the pause)
     bool takeMenu();
 
@@ -88,14 +100,19 @@ public:
     // the whole chain: the world point the game camera sees at that aim (the eye's depth), the gun's ray from its
     // muzzle to it, its hit in the eye's depth, back through the game camera = the same arcade point
     bool followGameAim = false;
+    // dual pistols' test: the game's own aim (--autofire's, before the VR guns replace player 1's input) to follow
+    bool testAimSet = false;
+    float testAim[2] = {0, 0};
     struct TestStats {
         int frames = 0, checked = 0, over = 0, blocked = 0;
         double worst = 0, sum = 0;
         int depthHits = 0;
+        int leftChecked = 0, leftDepthHits = 0;   // dual pistols: the left gun's round trips / hits in the depth
+        double leftSum = 0;
     } test;
 
     // the last frame's state (logs, tests)
-    AimResult lastAim;
+    AimResult lastAim, lastAimLeft;   // (lastAimLeft: dual pistols' left gun)
     float lastHitDist = 0;   // game units
     float vignetteNow = 0;
 
@@ -114,6 +131,7 @@ private:
     // aim / input
     Aim pending_;
     bool triggerDown_ = false, wasDown_ = false, wasLow_ = false;
+    bool triggerDownL_ = false, wasDownL_ = false, wasLowL_ = false;   // dual pistols: the left gun's
     bool gripDown_[2] = {}, wasReload_[2] = {}, wasMenu_ = false, menuPending_ = false, wasStart_ = false;
     // comfort
     float prevFwd_[3] = {0, 0, 0};

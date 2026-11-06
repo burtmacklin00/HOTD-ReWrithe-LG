@@ -349,6 +349,33 @@ bool partAim(Runtime& rt, uint32_t obj, uint32_t pick, float& x, float& y)
     return true;
 }
 
+// totd5 (The Typing of the Dead 0: a word's kill without a burst of shots): the hit a landed shot of `player` makes,
+// on the biggest body part that takes damage (on the screen or not): the part's and the object's hit bits (player + 1,
+// 0x100), as the weapons' blast marks a part (port shooting.cpp weapon_blast_hit); the creature's own enemy_part_hits
+// takes it in its next frame. False: no such part (no body)
+bool partHit(Runtime& rt, uint32_t obj, int player)
+{
+    const uint32_t root = rt.mem.u32(obj + 0xC8);
+    if (!rt.mem.mapped(root))
+        return false;
+    std::vector<uint32_t> parts;
+    listParts(rt, root, parts, 0);
+    uint32_t best = 0;
+    float bestR = -1;
+    for (uint32_t part : parts) {
+        if (part == root || rt.mem.u32(part) == 0 || (rt.mem.u32(part + 0x3C) & 0x80000000u) || partDamage(rt, obj, part) <= 0)
+            continue;
+        const float r = rt.mem.f32(part + 0x74);
+        if (r > bestR) bestR = r, best = part;
+    }
+    if (!best)
+        return false;
+    const uint32_t bit = (1u << ((player & 1) + 1)) | 0x100u;
+    rt.mem.at<uint32_t>(best + 0x3C) |= bit;
+    rt.mem.at<uint32_t>(obj + 0x58) |= bit;
+    return true;
+}
+
 Bot::Kind Bot::kindOf(Runtime& rt, uint32_t obj)
 {
     if (isHostage(rt, obj) || isHuman(rt, obj))

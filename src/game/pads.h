@@ -29,7 +29,8 @@
 //   North (Y, Triangle): held = the gyro's ratchet (the crosshair stays while the pad is turned back), tapped = the
 //   crosshair to the middle; right stick click = the middle; left stick: clicked = the middle, held = precise (35 % speed)
 //   a trigger pulled with the crosshair off the window (the stick, gyro or touchpad past the edge) = the reload; the
-//   crosshair stays there (padfix; was: back to the middle). Every aim x the player's Aim Sensitivity (Controls)
+//   crosshair stays there (padfix; was: back to the middle). Each input its own speed (sens36, GitHub #36: Stick /
+//   Fine Stick / Gyro / Trackpad Sensitivity per style, nothing shared on top; was x the player's Aim Sensitivity)
 //   Start = start / join / continue (not in play), the pause (in play); Back / Share / Minus = the pause
 //   (keybind: every one of these per player on Options > Controls > Keys & Buttons, game/keybinds.h; untouched = "Auto")
 //   paused: d-pad / stick up / down pick, South / trigger = choose, Start / East = close
@@ -86,6 +87,11 @@ public:
     // --input-test: only SDL's virtual pads (the test's own) are opened; physical pads and their buttons are left out,
     // so the test runs the same whatever is plugged in
     bool virtualOnly = false;
+    // weapons (game/weapons.h; Survival in play, main sets it each frame): a pad's shoulder buttons L1 / R1 and the
+    // d-pad's left / right are the previous / next weapon (their bound actions not done meanwhile: the triggers L2 / R2
+    // reload / fire by default); weaponStep: the steps asked since main last read them, by player
+    bool weaponShoulders = false;
+    int weaponStep[kInputPlayers] = {};
     void configure(const LaunchConfig& c);
 
     bool start();   // the gamepad subsystem (SDL_INIT_GAMEPAD)

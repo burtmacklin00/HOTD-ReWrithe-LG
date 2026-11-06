@@ -230,9 +230,41 @@ void Overlay::drawAnchored(int w, int h, float x, float y, float ax, float ay)
     drawRect(w, h, -1.0f + 2.0f * (x - pw * ax) / float(w), 1.0f - 2.0f * (y - ph * ay) / float(h));
 }
 
+bool gTextFit = false;
+long gTextFitChecked = 0;
+
+std::vector<TextFitMiss>& textFitMisses()
+{
+    static std::vector<TextFitMiss> v;
+    return v;
+}
+
+void textFitNote(const std::string& text, float x, float y, float w, float h, int W, int H)
+{
+    if (!gTextFit || text.empty() || W <= 0 || H <= 0)
+        return;
+    ++gTextFitChecked;
+    const float over = std::max(std::max(-x, x + w - float(W)), std::max(-y, y + h - float(H)));
+    if (over <= 1.0f)
+        return;
+    for (TextFitMiss& m : textFitMisses())
+        if (m.text == text) {
+            m.over = std::max(m.over, int(std::lround(over)));
+            return;
+        }
+    textFitMisses().push_back({text, int(std::lround(over)), W, H});
+}
+
 void Overlay::drawRect(int w, int h, float x0, float y1)
 {
     const float pw = float(texW_) * outScale(), ph = float(texH_) * outScale();
+    if (gTextFit && texW_ > 0) {   // checks1 (--text-fit): the panel's window rectangle (a ready picture: its size)
+        std::string all;
+        for (const std::string& l : lines_) all += (all.empty() ? "" : " | ") + l;
+        if (lines_.empty())
+            all = "[picture " + std::to_string(texW_) + "x" + std::to_string(texH_) + "]";
+        textFitNote(all, (x0 + 1.0f) * 0.5f * float(w), (1.0f - y1) * 0.5f * float(h), pw, ph, w, h);
+    }
     const float sw = 2.0f * pw / float(w), sh = 2.0f * ph / float(h);
     gl::Viewport(0, 0, w, h);
     gl::Disable(gl::DEPTH_TEST);

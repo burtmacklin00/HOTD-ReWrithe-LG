@@ -1,0 +1,85 @@
+# phrases: short everyday phrases, lower case, no punctuation (tougher zombies on Easy / Normal). Spaces are typed.
+all day long
+as soon as possible
+at the moment
+back to work
+bad weather
+behind the door
+better late than never
+big surprise
+bring a coat
+by the window
+call me later
+catch the bus
+clean the room
+close the gate
+cold coffee
+come back soon
+cup of tea
+dinner is ready
+do not panic
+down the hall
+each and every day
+easy does it
+face the music
+fresh air
+full moon tonight
+get some rest
+going home
+good luck
+good night
+green light
+hold the door
+hot chocolate
+in the morning
+just a minute
+keep it simple
+keep the change
+last chance
+left or right
+lights out
+lock the door
+long way home
+make a wish
+meet me there
+mind the step
+more or less
+never give up
+next time
+no time to lose
+not right now
+once in a while
+one more time
+open the window
+out of order
+over the hill
+pass the salt
+piece of cake
+please sit down
+quick question
+rainy day
+read the map
+ring the bell
+run for it
+see you soon
+slow and steady
+step by step
+stop and listen
+take a break
+take your time
+thank you
+the end is near
+time to go
+turn left here
+under the bed
+up the stairs
+wait for me
+walk the dog
+watch your step
+what a mess
+where are you
+wipe your feet
+work it out
+yes or no
+you are late
+zip it up

@@ -244,9 +244,18 @@ template <class P> void Game<P>::hermit_frame(uint32_t obj)
                 of<int16_t>(obj, 0x60) = 34;
             }
         }
+        // (ours, totd8: The Typing of the Dead 0's boss strike hold, game.h: the claws (11-15) and the lunge (21) wait
+        // as the arcade's own "combat not active" ones do, in a pose (action 33); the spit's balls carry their own key)
+        if (gBossHold && ((of<int16_t>(obj, 0x60) >= 11 && of<int16_t>(obj, 0x60) <= 15) || of<int16_t>(obj, 0x60) == 21) &&
+            gBossHold(obj)) {
+            mem.at<uint16_t>(blk + 0x1B8) = of<uint16_t>(obj, 0x60);
+            of<int16_t>(obj, 0x60) = 33;
+        }
     }
+    const int16_t heldAct = mem.at<int16_t>(blk + 0x1B8);
     if ((of<int16_t>(obj, 0x60) == 33 || of<int16_t>(obj, 0x60) == 34) && combat_active() != 0 &&
-        mem.at<uint8_t>(blk + 7) != 0) {
+        mem.at<uint8_t>(blk + 7) != 0 &&
+        !(gBossHold && ((heldAct >= 11 && heldAct <= 15) || heldAct == 21) && gBossHold(obj))) {
         const uint16_t held = mem.at<uint16_t>(blk + 0x1B8);
         of<int16_t>(obj, 0x66) = 0;
         of<uint16_t>(obj, 0x60) = held;

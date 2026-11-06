@@ -911,14 +911,12 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
             screenMainMenu();
         });
     };
-    const int grp = debugItems_ ? 0 : mainGroup_;
+    // GitHub #44: the groups open with SKIDMARX on too (was: forced to the top, so More Modes / Extras did nothing)
+    const int grp = mainGroup_;
     if (grp == 1) {
         items.push_back({-1, "More Modes", "", nullptr});
         items.back().heading = true;
-        items.push_back({-1, "Chapter Select", "Start at any chapter", [this]() {
-                             hordeChapters = false;
-                             screenChapters();
-                         }});
+        items.push_back({-1, "Chapter Select", "Start at any chapter", [this]() { screenChapters(); }});
         items.push_back({-1, "Co-op", "2 players, 4 players or online",
                          onCoop ? std::function<void()>([this]() { const auto f = onCoop; f(); }) : nullptr});
         if (sonicValue)
@@ -927,30 +925,23 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
                                  if (onSonic) onSonic();
                                  screenMainMenu();
                              }});
-        if (startTotd)   // The Typing of the Dead 0 (game/typing.h): the game played by typing
-            items.push_back({-1, "Typing of the Dead 0", "Type the words over the enemies to shoot them (keyboard)",
+        if (startTotd) {   // The Typing of the Dead 0 (game/typing.h): the game played by typing
+            // (rel130, user 2026-11-05: in the release, labelled "Experimental / Proof of Concept": the item's tag line,
+            // its help line, a notice when it starts: main.cpp / Hud::drawTotdNote)
+            items.push_back({-1, "The Typing of the Dead 0",
+                             "Experimental / Proof of Concept: type the words over the enemies to shoot them (keyboard)",
                              [this]() { const auto f = startTotd; f(); }});
+            items.back().tag = "Experimental / Proof of Concept";
+        }
         if (startSurvival && survivalArenaValue) {   // Survival Mode (game/survival.h): the game (players asked first), its arena
-            // (polish, user 2026-11-03: in the release, labelled Very Experimental / Proof of Concept: the item's tag line,
-            // its help line, a notice when it starts: main.cpp)
-            items.push_back({-1, "Survival", "Very Experimental / Proof of Concept: endless rounds, points to spend between them, cut creatures; own high scores", [this]() {
+            // (polish, user 2026-11-03: in the release; survfix3, user 2026-11-05: "remove very experimental / proof of
+            // concept from survival": no tag line, help line or start notice any more)
+            items.push_back({-1, "Survival", "Endless rounds, points to spend between them, cut creatures; own high scores", [this]() {
                                  askPlayers("Survival - " + survivalArenaValue(), [this]() { const auto f = startSurvival; f(); },
                                             [this]() { screenMainMenu(); });
                              }});
-            items.back().tag = kSurvivalTag;
             items.push_back({-1, "Survival Arena: " + survivalArenaValue(), "Where the waves come (click: next arena)", [this]() {
                                  if (onSurvivalArena) onSurvivalArena();
-                                 screenMainMenu();
-                             }});
-        }
-        if (hordeSizeValue) {   // Horde Mode (game/horde.h): the arcade game, more creatures at once; Chapter Select first
-            items.push_back({-1, "Horde", "The arcade game with many more zombies at once; own high scores", [this]() {
-                                 hordeChapters = true;
-                                 screenChapters();
-                             }});
-            items.push_back({-1, "Horde Size: " + hordeSizeValue(), "How many more creatures: Low 2x, Normal 3x, High 4x (click: next)",
-                             [this]() {
-                                 if (onHordeSize) onHordeSize();
                                  screenMainMenu();
                              }});
         }
@@ -982,9 +973,8 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
         const auto boss = mode(startBossMode, 2), pc = ask("PC Mode", mode(startPcMode, 1));
         items.push_back({2, "", pc ? "The PC version's own mode" : "PC Mode: coming (not ported yet)", pc});
         items.push_back({0x42, "", boss ? "Fight the bosses one by one" : "Boss Mode: coming (not ported yet)", boss});
-        // (Survival / Horde named only when their items are there: the release builds leave them out, main.cpp)
-        items.push_back({-1, "More Modes", std::string("Chapter Select, Co-op, Sonic Mode") + (startSurvival ? ", Survival" : "") +
-                                               (hordeSizeValue ? ", Horde" : ""), group(1)});
+        // (Survival named only when its items are there: main.cpp)
+        items.push_back({-1, "More Modes", std::string("Chapter Select, Co-op, Sonic Mode") + (startSurvival ? ", Survival" : ""), group(1)});
         items.push_back({-1, "Extras", "Gallery, Jukebox", group(2)});
         items.push_back({0x43, "", "The top 10 tables", mainMenuEnabled[3] ? std::function<void()>([this]() { screenRanking(); }) : nullptr});
         items.push_back({6, "", "Difficulty, lives, volumes and all settings",
@@ -995,7 +985,7 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
     // 0x421342..0x42142C: with the debug flag 0x5CD374 (Ctrl + SKIDMARX): chapter_select_check 0x422808, then Cheat
     // (handler 0x422784 -> 0x4228CC), Edit Char Stats (0x426188 -> 0x426190) and, with 0x5CE898 (Ctrl + CREATURE),
     // Creature Test (0x422230 -> 0x422324), as text (widget_set_text, not label ids)
-    if (debugItems_) {
+    if (debugItems_ && grp == 0) {   // (#44: on the top only, under Quit)
         auto add = [&](const char* text, std::function<void()> act) {
             items.push_back({-1, text, "", std::move(act)});
             items.back().debug = true;
@@ -1009,10 +999,15 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
     return items;
 }
 
+std::string Frontend::mainMenuHead()
+{
+    const std::vector<MainItem> items = mainMenuItems();
+    return items.empty() ? std::string() : items.front().name();
+}
+
 // ---- screen_main_menu 0x4210FC (screen 1) ----
 void Frontend::screenMainMenu()
 {
-    hordeChapters = false;   // (Horde Mode's Chapter Select only from its item: the plain one is the arcade's)
     if (style == kStyleRemake) {   // remakemenu: the same items, the Remake style's layout
         remakeMainMenu();
         return;
@@ -1038,7 +1033,8 @@ void Frontend::screenMainMenu()
     // eight items at most: 28 apart from 0xC8 (the PC: 32 from 0xD0); SKIDMARX: 19 apart, so Cheat / Edit Char Stats /
     // Creature Test fit under Quit (pc_cheats.md)
     // polish (the sweep: More Modes' ten items ran Back into the help line at 448): more than eight, closer together
-    const int step = debugItems_ ? 19 : mainCount > 8 ? 24 : 28;
+    const bool dbg = mainCount < items.size();   // (#44: the debug items are on the top only)
+    const int step = dbg ? 19 : mainCount > 8 ? 24 : 28;
     int y = 0;
     for (size_t k = 0; k < mainCount; ++k) {
         Item& it = items[k];
@@ -1055,7 +1051,7 @@ void Frontend::screenMainMenu()
         }
         setRect(item, 0, y, 0, 24);
         item->help = it.help;
-        if (!it.tag.empty()) {   // polish: Survival's "Very Experimental / Proof of Concept" in the small font beside it
+        if (!it.tag.empty()) {   // polish: an item's tag line in the small font beside it (TotD 0's)
             int lw = 0, lh = 0, tw = 0, th2 = 0;
             measure(it.name(), 0x20000, lw, lh);
             measure(it.tag, 0x800000, tw, th2);
@@ -1077,7 +1073,7 @@ void Frontend::screenMainMenu()
             }, &Frontend::hitText);
         if (k + 1 == mainCount)
             item->tag = 1;   // 0x427CB0: Escape activates Quit
-        if (debugItems_)
+        if (dbg)
             item->help.clear();   // (the help line's place holds the debug items)
         y += step;
     }
@@ -2025,7 +2021,7 @@ void Frontend::screenChapters()
     setImage(root, 0xD1, -1, 0x20000A);   // the hall without the logo
     Widget* title = widgetNew();
     addChild(root, title);
-    setText(title, hordeChapters ? "Horde - Chapter Select" : "Chapter Select", 0x10020);   // (Horde Mode: its own)
+    setText(title, "Chapter Select", 0x10020);
     setRect(title, 0, 0x20, 0, 0);
     static const char* const kBoss[4] = {"The Chariot", "The Hanged Man", "The Hermit", "The Magician"};
     const int colW = 148, x0 = (cw_ - 4 * colW) / 2;
@@ -2035,7 +2031,7 @@ void Frontend::screenChapters()
             walking_ = false;
             if (onChapter) {   // playerpick: the players first (Back: Chapter Select)
                 const auto f = onChapter;
-                askPlayers((hordeChapters ? "Horde - Chapter " : "Chapter ") + std::to_string(c + 1), [f, c]() { f(c); }, [this]() { screenChapters(); });
+                askPlayers("Chapter " + std::to_string(c + 1), [f, c]() { f(c); }, [this]() { screenChapters(); });
             }
         };
         const std::string help = on ? "Start Chapter " + std::to_string(c + 1) + " (its boss: " + kBoss[c] + ")"
@@ -3833,10 +3829,9 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
     fe.onChapter = [](int) {};
     fe.startBossMode = []() {};   // (as the host: Boss Mode and PC Mode are on)
     fe.startPcMode = []() {};
-    // polish: More Modes' Survival / Horde / Typing of the Dead 0 items as a development build has them (the sweep's
-    // pictures; HOTD_FE_RELEASE=1: as a release build, Survival only). relfix (the v1.2.0 checklist: --lang-check /
-    // --lang-shots of the release exe showed Typing of the Dead 0 and Horde): a release build (HOTD_EXPERIMENTAL_MODES
-    // OFF) always as its own menu, Survival only where it is built in (HOTD_SURVIVAL_MODE)
+    // polish: More Modes' items as a development build has them (the sweep's pictures; HOTD_FE_RELEASE=1: as a release
+    // build). relfix (the v1.2.0 checklist: --lang-check / --lang-shots of the release exe showed the unreleased modes): a
+    // release build (HOTD_EXPERIMENTAL_MODES OFF) always as its own menu, Survival only where it is built in (HOTD_SURVIVAL_MODE)
     {
         const bool release = std::getenv("HOTD_FE_RELEASE") != nullptr || HOTD_EXPERIMENTAL_MODES == 0;
         if (HOTD_EXPERIMENTAL_MODES != 0 || HOTD_SURVIVAL_MODE != 0) {
@@ -3844,11 +3839,8 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
             fe.survivalArenaValue = []() { return std::string("Chapter 1: The Courtyard"); };
             fe.onSurvivalArena = []() {};
         }
-        if (!release) {
+        if (!release || HOTD_TOTD_MODE != 0)   // (rel130: The Typing of the Dead 0 in the release builds too)
             fe.startTotd = []() {};
-            fe.hordeSizeValue = []() { return std::string("Normal"); };
-            fe.onHordeSize = []() {};
-        }
     }
     for (int k = 0; k < 4; ++k)
         fe.chapterEnabled[k] = chapterPlayable(k);
@@ -4070,7 +4062,7 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
             if (f[i].styleMember && !(f[i].styleMask & 4))
                 continue;
             const int v = f[i].styleMember ? pp.s[2].*f[i].styleMember : pp.*f[i].member;
-            const std::string t = f[i].names ? f[i].names[v - f[i].lo] : std::to_string(v);
+            const std::string t = padFieldText(f[i], v);   // (sens36: "100%")
             fe.extras.push_back({f[i].label, [t]() { return t; }, []() {}, padFieldHelp(f[i].key)});
         }
         fe.extras.push_back({"Feel Preset", []() { return std::string("Balanced"); }, []() {},

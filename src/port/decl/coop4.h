@@ -12,6 +12,9 @@
     void coop4_reset(int playersInPlay, int lives);
     // the per-frame routine of seats 2 / 3 (their tasks' +0: kCoop4SeatRoutine): the gun, lives, the start button
     void coop4_seat_frame(uint32_t task);
+    // seat 2 / 3 in play (state 5) from waiting (9, a join) or out of lives (4, a continue): the start button's part of
+    // coop4_seat_frame (also Survival's return of a seat that was out: survrevive, game/survival.cpp)
+    void coop4_seat_start(int p);
     // the hit table: the seats whose shot hit `target` (an object or a part) this frame (shot_hit_nearest)
     void coop4_hit_add(uint32_t target, int seat);
     uint32_t coop4_hit_seats(uint32_t target);

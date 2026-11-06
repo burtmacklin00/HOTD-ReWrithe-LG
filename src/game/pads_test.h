@@ -38,7 +38,9 @@ public:
     // flash's): the sticks past the window's edge and the off-screen reload without a recentre, the left stick's click,
     // Aim Sensitivity, Motion + stick held flat (relpad: was the Sideways grip; old launcher.ini files), the menu cursor from any
     // pad, Button Style's grey choices. The last frame checks that all kFixChecks checks ran
-    static constexpr int kFixFrames = 90, kFixChecks = 20;
+    // sens36 (GitHub #36): Stick Sensitivity (was Aim Sensitivity) in 3; from frame 90 each input's speed proven its own,
+    // the menu cursor's two, an older launcher.ini's speeds converted
+    static constexpr int kFixFrames = 414, kFixChecks = 32;
     void fixBefore(int k, Ctx& c);
     void fixAfter(int k, Ctx& c);
 private:

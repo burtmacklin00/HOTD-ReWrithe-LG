@@ -20,6 +20,9 @@
 // Survival Mode is off.
 #pragma once
 
+#include "game/engage.h"
+
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -30,8 +33,8 @@ class Runtime;
 
 // the sound files Survival Mode plays (data/survival/<name>.wav; until they are there: stand-ins from the PC's own sounds)
 inline constexpr const char* kSurvivalSfx[] = {"smg_fire", "smg_reload", "wave_start", "wave_clear"};
-std::string survivalSoundDir();   // the data/survival folder (the first data folder that has one; else an old data/horde)
-// a testing variable HOTD_SURVIVAL_<name>, else its old name HOTD_HORDE_<name> (the mode was "Horde" until 2026-11-03)
+std::string survivalSoundDir();   // the data/survival folder (the first data folder that has one)
+// a testing variable HOTD_SURVIVAL_<name>
 const char* survivalEnv(const char* name);
 
 // an arena: a place in a stage where the camera holds and creatures can come from several sides
@@ -42,9 +45,15 @@ struct SurvivalArena {
     int event;              // the event the game starts at (its section 1, as a chapter start)
     int waitSkip;           // the arena is the (waitSkip + 1)-th creature wait of the lead-in
     std::vector<int> types; // the chapter's own standard creature types (kind 0 records of that chapter), weakest first
+    // arenas (2026-11-05): the room's entrances (world x, floor y, z): doors, corridors, stairs, the far end, each on the
+    // room's floor with a clear walk to the camera (checked against the stage's walls: docs/survival.md "Arenas"); the
+    // creatures come from these. Empty: the places the lead-in captured (the old rule)
+    std::vector<std::array<float, 3>> doors;
+    // old keys still taken by --survival (the arenas replaced: bedroom, furnace)
+    std::vector<const char*> aliases;
 };
 const std::vector<SurvivalArena>& survivalArenas();
-int survivalArenaParse(const std::string& v);   // a key or a number (1-based); -1 none
+int survivalArenaParse(const std::string& v);   // a key, an old key or a number (1-based); -1 none
 
 // a cut creature brought back (docs/survival.md "Cut creatures"): its type, its look and how it moves
 struct SurvivalCut {
@@ -55,6 +64,7 @@ struct SurvivalCut {
     int life;               // hit points (its nearest relative's)
 };
 const std::vector<SurvivalCut>& survivalCuts();
+void survivalCutTables(Runtime& rt);   // the cut creatures' borrowed tables (survival.cpp)
 
 class SurvivalMode {
 public:
@@ -90,6 +100,10 @@ public:
     uint64_t overFrame = 0;         // the frame the game ended
     std::string banner;             // the centre text of the moment ("ROUND 3", "1P BOUGHT THE SMG" ..), empty: none
     int bannerFrames = 0;
+    // its colour (survfix2): a warning (red: a round starts, NOT ENOUGH POINTS), good news (gold: cleared, the results),
+    // plain (white: the arena's name), a seat's own (what it bought)
+    enum Tone { Alert, Good, Plain, Seat1, Seat2, Seat3, Seat4 };
+    Tone bannerTone = Alert;
 
     // ---- the points and the shop (Call of Duty Zombies' rules, the game's own guns and lives) ----
     static constexpr int kHitPoints = 10;        // a frame of hits on a creature (each seat that hit it)
@@ -97,45 +111,77 @@ public:
     static constexpr int kHeadKillPoints = 100;  // the kill with a head hit (part class 1, the game's eye / head hit)
     static constexpr int kLives = 3;             // the lives at the start (fewer when the setting is lower)
     static constexpr int kMaxLives = 5;          // bought lives up to this
-    static constexpr int kPistolRounds = 6, kSmgRounds = 30, kBigMag = 3;   // magazines; Big Mag: x 1.5
-    static constexpr int kSmgReserveMags = 4;    // the SMG's rounds outside the magazine (bought / Max Ammo): 4 magazines
-    static constexpr int kPistolReload = 36, kSmgReload = 72;   // frames a reload takes (Quick Reload: half)
-    static constexpr int kSmgPeriod = 5;   // 12 shots a second
-    static constexpr int kSmgBurst = 3;    // a pull without a held state (pads, light guns): three shots
     static constexpr int kBreakFrames = 480;    // the break between rounds (~8 s): the shop is open
-    enum Item { Ammo, Smg, Life, Quick, BigMag, kItems };
-    struct Sign { const char* name; int price; float x, y; };   // a sign: its place (arcade screen units, centre 0 / 0, y up)
+    // the shop's items (weapons: game/weapons.h, their prices from data/weapons.ini); Smg stays item 1 (the test line)
+    enum Item { Ammo, Smg, Life, Quick, BigMag, Rifle, Dual, Shotgun, Hand, kItems };
+    // a sign: its name, price (weapons: weaponDefs' price), place (arcade screen units, centre 0 / 0, y up: the top of
+    // its name), the weapon it sells (-1 none), the in-game model floating over it (docs/weapons.md "The shop's
+    // models"), its scale and the lift that centres it in its box (a model's origin is not its middle)
+    struct Sign { const char* name; int price; float x, y; int weapon; uint32_t model; float scale, lift; };
     static const Sign kSigns[kItems];
-    static constexpr float kSignW = 88.0f, kSignH = 44.0f;      // a sign's size (arcade screen units)
+    // survfix2: a sign's stack (arcade screen units from the top of its name): the model's box above (kModelBox high,
+    // its middle kModelUp over the name), the name (a cell), the price (two cells) kPriceDown under the name's top, the
+    // seats that can buy it (a cell; two players or more) kSeatsDown under it, the sign's bottom kSignBottom. No part of
+    // a sign overlaps another part, another sign or the HUD's corners (docs/survival.md "The shop")
+    static constexpr float kSignW = 110.0f;
+    static constexpr float kModelBox = 28.0f, kModelUp = 19.0f;   // (the box's bottom 5 over the name: the bob is +-3)
+    static constexpr float kPriceDown = 10.0f, kSeatsDown = 28.0f, kSignBottom = 36.0f;
     struct Seat {
         int points = 0, earned = 0;            // to spend / earned in all (the score)
         int hits = 0, kills = 0, heads = 0, spent = 0;
-        bool smg = false, quick = false, bigMag = false, livesSet = false;
-        int reserve = 0;                       // the SMG's rounds outside the magazine
-        int reload = 0;                        // frames the reload still takes (0: the gun is ready)
+        bool livesSet = false;
         int buys[kItems] = {};
-        int smgTimer = 0, smgBurst = 0;
+        unsigned ownedAtClear = 0;             // the weapons held when the last round was cleared (kept: the test)
+        // survrevive (user 2026-11-05, 2-4 players: "if a player loses all their lives, they come back in the next wave
+        // where they get half their points back"): out until the next round (no continue; BACK NEXT ROUND), its
+        // points (frozen) and weapons when it went out, the round, the magazine in the hand; back: waiting for state 5
+        bool out = false, returning = false;
+        int outPoints = 0, outRound = 0, outRounds = 0;
+        unsigned outOwned = 0;
+        uint64_t backUntil = 0;                // its "nP IS BACK" notice shows until this frame
     };
     Seat seat[4];
+    int outN = 0, backN = 0;        // survrevive: seats that went out / came back this game (the summary)
+    bool reviveOk = true;           // the test: each return had the start lives, half the points, the weapons held
+    // (testing, HOTD_SURVIVAL_DRAIN=<seat>@<round>[+frames],..: that seat's lives to 0 that many frames (default 300)
+    // into that round, as a creature's last hit would; --lives-kept leaves it out)
+    struct Drain { int seat, round, frames; };
+    std::vector<Drain> drains;
+    static int startLives(const Runtime& rt);   // a seat's lives at its start in Survival: min(the Lives setting, kLives)
+    int weaponsWave = 0;            // testing: every weapon given free from this round (0: only bought)
+    bool cycleTest = false;         // testing (the self-test): each seat switches weapon every 300 frames of a round
+    bool keptOk = true;             // the test: every weapon held at a round's clear was still held at the next start
+    int price(int item) const;      // the sign's price (a weapon's from weaponDefs)
     bool shopOpen() const { return phase == Break && frozen && wave >= 1; }
-    int signAt(float x, float y) const;         // the sign at that aim (-1 none)
+    int signAt(float x, float y) const;         // the sign (or its model) at that aim (-1 none)
     bool canBuy(const Runtime& rt, int p, int item) const;
     bool buy(Runtime& rt, int p, int item);
-    int magazine(int p) const;
-    int reloadFrames(int p) const;
     int testBuy(const Runtime& rt, int p) const;   // the test players' pick in the shop (-1 nothing)
-    // the input's gun (Runtime::input_task_stand_in) for seat p, before the game reads it: the shop's signs, the reload
-    // by hand (off the screen; it takes reloadFrames, the SMG's from its reserve), the SMG's automatic fire
+    // the input's gun (Runtime::input_task_stand_in) for seat p, before the game and the weapons read it: the shop's
+    // signs (a shot at a sign or its model buys it; the shot is not fired)
     void gunInput(Runtime& rt, int p, bool& trigger, bool onScreen, bool held, float x, float y);
     // enemy_part_hits' report (Game::survival_hits): the points
     void hits(Runtime& rt, uint32_t obj, uint32_t seats, int killer, uint32_t headSeats);
-    int reloadSeat = 0;             // the seat whose reload sound plays (survival_cue)
 
-    struct WaveStat { int wave = 0, count = 0, cut = 0, peak = 0, special = 0; uint64_t start = 0, end = 0; };
+    // (survfix2, the balance runs: the points every seat had earned / still had when the round was cleared)
+    struct WaveStat { int wave = 0, count = 0, cut = 0, peak = 0, special = 0, earned = 0, banked = 0, hurt = 0; uint64_t start = 0, end = 0; };   // (hurt: lives lost)
+    // the balance runs (survfix2): each creature's first hit, and per weapon the kills and the frames from a
+    // creature's first hit to its death (the time to kill, the killer's weapon)
+    struct FirstHit { uint32_t obj; uint64_t frame; };
+    std::vector<FirstHit> firstHits;
+    long long ttkFrames[8] = {};
+    int ttkKills[8] = {};
     std::vector<WaveStat> stats;    // one per round begun (end 0: not cleared)
     struct Point { float pos[3]; int32_t ang[3]; uint32_t flags; int kind; int type; };
     std::vector<Point> points;      // the arena's spawn points (the lead-in's captured creatures)
     std::vector<Point> section;     // captured in the lead-in since the last creature wait
+    struct Mine { uint32_t task = 0, serial = 0; uint64_t born = 0; int type = 0; bool cut = false; };
+    std::vector<Mine> mine;         // Survival's creatures made this game (task, its serial: alive while it matches)
+    EngageWatch engage;             // survfix: the ones that will never attack are sent away (game/engage.h)
+    int retiredN = 0;               // .. how many (not kills; the round does not wait for them)
+    int testIdle = 0;               // testing (HOTD_SURVIVAL_TEST_IDLE): round 1's extra creatures, see testIdleFrame
+    uint32_t idleTask_[2] = {}, idleSerial_[2] = {};
+    float idleHeld_[2] = {};
 
     bool active() const { return phase != Off; }
     bool leadIn() const { return phase == LeadIn; }
@@ -150,8 +196,11 @@ public:
     // the round's numbers (docs/survival.md "Rounds")
     static int roundCount(int round, int players);
     static float roundHealth(int round);
-    // the overlay's lines (top: round / left; a line per player: points, gun, perks; the break's countdown)
-    std::vector<std::string> hudLines(const Runtime& rt) const;
+    // the HUD's title block (survfix2: one for 1-4 players, rounds and shop): the round (two cells high; in the break
+    // the next one and its countdown; at the end REACHED ROUND n) and under it the status (one cell: the creatures
+    // left; in the shop SHOOT AN ITEM TO BUY; at the end the points and kills), translated (lang keys)
+    std::string titleLine() const;
+    std::string statusLine() const;
     std::string summary(const Runtime& rt) const;   // one line: the result (the test and the log)
 
 private:
@@ -162,15 +211,20 @@ private:
     bool reported_ = false;         // the end reported (justFinished once)
     int players_ = 1;
     int leadLives_[4] = {};         // the lives at the lead-in's start (kept through it)
+    int lastLives_[4] = {};         // (the balance runs: the lives a frame ago, the round's lives lost)
+    int cycleWeapon_[4] = {}, cycleReloads_[4] = {};   // cycleTest: the weapon in the hand, its reloads when picked ..
+    uint64_t cycleAt_[4] = {};                         // .. and the frame
     uint32_t next();                // LCG
     int rand(int n) { return n > 0 ? int(next() % uint32_t(n)) : 0; }
     void startWave(Runtime& rt);
+    void testIdleFrame(Runtime& rt);
     void spawnOne(Runtime& rt);
     int pickType(const Runtime& rt, bool& cut);
     void countMine(Runtime& rt);
-    void seats(Runtime& rt);        // each frame: lives at the start, magazines, the SMG flag, the score
-    void giveSmg(Runtime& rt, int p);
-    void say(const std::string& s, int frames) { banner = s; bannerFrames = frames; }
+    void seats(Runtime& rt);        // each frame: lives at the start, the weapons flag, the score, the shop's models
+    void goOut(Runtime& rt, int p); // survrevive: seat p out until the next round (no CONTINUE?)
+    void comeBack(Runtime& rt, int p);   // .. and back at the next round's start
+    void say(const std::string& s, int frames, Tone tone = Alert) { banner = s; bannerFrames = frames; bannerTone = tone; }
 };
 
 // the Survival table (survival_scores.txt in the settings folder): ten rows of points, round, arena and name

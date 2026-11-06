@@ -80,7 +80,9 @@ public:
     // mono / stereo, any rate), else the stand-in: PC cue `cue`'s bank sample played `pitch` times faster and cut to
     // `clip` of its length. Loaded once. false: nothing to play (no file, no stand-in). extraSource(name): "file",
     // "stand-in" or "" (not loaded / nothing)
-    bool playExtra(const std::string& dir, const std::string& name, int cue, float pitch, float clip, float volume = 1.0f);
+    // totd5: a file cue (O_*.RBH) as the stand-in too; normalize > 0: its peak brought to that share of full scale first
+    bool playExtra(const std::string& dir, const std::string& name, int cue, float pitch, float clip, float volume = 1.0f,
+                   float normalize = 0.0f);
     std::string extraSource(const std::string& name) const;
     std::set<uint32_t> unmapped;             // arcade codes without a PC cue (logged once)
     std::set<int> silent;                    // PC sample / file cues that had nothing to mix (missing data)
@@ -145,7 +147,12 @@ private:
         bool quiet = false;  // started during a cut-scene's skip (quietEffects): mixed silent to its end
         float amp = 0;       // the start / stop ramp (our own, against clicks): 0 -> 1 over kFade frames at the start
         bool release = false;   // a tail (tails_): ramps down to 0, then ends
+        // totd7: a normalized extra (playExtra's normalize > 0: The Typing of the Dead 0's key / miss / ding): mixed
+        // after the PC sound's limiter, so the music / effects in it never squeeze it
+        bool direct = false;
     };
+    bool nextDirect_ = false;   // (playExtra -> play: the voice it starts is a direct one)
+    std::vector<float> directBuf_;
     void cut(Voice& v);   // the voice ends: its sound goes on in a tail that ramps down (no click), the voice is free
     struct Music;
 

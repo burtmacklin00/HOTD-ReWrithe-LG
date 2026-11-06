@@ -22,6 +22,19 @@ namespace {
 using G = A::G;
 constexpr float kPi = 3.14159265f;
 
+// sens36 (GitHub #36): the fix section's independence trials from frame kInd0, kIndLen frames each: per (style, input)
+// three runs (all four speeds 100 %; the input 100 % and every other 250 %; the input 200 %, the others 100 %), then
+// two with the profile an older launcher.ini converted to (Classic's stick, Motion + stick's gyro)
+constexpr int kInd0 = 90, kIndLen = 16, kIndInputs = 6, kIndTrials = kIndInputs * 3 + 2;
+struct IndInput { int style, input; };   // input 0 the aiming stick, 1 the fine stick, 2 the gyro, 3 the trackpad
+IndInput indInput(int t)
+{
+    static const IndInput k[kIndInputs] = {{1, 0}, {1, 1}, {1, 3}, {3, 1}, {3, 2}, {3, 3}};
+    return t < kIndInputs * 3 ? k[t / 3] : t == kIndInputs * 3 ? IndInput{1, 0} : IndInput{3, 2};
+}
+const char* const kIndNames[4] = {"Stick", "Fine Stick", "Gyro", "Trackpad"};
+static_assert(PadTest::kFixFrames > kInd0 + kIndTrials * kIndLen + 2, "the fix section's frames: the trials and the end");
+
 // a virtual pad and what the game sent it (rumble, the light bar, the DualSense effect)
 struct VPad {
     SDL_JoystickID id = 0;
@@ -67,6 +80,8 @@ struct PadTest::Impl {
     float mark[2][2] = {};
     int rumbles0 = 0;
     int fixChecks = 0;   // padfix: the fix section's checks so far
+    float ind[kIndTrials] = {};   // sens36: each independence trial's x motion
+    PadProfile migrated;          // sens36: player 1's profile from an older launcher.ini (fixAfter 1)
 
     // kind 0: DualSense (gyro, accelerometer, touchpad), 1: Xbox (none), 2: Switch Pro (gyro, accelerometer)
     bool attach(VPad& v, int kind)
@@ -400,9 +415,9 @@ void PadTest::before(int i, Ctx& c)
     if (i == 1076) m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0);
     if (i == 1077) m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0.75f);
     if (i == 1078) m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0);
-    if (i == 1080) { p2.s[0].speed = 1; c.pads.configure(c.cfg); g[1].x = 5; m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 1.0f); }
+    if (i == 1080) { p2.s[0].stickSens = 46; c.pads.configure(c.cfg); g[1].x = 5; m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 1.0f); }   // (sens36: the old speed 1)
     if (i == 1113) markGuns();
-    if (i == 1116) { m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0); p2.s[0].speed = 5; c.pads.configure(c.cfg); }
+    if (i == 1116) { m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0); p2.s[0].stickSens = 100; c.pads.configure(c.cfg); }
     // shake to reload (Motion + stick, Medium; relpad: game/shake.h): a jolt and one back (two frames later) reloads
     // and does not move the crosshair; an aim turn (3 rad/s, 0.3 g) is 1:1 and no reload; a wrist flick (a fast turn
     // with a jolt) reloads, its turn dropped, the flick back is no second reload (the cooldown)
@@ -675,8 +690,8 @@ void PadTest::after(int i, Ctx& c)
         std::snprintf(b, sizeof b, "frame-rate independent stick: %.3f px at 60 Hz, %.3f px at 240 Hz", d1, g[1].x - x1);
         c.expect(d1 > 1.0f && std::abs(d1 - (g[1].x - x1)) < 0.01f, b);
     }
-    if (i == 1116) {   // speed 1 (1.1 heights / s), held at full tilt 0.6 s: the turbo's 1.5x
-        const float base = 1.1f * lh / 60.0f;
+    if (i == 1116) {   // Stick Sensitivity 46 % (1.1 heights / s, the old speed 1), held at full tilt 0.6 s: the turbo's 1.5x
+        const float base = 0.46f * 2.4f * lh / 60.0f;
         moved(1, 3 * 1.5f * base, 0, 0.5f, "Classic: the stick held at full tilt = the edge turbo (1.5x)");
     }
     if (i == 1123) c.counts(0, 0, 0, 0, 0, 0, "shake: the first jolt alone is no reload");
@@ -697,11 +712,23 @@ void PadTest::after(int i, Ctx& c)
         c.expect(g[1].x <= 0.0f && g[1].y >= lh, b);
     }
     if (i == 1166) {
-        PadStyle s;
-        const int bal = padPresetOf(s);
-        applyPadPreset(s, 1);
-        std::snprintf(b, sizeof b, "feel presets: the defaults = Balanced (%d), Precise applied = Precise (%d)", bal, padPresetOf(s));
-        c.expect(bal == 2 && padPresetOf(s) == 1, b);
+        // sens36: per style, a preset sets that style's own inputs' speeds (Classic: the stick 83 %, the fine stick 63 %;
+        // Motion + stick: the gyro 85 %, the fine stick 75 %; Touchpad: the trackpad 80 %), as the old Sensitivity 4 /
+        // Fine Aim Speed 3 did; the others' untouched
+        bool ok = true;
+        std::string got;
+        for (int st = 1; st <= kPadStyles; ++st) {
+            PadStyle s;
+            const int bal = padPresetOf(s, st);
+            applyPadPreset(s, 1, st);
+            got += " " + std::to_string(bal) + std::to_string(padPresetOf(s, st)) + ":" + std::to_string(s.stickSens) + "/" +
+                   std::to_string(s.fineSens) + "/" + std::to_string(s.gyroSens) + "/" + std::to_string(s.touchSens);
+            static const int want[4][4] = {{83, 63, 100, 100}, {100, 100, 85, 100}, {100, 75, 85, 100}, {100, 100, 100, 80}};
+            ok = ok && bal == 2 && padPresetOf(s, st) == 1 && s.stickSens == want[st - 1][0] && s.fineSens == want[st - 1][1] &&
+                 s.gyroSens == want[st - 1][2] && s.touchSens == want[st - 1][3];
+        }
+        std::snprintf(b, sizeof b, "feel presets per style (defaults = Balanced, Precise applied = Precise, stick/fine/gyro/trackpad %%):%s", got.c_str());
+        c.expect(ok, b);
     }
 }
 
@@ -735,21 +762,14 @@ void PadTest::fixBefore(int k, Ctx& c)
     // 2: a click of the left stick = the middle
     if (k == 10) m.button(m.a, SDL_GAMEPAD_BUTTON_LEFT_STICK, true);
     if (k == 11) m.button(m.a, SDL_GAMEPAD_BUTTON_LEFT_STICK, false);
-    // 3: Aim Sensitivity 200 %: the same stick twice as far
-    // GitHub #36 (testing): HOTD_SENS_TEST=stick: Stick Sensitivity 200 % instead (the same checks pass);
-    // =stickgyro: also Stick Sensitivity 200 % through the gyro's checks (they pass: the gyro is apart); =gyro: Gyro
-    // Sensitivity 200 % there (the gyro's checks see twice the turn), =touch: Trackpad Sensitivity 200 % (nothing here)
-    static const std::string sensTest = std::getenv("HOTD_SENS_TEST") ? std::getenv("HOTD_SENS_TEST") : "";
-    int& sens12 = sensTest == "stick" ? p2.stickSens : p2.aimSens;
-    if (k == 12) { sens12 = 20; c.pads.configure(c.cfg); markGuns(); m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0.5f); }
-    if (k == 22) { m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0); sens12 = 10; c.pads.configure(c.cfg); }
+    // 3: Classic's Stick Sensitivity 200 %: the same stick twice as far (padfix: was the player's Aim Sensitivity; the
+    // other inputs' independence: the trials from kInd0, sens36)
+    if (k == 12) { p2.s[0].stickSens = 200; c.pads.configure(c.cfg); markGuns(); m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0.5f); }
+    if (k == 22) { m.axis(m.a, SDL_GAMEPAD_AXIS_LEFTX, 0); p2.s[0].stickSens = 100; c.pads.configure(c.cfg); }
     // 4 (relpad: the Sideways grip is gone): Motion + stick held normally, flat: raising the front = up, turning right
     // = right; the face buttons as printed (West, East = reload); old launcher.ini files with Sideways (fixAfter)
     if (k == 23) {
         p2.style = 3;
-        if (sensTest == "stickgyro") p2.stickSens = 20;
-        if (sensTest == "gyro") p2.gyroSens = 20;
-        if (sensTest == "touch") p2.touchSens = 20;
         c.pads.configure(c.cfg);
         g[1].x = c.lw * 0.5f;
         g[1].y = c.lh * 0.5f;
@@ -768,6 +788,55 @@ void PadTest::fixBefore(int k, Ctx& c)
         p2 = PadProfile{};
         c.pads.configure(c.cfg);
     }
+    // 7 (sens36, GitHub #36): each input's speed is its own. A DualSense for player 2 again; per trial (kIndLen frames)
+    // the style and the four speeds set, the crosshair at 30 % of the width, one input moved (frames 2 .. 11), the
+    // crosshair's x motion kept (fixAfter)
+    const float zero[3] = {0, 0, 0};
+    if (k == kInd0 - 2) {
+        m.attach(m.a, 0);
+        c.cfg.p2Input = 2;
+        p2 = PadProfile{};
+        p2.style = 1;
+        c.pads.configure(c.cfg);
+    }
+    if (k >= kInd0 && k < kInd0 + kIndTrials * kIndLen) {
+        const int t = (k - kInd0) / kIndLen, j = (k - kInd0) % kIndLen;
+        const IndInput in = indInput(t);
+        if (j == 0) {
+            p2 = t >= kIndInputs * 3 ? m.migrated : PadProfile{};
+            p2.style = in.style;
+            if (t < kIndInputs * 3) {
+                PadStyle& s = p2.s[in.style - 1];
+                int* v[4] = {&s.stickSens, &s.fineSens, &s.gyroSens, &s.touchSens};
+                const int var = t % 3;
+                for (int q = 0; q < 4; ++q)
+                    *v[q] = var == 1 && q != in.input ? 250 : var == 2 && q == in.input ? 200 : 100;
+            }
+            c.pads.configure(c.cfg);
+            g[1].x = c.lw * 0.3f;
+            g[1].y = c.lh * 0.5f;
+        }
+        if (j == 2) markGuns();
+        if (in.input <= 1) {   // the aiming stick (left) / the fine stick (right) half way
+            const SDL_GamepadAxis ax = in.input == 0 ? SDL_GAMEPAD_AXIS_LEFTX : SDL_GAMEPAD_AXIS_RIGHTX;
+            if (j == 2) m.axis(m.a, ax, 0.5f);
+            if (j == 12) m.axis(m.a, ax, 0);
+        }
+        if (in.input == 3) {   // a stroke right on the touchpad (a trackpad: DualSense auto)
+            if (j >= 2 && j <= 4) m.touch(m.a, true, 0.4f + 0.05f * float(j - 2), 0.5f);
+            if (j == 5) m.touch(m.a, false, 0.5f, 0.5f);
+        }
+        if (in.style == 3) {   // the gyro: turned right 0.5 rad/s (frames 2 .. 11), else lying flat and still
+            const float r[3] = {0, -0.5f, 0};
+            m.sensors(m.a, flat, in.input == 2 && j >= 2 && j <= 11 ? r : zero);
+        }
+    }
+    if (k == kInd0 + kIndTrials * kIndLen + 1) {
+        m.detach(m.a);
+        c.cfg.p2Input = 0;
+        p2 = PadProfile{};
+        c.pads.configure(c.cfg);
+    }
 }
 
 void PadTest::fixAfter(int k, Ctx& c)
@@ -779,7 +848,7 @@ void PadTest::fixAfter(int k, Ctx& c)
     const float lw = float(c.lw), lh = float(c.lh);
     const float stick = 2.4f * lh / 60.0f, half = 0.25f;
     const float perRad = lw / (36.0f * kPi / 180.0f);
-    char b[320];
+    char b[512];
     auto expect = [&](bool ok, const std::string& what) { ++m.fixChecks; c.expect(ok, what); };
     auto counts = [&](int a, int b2, int c2, int d, const char* what) { ++m.fixChecks; c.counts(a, b2, c2, d, 0, 0, what); };
     auto moved = [&](float wx, float wy, float tol, const char* what) {
@@ -845,26 +914,143 @@ void PadTest::fixAfter(int k, Ctx& c)
             fam = SDL_GAMEPAD_TYPE_PS5;
             rows = menuCategoryRows(kCatControls, lc, h);
             bs = nullptr;
-            Frontend::Extra* aim = nullptr;
+            Frontend::Extra *tc = nullptr, *gc = nullptr;
+            int aimRows = 0;
             for (Frontend::Extra& e : rows) {
                 if (e.name == "Button Style") bs = &e;
-                if (e.name == "Aim Sensitivity: Player 2") aim = &e;
+                if (e.name == "Touchpad Cursor Sensitivity") tc = &e;
+                if (e.name == "Gyro Cursor Sensitivity") gc = &e;
+                aimRows += e.name.rfind("Aim Sensitivity", 0) == 0;
             }
             expect(bs && bs->choiceOff && !bs->choiceOff(0) && bs->help.find("No ") == std::string::npos,
                    "Button Style with a DualSense: nothing grey, the usual help");
-            // 3: Controls > Aim Sensitivity: Player 2: its list and its bar
-            const bool ok = aim && aim->pickAt && aim->barSet && aim->barGet && aim->value;
+            // 3 (sens36, GitHub #36): Controls: no master Aim Sensitivity rows; the menu cursor's two rows each set
+            // their own value only (the touchpad's bar to 150, the gyro's list to 200 %)
+            const bool ok = tc && gc && tc->barSet && tc->barGet && tc->value && gc->pickAt && gc->value;
             std::string v1, v2;
+            int t1 = 0, g1 = 0;
             if (ok) {
-                aim->pickAt(10);   // 150 %
-                v1 = aim->value();
-                aim->barSet(80);   // 80 %
-                v2 = aim->value();
+                tc->barSet(150);
+                v1 = tc->value();
+                t1 = lc.touchCursorSens, g1 = lc.gyroCursorSens;
+                gc->pickAt(19);   // 10 % + 19 steps of 10
+                v2 = gc->value();
             }
-            std::snprintf(b, sizeof b, "Controls > Aim Sensitivity: Player 2: picked 150%% = \"%s\", the bar at 80 = \"%s\" (%d, bar %d)",
-                          v1.c_str(), v2.c_str(), lc.pad[1].aimSens, ok ? aim->barGet() : -1);
-            expect(ok && v1 == "150%" && v2 == "80%" && lc.pad[1].aimSens == 8 && aim->barGet() == 80, b);
+            std::snprintf(b, sizeof b, "Controls: %d Aim Sensitivity rows; Touchpad Cursor Sensitivity bar 150 = \"%s\" (touch %d, gyro %d), "
+                          "Gyro Cursor Sensitivity 200%% = \"%s\" (touch %d, gyro %d)",
+                          aimRows, v1.c_str(), t1, g1, v2.c_str(), lc.touchCursorSens, lc.gyroCursorSens);
+            expect(ok && aimRows == 0 && v1 == "150%" && t1 == 150 && g1 == 100 && v2 == "200%" && lc.touchCursorSens == 150 &&
+                       lc.gyroCursorSens == 200, b);
         }
+        // 8 (sens36): the menu cursor's touchpad and gyro speeds apart: each scales its own motion only
+        {
+            auto run = [](int ts, int gs, float& touchDx, float& gyroDx) {
+                MenuCursor mc;
+                MenuCursorConfig cc;
+                cc.gyro = 2, cc.touchSens = ts, cc.gyroSens = gs;
+                SDL_Event t{};
+                t.type = SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN, t.gtouchpad.which = 21, t.gtouchpad.x = 0.3f, t.gtouchpad.y = 0.5f;
+                mc.event(t, cc, 640);
+                for (int n = 1; n <= 5; ++n)
+                    t.type = SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION, t.gtouchpad.x = 0.3f + 0.02f * float(n), mc.event(t, cc, 640);
+                float dy = 0;
+                bool cl = false;
+                mc.take(touchDx, dy, cl);
+                SDL_Event gy{};
+                gy.type = SDL_EVENT_GAMEPAD_SENSOR_UPDATE, gy.gsensor.sensor = SDL_SENSOR_GYRO, gy.gsensor.data[1] = -1.0f;
+                gy.gsensor.which = 21;
+                for (int n = 1; n <= 4; ++n)
+                    gy.gsensor.sensor_timestamp = uint64_t(n) * 10000000ull, mc.event(gy, cc, 640);
+                mc.take(gyroDx, dy, cl);
+            };
+            float t0, g0, tT, gT, tG, gG;
+            run(100, 100, t0, g0);
+            run(250, 100, tT, gT);
+            run(100, 250, tG, gG);
+            std::snprintf(b, sizeof b, "menu cursor: touchpad / gyro at 100/100 %.2f / %.2f, touchpad 250 %.2f / %.2f, gyro 250 %.2f / %.2f",
+                          double(t0), double(g0), double(tT), double(gT), double(tG), double(gG));
+            expect(t0 > 5 && g0 > 5 && std::abs(tT - 2.5f * t0) < 0.01f * t0 && std::abs(gT - g0) < 0.001f &&
+                       std::abs(tG - t0) < 0.001f && std::abs(gG - 2.5f * g0) < 0.01f * g0, b);
+        }
+        // 9 (sens36): the Controller page's speed rows: one per input, each a % (10-500), no Sensitivity / Fine Aim
+        // Speed / Aim Sensitivity left, no help line says "on top of"
+        {
+            int nf = 0;
+            const PadField* pf = padFields(nf);
+            std::string keys;
+            bool okf = true;
+            for (int i = 0; i < nf; ++i) {
+                const std::string kk = pf[i].key, help = padFieldHelp(pf[i].key);
+                okf = okf && kk != "speed" && kk != "fine" && kk != "aimsens" && kk != "sticksens" && kk != "gyrosens" &&
+                      kk != "touchsens" && help.find("on top of") == std::string::npos;
+                if (pf[i].step > 1) {
+                    keys += " " + kk;
+                    okf = okf && pf[i].styleMember && pf[i].lo == kPadSensLo && pf[i].hi == kPadSensHi && padFieldText(pf[i], 120) == "120%";
+                }
+            }
+            std::snprintf(b, sizeof b, "Controller page: the per-input speed rows%s (want aimstick aimfine aimgyro aimtouch), 10-500 %%", keys.c_str());
+            expect(okf && keys == " aimstick aimfine aimgyro aimtouch", b);
+        }
+    }
+    if (k == 1) {
+        // 10 (sens36): an older launcher.ini (padv 3: Sensitivity / Fine Aim Speed per style, the player's Aim / Stick /
+        // Gyro / Trackpad Sensitivity, the menu cursor 1-10) converts once to the same speed per input (the old
+        // formulas written out here, in screen heights / s, x 1.0 gyro and x 1.0 trackpad); a padv 4 file is kept
+        const char* pd = std::getenv("HOTD_PREF_DIR");
+        const std::filesystem::path dir = pd && *pd ? std::filesystem::path(pd) : std::filesystem::temp_directory_path();
+        const std::string file = (dir / "sens36_migrate_test.ini").string();
+        auto loadFrom = [&](const char* text) {
+            { std::ofstream o(file, std::ios::binary); o << text; }
+            LaunchConfig lc;
+            lc.load(file);
+            return lc;
+        };
+        LaunchConfig o = loadFrom("padv=3\npad1.classic.speed=7\npad1.classic.fine=3\npad1.motion.speed=4\npad1.mix.speed=8\n"
+                                  "pad1.mix.fine=6\npad1.touch.speed=3\npad1.aimsens=15\npad1.sticksens=8\npad1.gyrosens=12\n"
+                                  "pad1.touchsens=20\npad2.classic.speed=10\npad2.aimsens=20\npad2.sticksens=20\ncursorspeed=7\n"
+                                  "gyrocursorspeed=3\n");
+        m.migrated = o.pad[0];
+        const PadStyle *cl = &o.pad[0].s[0], *mo = &o.pad[0].s[1], *mx = &o.pad[0].s[2], *tp = &o.pad[0].s[3];
+        // the old speeds: Classic stick 3.5 x 0.8 x 1.5, fine 3.5 x 30 % x 0.8 x 1.5, trackpad 2.0 x 1.5; Motion gyro
+        // 0.85 x 1.2 x 1.5; Motion + stick gyro 1.7 x 1.2 x 1.5, fine 2.4 x 60 % x 0.8 x 1.5; Touchpad trackpad 3/5 x 2.0 x 1.5
+        const float want[7] = {3.5f * 0.8f * 1.5f, 3.5f * 0.3f * 0.8f * 1.5f, 2.0f * 1.5f, 0.85f * 1.2f * 1.5f, 1.7f * 1.2f * 1.5f,
+                               2.4f * 0.6f * 0.8f * 1.5f, 0.6f * 2.0f * 1.5f};
+        const float now[7] = {2.4f * cl->stickSens / 100.0f, 0.96f * cl->fineSens / 100.0f, cl->touchSens / 100.0f, mo->gyroSens / 100.0f,
+                              mx->gyroSens / 100.0f, 0.96f * mx->fineSens / 100.0f, tp->touchSens / 100.0f};
+        bool same = true;
+        for (int i = 0; i < 7; ++i) same = same && std::abs(now[i] - want[i]) <= 0.005f * want[i] + 0.0001f;
+        std::snprintf(b, sizeof b, "older launcher.ini converted: Classic %d/%d/%d%%, Motion gyro %d%%, Motion + stick %d/%d%%, Touchpad %d%%, "
+                      "P2 Classic stick %d%% (clamped), menu cursor %d/%d%%: the same speeds %d",
+                      cl->stickSens, cl->fineSens, cl->touchSens, mo->gyroSens, mx->gyroSens, mx->fineSens, tp->touchSens,
+                      o.pad[1].s[0].stickSens, o.touchCursorSens, o.gyroCursorSens, int(same));
+        expect(same && o.pad[1].s[0].stickSens == kPadSensHi && o.touchCursorSens == 140 && o.gyroCursorSens == 60 &&
+                   o.pad[2].s[0].stickSens == 100 && o.pad[2].s[2].gyroSens == 100, b);
+        // saved: padv=4, the new keys, none of the old pad keys; read back the same; a padv 4 file is not converted again
+        const bool ro = LaunchConfig::readOnly;   // (this test's own file only)
+        LaunchConfig::readOnly = false;
+        o.save(file);
+        LaunchConfig::readOnly = ro;
+        std::string all;
+        {
+            std::ifstream in(file);
+            all.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+        LaunchConfig back;
+        back.load(file);
+        LaunchConfig v4 = loadFrom("padv=4\npad1.classic.aimstick=130\npad1.classic.speed=9\npad1.aimsens=20\n");
+        std::error_code ec;
+        std::filesystem::remove(file, ec);
+        const bool kept = back.pad[0].s[0].stickSens == cl->stickSens && back.pad[0].s[2].gyroSens == mx->gyroSens &&
+                          back.pad[0].s[3].touchSens == tp->touchSens && back.touchCursorSens == 140 && back.gyroCursorSens == 60;
+        std::snprintf(b, sizeof b, "launcher.ini saved: padv=4 %d, aimstick %d, old pad keys %d, cursorspeed=7 %d; read back the same %d; "
+                      "a padv 4 file kept (stick %d, gyro %d)",
+                      int(all.find("padv=4") != std::string::npos), int(all.find(".classic.aimstick=175") != std::string::npos),
+                      int(all.find(".speed=") != std::string::npos || all.find("aimsens=") != std::string::npos),
+                      int(all.find("\ncursorspeed=7") != std::string::npos), int(kept), v4.pad[0].s[0].stickSens, v4.pad[0].s[2].gyroSens);
+        expect(all.find("padv=4") != std::string::npos && all.find(".classic.aimstick=175") != std::string::npos &&
+                   all.find(".speed=") == std::string::npos && all.find("aimsens=") == std::string::npos &&
+                   all.find("\ncursorspeed=7") != std::string::npos && kept && v4.pad[0].s[0].stickSens == 130 && v4.pad[0].s[2].gyroSens == 100,
+               b);
     }
     if (k == 7) {
         std::snprintf(b, sizeof b, "Classic: the stick pushes the crosshair past the window's right edge (x %.1f, window %.0f, margin %.1f)", g[1].x, lw,
@@ -880,11 +1066,11 @@ void PadTest::fixAfter(int k, Ctx& c)
         expect(g[1].x > lw, b);
     }
     if (k == 11) middle("a click of the left stick");
-    if (k == 22) moved(10 * half * stick * 2.0f, 0, 1.2f, "Aim Sensitivity 200%: the stick half way for 10 frames");
+    if (k == 22) moved(10 * half * stick * 2.0f, 0, 1.2f, "Classic's Stick Sensitivity 200%: the stick half way for 10 frames");
     if (k == 23) expect(c.pads.styleOf(1) == 3, "Motion + stick: style " + std::to_string(c.pads.styleOf(1)));
     if (k == 24) {
         // relpad: launcher.ini from before (padv 2): Sideways (4) loads as Motion + stick, the Touchpad (5) as 4, its
-        // pad1.sideways.* lines are ignored; padv 3: 4 = the Touchpad; a saved file says padv=3 and keeps the style
+        // pad1.sideways.* lines are ignored; padv 3: 4 = the Touchpad; a saved file says padv=4 (sens36; was 3) and keeps the style
         const char* pd = std::getenv("HOTD_PREF_DIR");
         const std::filesystem::path dir = pd && *pd ? std::filesystem::path(pd) : std::filesystem::temp_directory_path();
         const std::string file = (dir / "relpad_padv_test.ini").string();
@@ -913,9 +1099,9 @@ void PadTest::fixAfter(int k, Ctx& c)
         back.load(file);
         std::error_code ec;
         std::filesystem::remove(file, ec);
-        std::snprintf(b, sizeof b, "launcher.ini saved (%zu bytes): padv=3 %d, sideways keys %d, the style kept %d", all.size(),
-                      int(all.find("padv=3") != std::string::npos), int(all.find("sideways") != std::string::npos), back.pad[0].style);
-        expect(all.find("padv=3") != std::string::npos && all.find("sideways") == std::string::npos && back.pad[0].style == 2, b);
+        std::snprintf(b, sizeof b, "launcher.ini saved (%zu bytes): padv=4 %d, sideways keys %d, the style kept %d", all.size(),
+                      int(all.find("padv=4") != std::string::npos), int(all.find("sideways") != std::string::npos), back.pad[0].style);
+        expect(all.find("padv=4") != std::string::npos && all.find("sideways") == std::string::npos && back.pad[0].style == 2, b);
     }
     if (k == 25) {
         int nf = 0;
@@ -933,6 +1119,27 @@ void PadTest::fixAfter(int k, Ctx& c)
     if (k == 47) moved(10 * 0.5f / 60.0f * perRad, 0, 1.0f, "Motion + stick (flat): turned right = right");
     if (k == 60) counts(0, 0, 0, 1, "Motion + stick: West = reload (as printed)");
     if (k == 61) counts(0, 0, 0, 1, "Motion + stick: East = reload (as printed)");
+    // 7 (sens36, GitHub #36): each trial's motion; then per input: the other three speeds at 250 % move it exactly as
+    // at 100 % (nothing shared on top), its own 200 % twice as far; the converted older profile as fast as before
+    if (k >= kInd0 && k < kInd0 + kIndTrials * kIndLen && (k - kInd0) % kIndLen == 14)
+        m.ind[(k - kInd0) / kIndLen] = g[1].x - m.mark[1][0];
+    if (k == kInd0 + kIndTrials * kIndLen) {
+        for (int i = 0; i < kIndInputs; ++i) {
+            const IndInput in = indInput(i * 3);
+            const float a = m.ind[i * 3], o = m.ind[i * 3 + 1], two = m.ind[i * 3 + 2];
+            std::snprintf(b, sizeof b, "%s, %s Sensitivity: alone at 100%% %.2f px, the other three at 250%% %.2f, its own 200%% %.2f (want the same, x2)",
+                          in.style == 1 ? "Classic" : "Motion + stick", kIndNames[in.input], a, o, two);
+            expect(a > 3.0f && std::abs(o - a) <= 0.01f * a + 0.3f && std::abs(two - 2.0f * a) <= 0.02f * a + 0.6f, b);
+        }
+        // the older file's Classic stick 175 % (old: Sensitivity 7 = 3.5 x Stick 80 % x Aim 150 % heights / s) half
+        // way 10 frames; its Motion + stick gyro 306 % (old: 1.7 x Gyro 120 % x Aim 150 %) turned 0.5 rad/s 10 readings
+        const float st = m.ind[kIndInputs * 3], gy = m.ind[kIndInputs * 3 + 1];
+        const float wantSt = 10 * half * 3.5f * 0.8f * 1.5f * lh / 60.0f, wantGy = 10 * 0.5f / 60.0f * perRad * 1.7f * 1.2f * 1.5f;
+        std::snprintf(b, sizeof b, "the converted older settings move as before: Classic stick %.2f px (old %.2f)", st, wantSt);
+        expect(std::abs(st - wantSt) <= 0.01f * wantSt + 0.5f, b);
+        std::snprintf(b, sizeof b, "the converted older settings move as before: Motion + stick gyro %.2f px (old %.2f)", gy, wantGy);
+        expect(std::abs(gy - wantGy) <= 0.015f * wantGy + 1.0f, b);
+    }
     if (k == kFixFrames - 1) {
         std::snprintf(b, sizeof b, "padfix: %d of %d checks ran", m.fixChecks, kFixChecks);
         c.expect(m.fixChecks == kFixChecks, b);

@@ -27,6 +27,18 @@ int gammaParse(const char* s);
 // "1.40"
 const char* gammaText(int g100, char (&buf)[8]);
 
+// bugs4 (GitHub #23: "the blacks are crushed, gamma only greys them"): Video > Black Level, the arcade picture's black
+// point. The arcade models' output goes through MAME's monitor curve max(v - 64, 0) x 255 / 191 (renderer.cpp
+// uM2Gamma, the 2D layer's table in sprites_arcade.cpp, the cut-scene bars' flash in hud.cpp): every value up to 64 is
+// black, which Gamma (a curve over the finished 8-bit frame) cannot bring back. This lowers the 64 (launcher.ini
+// blacklevel=, --black-level 0-64), per pixel before the 8-bit output, so the shadows' detail returns instead of
+// turning grey. 64 = MAME's (the default: every frame as before, bit for bit); 0 = no curve. The PC models: none
+constexpr int kBlackMin = 0, kBlackMax = 64, kBlackStep = 4, kBlackDefault = 64;
+int blackLevel();   // the level in effect now (the frames set it from their LaunchConfig, as the gamma)
+void setBlackLevel(int b);
+// the curve on one 8-bit value with black level b (b 64: MAME's integer curve exactly)
+inline int m2Curve(int v, int b) { return v > b ? (v - b) * 255 / (255 - b) : 0; }
+
 // the picture in framebuffer fbo (w x h) through the curve, in place (nothing at 1.0). Leaves fbo bound with its
 // viewport, depth test / blending / scissor off, no program, texture unit 0 active
 void gammaApply(unsigned fbo, int w, int h);

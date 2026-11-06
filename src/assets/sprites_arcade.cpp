@@ -3,6 +3,8 @@
 // the scroll registers follow MAME's System 24 tile chip as far as the game uses them; no MAME frame compared yet.
 #include "assets/sprites_arcade.h"
 
+#include "render/gamma.h"
+
 #include <array>
 #include <cstring>
 
@@ -31,14 +33,15 @@ void composeInto(const uint8_t* tileRam, const uint8_t* charRam, const uint8_t* 
     // checked against MAME snapshots (bullet 189,121,36; life bar 20,0,255). Dark colours become black,
     // and stay opaque (only pen 0 is transparent: title-2, the title logo's dark shading and the
     // figure showed the 3D through, MAME attract_us snap 0058 has them black)
-    static const auto gm = [] {
-        std::array<uint8_t, 32> t{};
-        for (uint32_t c5 = 0; c5 < 32; ++c5) {
-            const int v = int(c5 * 255 / 31) - 64;
-            t[c5] = uint8_t(v > 0 ? v * 255 / 191 : 0);
-        }
-        return t;
+    // bugs4 (#23): the 64 is Video > Black Level (render/gamma.h m2Curve; 64: the table as before), a table per level
+    static const auto gms = [] {
+        std::array<std::array<uint8_t, 32>, kBlackMax + 1> all{};
+        for (int b = 0; b <= kBlackMax; ++b)
+            for (uint32_t c5 = 0; c5 < 32; ++c5)
+                all[size_t(b)][c5] = uint8_t(m2Curve(int(c5 * 255 / 31), b));
+        return all;
     }();
+    const std::array<uint8_t, 32>& gm = gms[size_t(blackLevel())];
     for (int layer = 3; layer >= 0; --layer) {
         const uint16_t pri = high ? 0x8000 : 0;
         const uint16_t hs = rd16(tileRam, 0xA000 + 2 * layer), vs = rd16(tileRam, 0xA008 + 2 * layer);

@@ -16,10 +16,14 @@ Everyone who made it: thank you for the game this whole project is built around.
 THIS PROJECT
 ------------
 Project author, testing, direction ... Tawhid
-AI assistance ........................ Anthropic's Claude: reverse engineering, and rewriting
-                                       and combining the existing code
 Translations ......................... machine-made (Korean, Japanese, Arabic, Hebrew):
                                        corrections/additions are welcomed and highly encouraged
+
+AI disclaimer: ReWrithe was made with AI assistance: AI tools helped reverse engineer the
+original game and combine its code to bring the arcade and PC versions together. No
+generative AI has been or ever will be used to create artistic assets. Everything you
+see and hear comes from the original games or from human-made work. Any new model,
+texture or sound effect will always be made by humans.
 
 
 SPECIAL THANKS
@@ -28,6 +32,9 @@ The MAME team ........................ the Model 2 hardware knowledge, and the S
                                        core (BSD-3-Clause)
 Karl Stenerud ........................ Musashi, the 68000 core of the sound board (MIT)
 RUNESA ............................... the secret-codes tip
+Saturn Memories (YouTube) ............ "The Typing of the Dead [PC] by SEGA" playthrough:
+                                       The Typing of the Dead 0's design reference
+                                       (watched only; no footage is included)
 Friends and testers .................. for playing early builds
 Everyone who reports a bug ........... you make it better
 
@@ -44,6 +51,8 @@ Xelu's Free Controller & Key Prompts by Nicolae "Xelu" Berbece (Those Awesome Gu
   updated by Paul Paun - thoseawesomeguys.com/prompts (CC0)
 Input Prompts by Kenney - kenney.nl (CC0)
 Special Elite font by Astigmatic (Apache 2.0), used to make the "ReWrithe" wordmark
+"Typewriter, bell #2" by Joseph SARDIN, BigSoundBank.com (sound 2845; CC0),
+  The Typing of the Dead 0's bell
 OpenXR loader by The Khronos Group (Apache 2.0), for VR headsets (Windows)
 Microsoft Visual C++ runtime (redistributable files)
 

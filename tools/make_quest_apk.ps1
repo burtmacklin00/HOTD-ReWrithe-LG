@@ -14,7 +14,7 @@
 #   powershell -ExecutionPolicy Bypass -File tools\make_quest_apk.ps1            # build + package
 #   powershell -ExecutionPolicy Bypass -File tools\make_quest_apk.ps1 -NoBuild   # package the last build again
 # Result: <checkout>\build-quest\HOTD-ReWrithe-quest-<version>-debug.apk (docs/quest.md: adb install)
-# Built with HOTD_EXPERIMENTAL_MODES=OFF (no Typing of the Dead 0 or Horde; Survival Mode in, labelled Very Experimental: docs/porting.md "Experimental
+# Built with HOTD_EXPERIMENTAL_MODES=OFF (no Typing of the Dead 0 or unreleased modes; Survival Mode in: docs/porting.md "Experimental
 # modes"); -Experimental keeps them (a testing APK, never released)
 param(
     [string]$Deps = "",

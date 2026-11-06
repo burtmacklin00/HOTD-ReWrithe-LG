@@ -16,6 +16,7 @@ extern "C" {
 #include "m68k.h"
 }
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <atomic>
@@ -46,6 +47,30 @@ struct SoundBoard::Impl {
     bool trace = std::getenv("HOTD_TRACE_BOARD") != nullptr;   // once a second: the 68000's PC / SR, the IRQ lines
 
     uint32_t heldLines = 0;   // lines raised with HOLD_LINE: cleared when the 68000 acknowledges that level (MAME's rule)
+    // totd8 (testing, HOTD_SCSP_KEYS=1): each slot keyed on (KYONEX with KEYONB newly set) printed with its sample
+    // format: PCM8B (8-bit) or 16-bit, the pitch (OCT / FNS: the rate = 44100 x 2^OCT x (1 + FNS / 1024)), the start
+    // address and loop end: the arcade's own samples' format (docs/typing.md, the typing sounds by board)
+    bool keysTap = std::getenv("HOTD_SCSP_KEYS") != nullptr;
+    bool keyWas[32] = {};
+    void tapKeys(uint32_t a, uint32_t w)
+    {
+        if (!keysTap || (a & 0xFFF) >= 0x400 || ((a & 0x1F) >> 1) != 0)
+            return;
+        if (!(w & 0x1000))
+            return;
+        for (int s = 0; s < 32; ++s) {
+            const u16 r0 = scsp->read(s * 0x10), on = r0 & 0x0800;
+            if (on && !keyWas[s]) {
+                const u16 r8 = scsp->read(s * 0x10 + 8);
+                int oct = (r8 >> 11) & 0xF;
+                if (oct & 8) oct -= 16;
+                const double rate = 44100.0 * std::pow(2.0, oct) * (1.0 + (r8 & 0x3FF) / 1024.0);
+                std::printf("SCSP KEY slot %d %s rate %.0f SA %05X LEA %04X TL %d\n", s, (r0 & 0x10) ? "8-bit" : "16-bit", rate,
+                            ((r0 & 0xF) << 16) | scsp->read(s * 0x10 + 1), scsp->read(s * 0x10 + 3), scsp->read(s * 0x10 + 6) & 0xFF);
+            }
+            keyWas[s] = on != 0;
+        }
+    }
 
     void setIrq(offs_t line, u8 state)
     {
@@ -117,8 +142,10 @@ struct SoundBoard::Impl {
         a &= 0xFFFFFF;
         if (a < kRamSize)
             ram[a] = v;
-        else if (a >= 0x100000 && a < 0x101000)
+        else if (a >= 0x100000 && a < 0x101000) {
             scsp->write((a & 0xFFF) >> 1, (a & 1) ? u16(v) : u16(v << 8), (a & 1) ? 0x00FF : 0xFF00);
+            tapKeys(a & ~1u, (a & 1) ? 0u : uint32_t(v) << 8);
+        }
     }
     void write16(uint32_t a, uint16_t v)
     {
@@ -126,8 +153,10 @@ struct SoundBoard::Impl {
         if (a < kRamSize) {
             ram[a] = uint8_t(v >> 8);
             ram[a + 1] = uint8_t(v);
-        } else if (a >= 0x100000 && a < 0x101000)
+        } else if (a >= 0x100000 && a < 0x101000) {
             scsp->write((a & 0xFFF) >> 1, v, 0xFFFF);
+            tapKeys(a, v);
+        }
     }
 };
 

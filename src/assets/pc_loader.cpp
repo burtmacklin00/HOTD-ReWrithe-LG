@@ -635,6 +635,30 @@ std::unique_ptr<StageData> PcSource::loadStage(int stage, std::string& err)
     }
     for (const RawObject& o : extra)
         if (!out->models.count(o.id)) build(o);   // a world object with the same ID wins
+    // survfix (user 2026-11-04: Survival shows no hand outside VR, the shop's and pickups' guns without it):
+    // the players' gun hand 0x719 `ter00a` without the hand as kGunOnlyKey 0xF1000719, as the arcade's
+    // (ArcadeSource::loadStage). The PC's 0x719 is one texture page (560) and its empty hand 0x36B another (551), so
+    // the arcade's rule (the empty hand's texture rectangles) does not carry over: the hand's skin and cuff are the
+    // page's corner u < 40, v >= 225 (rendered alone: the hand; u >= 225 the slide and grip, 97..118 one quad, the
+    // untextured muzzle), those left out
+    if (auto g = out->models.find(0x719); g != out->models.end() && !out->models.count(0xF1000719)) {
+        Model gun = g->second;
+        gun.key = 0xF1000719;
+        gun.name += " gun only";
+        for (Mesh& m : gun.meshes) {
+            std::vector<Vertex> kept;
+            for (size_t t = 0; t + 2 < m.vertices.size(); t += 3) {
+                const Vertex* v = &m.vertices[t];
+                const float u = (v[0].uv[0] + v[1].uv[0] + v[2].uv[0]) / 3.0f, w = (v[0].uv[1] + v[1].uv[1] + v[2].uv[1]) / 3.0f;
+                if (!((v[0].flags & kTextured) && u < 40.0f && w >= 225.0f))
+                    kept.insert(kept.end(), v, v + 3);
+            }
+            m.vertices = std::move(kept);
+        }
+        gun.computeBounds();
+        if (gun.triangleCount() > 0)
+            out->models[0xF1000719] = std::move(gun);
+    }
     return out;
 }
 

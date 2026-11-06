@@ -6,20 +6,17 @@ version was too easy): rounds that keep getting harder, points for hits and kill
 SMG, a life, two perks), reloads by hand, three lives. Code: `src/game/survival.h` / `survival.cpp`; the hooks listed
 under "Normal play".
 
-**Very Experimental / Proof of Concept** (user 2026-11-03): in the release packages too (CMake `HOTD_SURVIVAL_MODE`,
-default ON), with that line on its More Modes item and its help line and a notice when a game starts. In a release
-package (`HOTD_EXPERIMENTAL_MODES` OFF) only `--survival*` works: the old `--horde*` names are refused there (they are
-the new Horde Mode's, which stays out) ([porting.md](porting.md#experimental-modes)).
-
-Named **Horde Mode** until 2026-11-03 (the user: it is survival). The old names still work: `--horde <arena>`, `--horde-test`, `--horde-seed`, `--horde-smg-wave`,
-`--horde-cap`, `--horde-no-cut` (= the `--survival*` ones), `HOTD_HORDE_*` (= `HOTD_SURVIVAL_*`), `data/horde/` (the
-sound folder when there is no `data/survival/`); `horde_scores.txt` is moved to `survival_scores.txt` once.
+In the release packages too (user 2026-11-03; CMake `HOTD_SURVIVAL_MODE`, default ON). Its "Very Experimental / Proof of
+Concept" labels (the More Modes item's tag line, its help line, the 6 s notice at a game's start: v1.2.0) are gone
+(survfix3, user 2026-11-05: "remove very experimental / proof of concept from survival"). Its options are
+`--survival*` ([porting.md](porting.md#experimental-modes)).
 
 ## How to play / test
 
 - Menu: **More Modes > Survival** (the players are asked first); **Survival Arena: <name>** below it picks the arena (click:
   the next one). Sonic Mode's preset (More Modes) applies to Survival as to every game.
-- Command line: `hotd --survival <arena>` (`courtyard`, `bedroom`, `lab`, `furnace`, or 1-4), with `--players 1..4`.
+- Command line: `hotd --survival <arena>` (`courtyard`, `dining`, `lab`, `octagon`, or 1-4; the old `bedroom` /
+  `furnace` give the dining hall / the laboratory), with `--players 1..4`.
   Options: `--survival-seed N` (the director's random stream: the same seed plays the same rounds), `--survival-smg-wave N`
   (testing: the SMG free from round N; default 0 = only bought), `--survival-cap N` (creatures at once, 1-64; default
   24), `--survival-no-cut` (no cut creatures).
@@ -36,8 +33,17 @@ sound folder when there is no `data/survival/`); `horde_scores.txt` is moved to 
 - Testing helpers: `HOTD_SURVIVAL_AIM_UP=n` (the autofire aims n arcade pixels above the target's centre: head kills),
   `HOTD_SURVIVAL_TYPE=t` (every spawn that type: a cut creature's look and behaviour),
   `HOTD_SURVIVAL_START_WAVE=n` (the first wave is n: the limits' stress run), `HOTD_SURVIVAL_WAIT=n` (the lead-in takes its
-  (n+1)-th creature wait; each wait is logged with the camera: how the arenas were found), `HOTD_SURVIVAL_NAME=X` (a new
-  table row filed under that name, also headless).
+  (n+1)-th creature wait; each wait is logged with the camera: how the arenas were found), `HOTD_SURVIVAL_START=c:e`
+(the lead-in from chapter c's event e: any wait of any chapter, with the arena's types), `HOTD_SURVIVAL_DUMP=<file>`
+(with `--render`: the camera, the spawn places and the stage's walls / floors near it, then the creatures' places every
+4 frames: "Arenas"), `HOTD_SURVIVAL_NAME=X` (a new
+  table row filed under that name, also headless), `HOTD_SURVIVAL_POINTS=n` (seat p gets n x (4 - p) / 4 points at
+  each round's clear: the shop's pictures), `HOTD_SURVIVAL_BUYER=saver|upgrades` (the test buyer saves for the
+  Magician's Hand after the SMG / after the SMG, ammo, Quick Reload and Big Mag), `HOTD_WEAPONS_FORCE=k` +
+  `HOTD_WEAPONS_FORCE_KEEP=1` (only weapon k, given back when used up: the time to kill). The round lines of the
+  test end `earned E banked B lives lost L` (every seat's points earned so far / unspent at the clear, the lives lost
+  in the round) and the result line `ttk=<weapon>=kills/frames,..` (per the killer's weapon: the kills and the mean
+  frames from a creature's first hit to its death).
 
 ## How it works
 
@@ -53,21 +59,25 @@ ENTB3's fields (`Runtime::survival_spawn`: kind 0, the standard enemy). Everythi
 creatures walk to the attack places, attack, take hits, die, score; the camera turns toward the attackers and back
 (the original's game camera), so the arena holds or pans slowly.
 
-**Spawn places:** the creatures the lead-in captured at that wait, plus those of earlier sections within 450 units of
-the camera (the same room), at most 16; a place nearer than 110 units is moved out to 110 along its own direction (the
-original's creatures there are scripted to step up close: born in the player's face they could not be shot in time);
-with fewer than 4, each is also turned 30 degrees either way about the camera (more sides to come from). Each spawn
-is spread +-20 units.
+**Spawn places (arenas, 2026-11-05):** each arena lists its **doors** (`SurvivalArena::doors`: the room's entrances,
+world x / floor y / z, chosen and checked as under "Arenas"): the creatures come from these, facing the camera, with the
+flags of the arena's own captured creatures, spread +-8 units (a doorway is narrow). An arena without doors (and the
+finding helpers `HOTD_SURVIVAL_START` / `HOTD_SURVIVAL_WAIT`) keeps the old rule: the creatures the lead-in captured at
+that wait, plus those of earlier sections within 450 units of the camera, at most 16; a place nearer than 110 units
+moved out to 110 along its own direction; with fewer than 4, each also turned 30 degrees either way about the camera;
+spread +-20. (That rule is why the old arenas felt wrong: the captured places are where the original's creatures stand
+up close, so most were born 110 units away in a ring; the earlier sections' places were often behind a wall in the
+next room or on another floor, and the turned copies stood in walls or in the furnace's lava.)
 
 **Rounds (round r; Call of Duty Zombies' curve, `SurvivalMode::roundCount` / `roundHealth`):**
 
 | | Rule |
 |---|---|
-| Creatures | 6, 8, 13, 18 (rounds 1-4), then `24 + 2(r - 5)` to round 9, from round 10 `24 x 0.15 x r`; + 25 % for each other player; at most 150 |
+| Creatures | 6, 9, 13, 17 (rounds 1-4), then `21 + 3(r - 5)` to round 9 (24 ... 33; survfix2: CoD's 18 -> 24 step at round 5 smoothed), from round 10 `24 x 0.15 x r` (36, 40, 43 ..); + 25 % for each other player; at most 150 |
 | At once | `min(cap, 1 + r)` in rounds 1-3 (2, 3, 4), then `2 + r`; the runners' round `4 + r` |
 | Spawn gap | `max(12, 80 x 0.93^(r - 1)) + rand(20)` frames |
 | Hit points | the type's own to round 3, then + 12 % a round to round 9 (x 1.72), then x 1.1 a round (CoD: + 100 to 9, then x 1.1) |
-| Runners | none in rounds 1-3; from round 4 a share `min(8(r - 3), 60) %` start in their dash (start sub-state 2: the type's motion entry 2, `walk_variant` 1, so they dash again after each stop); `min(10(r - 3), 70) %` with the AI at once (flag bit 22) |
+| Runners | none in rounds 1-3; from round 4 a share `min(6(r - 3), 60) %` start in their dash (start sub-state 2: the type's motion entry 2, `walk_variant` 1, so they dash again after each stop); `min(8(r - 3), 70) %` with the AI at once (survfix2: were 8 / 10 % a round) (flag bit 22) |
 | Aggression | the game's own rank (difficulty_level's 0x51F492, 0-15: how often creatures attack) gets a floor of `(r - 1) x 2 / 3` |
 | Mix | the arena chapter's own standard types, the early rounds from the weaker end of the list; from round 2 a cut creature with chance `min(5 + 2r, 25) %` |
 | Special rounds | every 5th: 5, 15, 25 .. **runners** (every creature dashing, AI at once, the lighter half of the types, 3/4 the count, more at once); 10, 20 .. **brutes** (the heavier half and the cut creatures, half the count, x 1.25 hit points). Cleared: **Max Ammo** (every gun full, the SMG's reserve too) |
@@ -79,40 +89,149 @@ stays over the game over scene, then the menus: the name entry for a new row ("R
 the **Survival** table (`survival_scores.txt` in the settings folder: points, round, arena, name; ten rows; shown as
 "Round n" and the points).
 
+**Out until the next round (2-4 players; survrevive, user 2026-11-05: "if a player loses all their lives, they come
+back in the next wave where they get half their points back"):**
+- A player who loses the last life while at least one other player is still in play is **out for the rest of the
+  round**: no CONTINUE?, no countdown, no continue at all; the start button does nothing (`Game::seatsHeldOut`:
+  `player_start_check`, `coop4_seat_frame`) and no PRESS START is shown. The seat's line reads **BACK NEXT ROUND** in
+  the score font in the seat's colour, with its points (frozen) under it; its gun is off (no aim, no shots, no shop),
+  its torches and bullets taken off. Checked after each frame (`SurvivalMode::tick`), so the CONTINUE? never shows,
+  not even for a frame: the seat goes from the game's state 4 straight to waiting (9).
+- When the next round starts (with its ROUND n banner) every out player **comes back**: through the game's own join
+  (players 1 / 2: `player_st3_join` / PlStartInit's join row; players 3 / 4: `coop4_seat_start`), with Survival's
+  start lives (the Lives setting's start lives, at most 3: the same as a game's start), **half the points it had when
+  it went out, rounded down to the points' step of 10** (it loses half), its weapons as they were (Survival keeps
+  weapons) and the magazine it had in the hand (no free refill). Its corner shows **"nP IS BACK"** in its colour over
+  its weapon line and its new points for 3 s.
+- Every player out at the same time (or the last one in play losing the last life): game over as before (the results,
+  then the Survival table). The points counted for the table are the points earned (unchanged by the halving).
+- 1 player: unchanged (game over at 0 lives). CPU teammates follow the same rule (their start button is held like a
+  player's). Deterministic: it uses only game state (no input, no random numbers), so it is the same on every PC; Survival
+  itself is still local only (see Open).
+- Test: `HOTD_SURVIVAL_DRAIN=<seat>@<round>[+frames],..` sets that seat's lives to 0 that many frames (default 300) into
+  that round, as a creature's last hit would (`--lives-kept` leaves the seat alone until it is back). The log has
+  `survival: nP is out ..` / `nP is back .. lives L, points P (half of Q), weapons W (had W), .., ok`, the result line
+  `out=N back=N revive=ok|FAIL`. E.g. `HOTD_SURVIVAL_DRAIN=3@2,4@2+200,2@3+100,1@4+100 hotd --survival-test 6 --players 4`.
+
 **Points** (each seat its own; `Game::survivalScoring`: the game's own `add_score` does nothing in Survival, and
 `enemy_part_hits` reports each frame a creature was hit, `Game::survival_hits`): **10** for each frame a seat's shots hit
 a creature, **50** for the kill (the game's own killer), **100** for a kill with a head hit (the game's eye / head hit,
 part class 1: `G::eye_hits`). The score in the table is the points earned (spending does not lower it).
 
-**The shop (between rounds):** five signs in a row across the lower part of the picture; a shot at a sign buys it
-(the shot is not fired): **AMMO 500** (the SMG's reserve full again: four magazines; the handgun never runs dry),
-**SMG 1000** (the SMG, a full magazine and its reserve; lost when it and its reserve are empty: back to the handgun),
-**LIFE 1500** (+1, at most 5), **QUICK RELOAD 2000** (reloads take half: 18 / 36 frames), **BIG MAG 2500** (magazines
-x 1.5: 9 / 45). "NOT ENOUGH POINTS" / "NOT NOW" when it cannot be bought.
+**The shop (between rounds, weapons 2026-11-04: [weapons.md](weapons.md#survival)):** nine items in three rows, each
+with an in-game model turning over it; a shot at its name or model buys it (the shot is not fired): the weapons
+**SMG 1000**, **ASSAULT RIFLE 2500**, **DOUBLE PISTOLS 1500**, **SHOTGUN 3000**, **MAGICIAN'S HAND 8000** (prices
+from `data/weapons.ini`; into the hand at once, full; lost when its magazine and reserve are empty), **AMMO 500** (the
+reserves of every weapon held full again; the handgun never runs dry), **LIFE 1500** (+1, at most 5), **QUICK RELOAD
+2000** (reloads take half), **BIG MAG 2500** (magazines x 1.5). "NOT ENOUGH POINTS" / "NOT NOW" when it cannot be
+bought. The weapons are **kept after a round** (the user's answer).
 
 **Reload by hand:** Survival ignores the Auto Reload setting (`autoReloadSeats` / `autoReloadWanted` in main.cpp: off
 while `survival.active()`, the setting itself untouched, every other game as set). A pull off the screen starts the
-reload: the handgun's takes 36 frames, the SMG's 72 (from its reserve); the gun does nothing meanwhile ("RELOADING").
+reload: each weapon's own time (the handgun 36 frames, the SMG 72 ...: weapons.md), from its reserve; the gun does
+nothing meanwhile ("RELOADING").
 
-**HUD:** the round line at the top ("ROUND n LEFT k"; in the break "ROUND n IN s - SHOOT A SIGN TO BUY"), a line per
-player ("1P 1230 PTS 6/6 QUICK BIG MAG", "SMG 23+120"), the shop's signs with their prices (lit when affordable) in
-the break, the moment's banner in the middle (the arena's name, ROUND n - RUNNERS, 1P BOUGHT THE SMG, ROUND n CLEARED -
-MAX AMMO). Drawn by `Hud::drawSurvival`.
+**HUD** (redone 2026-11-04, survfix; one title block for 1-4 players and the shop's stacks, survfix2:
+[weapons.md](weapons.md#survival)): in the font of the game's own score line (Score Display's `SCORE:00000`), on the
+arcade HUD's cell grid with shadows: one title block at the top centre for 1-4 players, rounds and shop alike ("ROUND
+n" over "LEFT k"; in the break "ROUND n IN s" over "SHOOT AN ITEM TO BUY" or the moment's buy / NOT ENOUGH POINTS;
+at the end "REACHED ROUND n" over "POINTS p   KILLS k" over the fallen players and the GAME OVER card), per player
+the weapon with `rounds/reserve` and `PTS:00000` over the arcade's bullets (past 6: one bullet and "X N"), the shop's
+signs (model, name, gold price, the seats that can buy it; grey when nobody can), the moment's banner in the gap
+between the RELOAD prompts (the arena's name, ROUND n RUNNERS, ROUND n CLEARED MAX AMMO). Drawn by
+`Hud::drawSurvival`. The name entry ("ROUND n  p PTS") and the Survival table are the menus' own screens.
+
+## Creatures that never attack (survfix, 2026-11-04)
+
+The user: "creatures far away that never attack the player must not matter: they must not hold up a round's end / wave
+clear, and must not count as needed kills", but those behind cover, hiding, popping out, waiting at a door or scripted
+to come later do matter. Decided from each creature's AI, never from distance or visibility alone
+(`game/engage.h` / `engage.cpp`, `EngageWatch`), every frame for Survival's own creatures (the
+script's own creatures stay as the arcade has them):
+
+| The creature | Rule | Evidence (the port of the arcade's code) |
+|---|---|---|
+| any routine but `enemy_main` (0x77410): `enemy_wait_camera_stop`, the scripted kinds (1 waking, 2 kicking, 8 rising into view, the door / corner / hanging / dropping kinds, bosses' helpers), dying, corpses | **matters** | their own routines decide when they come or leave (enemy_kinds.cpp, enemy_scripted.cpp) |
+| `enemy_main` in AI states 2-9 | **matters** | enemy_ai.cpp: a waiting or front attack position is held; attack_slots.cpp `attack_slots_update` re-orders the waiting positions by depth every frame, so the queue always moves on to a front position |
+| `enemy_main` state 1 with its delay (+0x2EC) running | **matters** ("comes later") | enemy_ai.cpp: the delay counts down, then the turn and the step |
+| `enemy_main` state 1 within 70 units of its target, or still getting 2 units nearer within 300 frames | **matters** (on its approach path) | enemy_ai.cpp state 1: it moves on to 2 / 3 within 70 |
+| `enemy_main` state 1, beyond 70 units and no nearer for 300 frames | **never attacks** | state 1 leaves only within 70 units: a creature that has stopped getting nearer (walking on the spot, a standing motion, a stale target) never will |
+| `enemy_main` with flags bit 0 clear for 300 frames (not dying) | **never attacks** | enemy.cpp `enemy_main`: `enemy_ai` runs only with flags bit 0 |
+| `enemy_main` in state 0 or above 9 for 300 frames | **never attacks** | enemy_ai.cpp: its switch acts on states 1-9 only |
+
+A creature that never attacks is sent away by the game's own leave (its routine set to `kind10_remove` 0x76FC0 with
+flags bit 21 cleared: `enemy_leave` frees its attack position and target, takes it off `enemy_count` /
+`enemies_alive` and ends its task), so the counts every wait reads (Survival's round, the script's WAIT_ENNUM /
+WAIT_ENALV, the camera stops) let go. Survival logs `survival: a type N creature will never attack (why): sent away`
+and counts them in the test line (`retired=`), not as kills. In the runs so far (Survival 12 rounds x 4 arenas with
+the autofire, with the launcher's bot and without shooting) no creature met a "never attacks" rule by itself:
+every standard creature either approached or waited in the queue of waiting positions (with one player only position
+0 attacks; up to ten stand about 70 units off, some behind the camera in the furnace arena: they matter and come in
+turn).
+
+Test (`HOTD_SURVIVAL_TEST_IDLE=1 hotd --survival courtyard --frames 6000 --lives-kept 1 --mute`, no shooter): round 1
+gets A (put back on its place each frame of its approach: walks on the spot, never attacks) and B (a 1500-frame delay:
+comes later) 250 units out of view; the test kills whoever attacks. Result: A sent away at frame 442, B attacked at
+4571, round 1 cleared at 4717 (after B). With `HOTD_SURVIVAL_KEEP_IDLE=1` (the old rule) the round never ends.
+`HOTD_SURVIVAL_TRACE_ALIVE=n`: every n frames each creature's routine, AI state, delay,
+attack position, distance and depth.
 
 ## Arenas
 
-Found with `HOTD_SURVIVAL_WAIT` (every creature wait of each chapter's lead-in logged with the camera) and pictures of
-each (`--render --shot-at`); the ones where the camera stops in an open place with several ways in were kept.
+**Chosen again (arenas, user 2026-11-05: "the chapter locations are weird, especially Chapter 2: it does not make
+sense, is not open enough"; the old set was the courtyard, the green bedroom, the laboratory and the furnace bridge: two
+from Chapter 3, none from Chapter 4).** One arena a chapter, the most open place where the camera stops:
 
-| Key | Where | Start | Wait | Types (the chapter's kind 0 records) |
+| # | Key | Menu name | Start | Wait | Doors | Types (the chapter's kind 0 records) |
+|---|---|---|---|---|---|---|
+| 1 | courtyard | Chapter 1: the courtyard | chapter 1 event 1 | 1st | 5: the mansion gate, three across the yard's far side (between the flower beds' kerbs), the west side | 11, 28, 24, 16, 57, 29, 30 |
+| 2 | dining | Chapter 2: the dining hall | chapter 2 event 12 | 3rd | 4: the north door, three across the far end (a step up) | 11, 28, 16, 29, 51, 33, 45, 30, 32, 58 |
+| 3 | lab | Chapter 3: the laboratory | chapter 3 event 1 | 1st | 4: the west door, the north corridor, the two far corners | 28, 61, 86, 62, 73, 83, 3, 29, 53, 65, 72, 63, 84 |
+| 4 | octagon | Chapter 4: the octagon hall | chapter 4 event 0 | 2nd | 4: three at the machine's end of the hall, the east corridor | 11, 53, 72 |
+
+(The dining hall is on Chapter 2's other route, events 10-13: the arena starts at its event 12 directly, as Boss Mode
+starts a boss. Chapter 4 has only three standard types: kind 0 records of 11, 53, 72.)
+
+**How they were found.** Every creature wait of all four chapters on every route (the lead-in from each chapter's
+event 0 / 1 and from each branch's first event, `HOTD_SURVIVAL_START=c:e` + `HOTD_SURVIVAL_WAIT=99`: 96 camera spots,
+44 in Chapter 1, 24 in Chapter 2, 24 in Chapter 3, 4 in Chapter 4), each pictured headless (`--render`, the space 60
+frames after the arena is taken and round 1 at +700) and measured from a dump of the stage (`HOTD_SURVIVAL_DUMP=<file>`:
+the camera, its view matrix, the spawn places and the stage's walls / floors near it: the Ragdoll mod's triangles, the
+same the dead bodies collide with; then each creature's place every 4 frames). The numbers (scratch tools `arenas.py`,
+`floor.py`, `check.py`, `find.py`):
+
+- **walkable floor in view**: the floor triangles at the camera's floor height (+-8, steps of 6 joined) connected to
+  the one under the camera, the part within the view (+-36 degrees), in 100 x 100 units;
+- **nearest wall / median depth**: rays from the camera over the view at body height (12 and 30 units up) to the first
+  wall triangle;
+- a door: on that floor, a straight walk to the camera with no wall at foot height (5 units: Chapter 1's flower-bed
+  kerbs are 10 high), room around it; then checked in play: the creatures' walks against the walls, and pictures every
+  600 frames (a door was dropped when the camera, turning after its creatures as the original's does, ended up facing a
+  wall close up: the courtyard's east side and gate behind (a hut), the dining hall's doorway behind (a curtain), the
+  octagon hall's corridor behind (a step lower: the camera looked at the floor) and west corridor (rock)).
+
+| Spot | Walkable floor in view | Nearest wall | Median depth | Verdict |
 |---|---|---|---|---|
-| courtyard | Chapter 1, the courtyard in front of the mansion | chapter 1 event 1 | 1st | 11, 28, 24, 16, 57, 29, 30 |
-| bedroom | Chapter 2, the green bedroom | chapter 2 event 1 | 6th (event 4) | 11, 28, 16, 29, 51, 33, 45, 30, 32, 58 |
-| lab | Chapter 3, the laboratory floor | chapter 3 event 1 | 1st | 28, 61, 86, 62, 73, 83, 3, 29, 53, 65, 72, 63, 84 |
-| furnace | Chapter 3, the bridge over the furnace | chapter 3 event 1 | 7th (event 6) | as lab |
+| Ch1 courtyard (kept) | **52.7** (129 in all) | 258 | 652 | the most open place of the game |
+| Ch1 mansion bridge, event 4 | 0.0 (the wide view is of the yard below) | 366 | 1200 | the camera on a narrow bridge; "HOLD YOUR FIRE": a hostage scene |
+| Ch2 green bedroom (old) | 0.2 | 57 | 60 | small, the creatures born in a ring at 110 |
+| Ch2 dining hall (new) | **2.3** | 35 (the table's end) | 174 | the largest checked room of Chapter 2: 275 x 100, the table in the middle, doors at both ends |
+| Ch2 gallery hall before the boss, event 9 | 0.5 | 23 | 99 | looks open, but a 35-wide gallery around a stairwell |
+| Ch2 pillar hall, event 0 | ? | (166) | (1200) | its walls / floors are not in the dump (a world the Ragdoll mod's walls do not cover): could not be checked; pillars close up |
+| Ch3 laboratory (kept) | **3.4** | 129 | 281 | a real floor, three ways in |
+| Ch3 furnace bridge (old) | 2.1 | 122 | 515 | a 20-wide walkway over lava (the lava 15 lower): one way in, the turned spawn copies stood in the lava |
+| Ch4 octagon hall (new) | **16.0** | 127 | 229 | the hall at Chapter 4's start: a wide floor round the machine, the corridors |
+| Ch4 fire corridor, event 3 | 11.7 | 20 | 87 | a 50-wide corridor |
 
-Dropped: Chapter 1's mansion steps (event 3's wait is inside a cut-scene: shots off, letterbox; the creatures could not
-be shot), Chapter 2's waits 7 / 8 (the camera in a dark corner), Chapter 3's waits 3 / 8 (too dark / too close).
+The rest (corridors, stairs, the dark Chapter 1 halls and Chapter 3's corners) had less than 13 in view or a wall
+within 40. Contact sheets of every spot and the before / after pictures: the worker's scratch folder (`arenas/sheets`).
+
+**Checked:** the creatures' walks in long runs with every door (the autofire every 40 frames, `--frames 12000` and
+`30000`, lives kept): courtyard 75 + 141 creatures, dining 93 + 192, lab 111 + 262, octagon 36 + 164 (the earlier door
+sets included), 0 steps crossing a wall at foot height; no creature sent away (`will never attack`: 0).
+`--survival-test 10`: ok in all four (see the worker's STATUS.md).
+
+The balance tables below were measured on the old arenas (courtyard / bedroom / lab / furnace).
 
 ## Cut creatures
 
@@ -160,6 +279,25 @@ Disiprin (52) has the same armour-0xFF roles with a complete damage row (no part
 --survival-test 10`: Syndy's 35 cleared at frame 2608 (was 4299), Baba's at 1471 (was 5055); renders of Baba
 before / after: scratch `workers\survival\shots\baba.png`.
 
+**Their shadows (fixed 2026-11-05, the user's report: "the hammer lady's shadow is just a squished-down Y level of
+her").** `part_draw` (0x36240) draws a creature's shadow, when body +0x6C bit 1 is set, by drawing each part again
+under the shadow projection (stored matrix 3, `shadow_setup`: onto the floor along the shadow light). The model it
+draws is the part role's entry of the type's **shadow table** (`0x14BA80[type]`, then `[role]`): low-polygon dark
+copies, `<part>_DD` / `semusikage_*` ...; a type whose word is 0 gets the part's **own textured model** squashed flat
+instead. The words, read from the ROM: 0 for MrG (5), Syndy (10), the Hangedman (50, 55, 69) and the Hermit (64);
+every other type has a table, and the 17-role human-shaped creatures share the zombies' 0x14A730 (`ff_*_DD`: Sam,
+Neil, Cyril, Samson, Harris, Gilmore, Bentley, Kageo, Bourbon, Robert, Burner, the other cut ones, ...). So Syndy cast
+a flat silvery copy of herself where every other creature casts a dark shadow. That is the original code's own path
+(the arcade would draw her so too, but never spawns her: nothing to compare in MAME). Her part tree has the same 17
+roles in the same order as theirs, so Survival now gives her her donor Neil's word (the zombies' table) with the other
+borrowed words: the same shadow models, opacity and floor projection as the others, posed by her own skeleton. Her
+mallet (drawn by her part hook, not a part) has no shadow, as Gilmore's hammer has none. Of the other types without a
+table, only the Hangedman's Chapter 1 copy (55, carrying Sophie off) draws a shadow pass (a trace of every shadow
+model drawn, per type: Chapters 1-4 with `--strict --default-route`, and `--survival-test 10`): the original's own
+flat copy, while he is high in the sky in that cut-scene (not on screen); the ROM has no shadow models for him, so it
+is left as the arcade draws it. MrG and the Hermit draw no creature shadow anywhere the game runs. Pictures: scratch
+`workers\shadow\syndy_shadow_before_after.png`.
+
 Not found: cut music in the arcade sound ROMs (the sound test's 8 / 10 / 13 are still undecoded: docs/cut_content.md);
 GitHub issue #4 could not be read (no network in this session).
 
@@ -199,23 +337,77 @@ So a sure, quick shot reaches rounds 9-13, a good one 6-8, a weak one 3-5 (the t
 The bedroom is the hardest (its creatures come close fast). (The first Survival had +1 life every 5th wave, the free
 SMG from wave 3 and Auto Reload: the user found it too easy.) Logs: the survival2 worker's `logs\bal_final\`.
 
-## The SMG
+### The balance pass (survfix2, 2026-11-04)
 
-Bought in the shop (1000 points; `--survival-smg-wave N` gives it free from round N, testing), for each player on
-their own: a full magazine at once, **30 rounds** a magazine (45 with Big Mag) and a reserve of four magazines
-(`Game::survivalRounds[seat]`: the port's `pm_full_rounds`; the HUD's bullets show the first 6, the player's line the
-count and reserve). The reload takes from the reserve; with the magazine and the reserve empty the player is back to
-the handgun (buy it again, or AMMO before that). Holding the trigger on the screen fires every 5 frames (12 shots a
-second, `SurvivalMode::gunInput`, called by `Runtime::input_task_stand_in`): the mouse's left button and the fire keys
-report held; an input that cannot (pads, light guns: their pulls arrive as single presses) fires a burst of 3 a pull.
-Damage per shot: the handgun's (the game's own shot path, `player_shoot`).
+Targets (the user's): the first buy in round 2-3, the Magician's Hand in round 8-10, each weapon worth its price,
+rounds harder steadily without spikes. Runs: `--survival-test 15 --survival <arena> --bot <1|2> --bot-skill <0.9|0.75>`
+(lives kept, the four arenas, 8 runs a row), the buyers `HOTD_SURVIVAL_BUYER=saver|upgrades` with the autofire, the
+time to kill `HOTD_WEAPONS_FORCE=k HOTD_WEAPONS_FORCE_KEEP=1 --survival-test 10 --survival-weapons-wave 1` (perfect aim,
+a pull every 15 frames).
 
-**Sounds** (`survivalSoundDir()`: the first data folder with `data/survival/`):
+Per round, bot skill 0.9 (the means of 8 runs; before = the curve of 2026-11-03, after = this pass):
+
+| Round | Points earned (all so far) | Earned in the round | Lives lost before | Lives lost after | Creatures before / after |
+|---|---|---|---|---|---|
+| 1 | 495 | 495 | 0.0 | 0.0 | 6 / 6 |
+| 2 | 1268 | 772 | 0.1 | 0.1 | 8 / 9 |
+| 3 | 2458 | 1190 | 0.1 | 0.1 | 13 / 13 |
+| 4 | 4015 | 1558 | 1.1 | 0.4 | 18 / 17 |
+| 5 (runners) | 5345 | 1330 | 0.8 | 0.8 | 18 / 16 |
+| 6 | 7560 | 2215 | 0.8 | 0.5 | 26 / 24 |
+| 7 | 10120 | 2560 | 2.8 | 1.5 | 28 / 27 |
+| 8 | 13172 | 3052 | 4.2 | 4.0 | 30 / 30 |
+| 9 | 16824 | 3651 | 6.2 | 5.4 | 32 / 33 |
+| 10 (brutes) | 19188 | 2364 | 5.2 | 3.2 | 18 / 18 |
+| 11 | 23585 | 4398 | 9.2 | 10.1 | 40 / 40 |
+| 12 | 28242 | 4658 | 13.9 | 9.6 | 43 / 43 |
+| 13 | 33270 | 5028 | 15.0 | 13.4 | 47 / 47 |
+| 14 | 39066 | 5796 | 18.1 | 14.5 | 50 / 50 |
+| 15 (runners) | 43232 | 4166 | 11.0 | 7.5 | 40 / 40 |
+
+(Skill 0.75: the same points within 5 %, lives lost after 0 / 0.6 / 0.6 / 1.1 / 2.8 / 1.9 / 3.1 / 6.8 / 9.0 / 6.2 /
+17.0 ...) Before, round 4 cost more lives than rounds 5-6 and round 7 three times round 6 (the 18 -> 24 count step and
+the runners' 8 / 10 % a round); after, the losses rise round by round, the special rounds (5, 10, 15) a breather.
+
+Buying (the round whose break it was bought in; the autofire, a pull every 15 / 25 frames, the four arenas): the
+**SMG (1000) in round 2** in every run (rounds 1-2 earn ~1200); the **Magician's Hand (8000)**: a saver (the SMG, then
+everything for the Hand) **in round 8**, a buyer of the SMG, ammo, Quick Reload (round 4) and Big Mag (round 6) **in
+round 9** (all 16 runs). At 5000 a saver had it after round 5.
+
+Time to kill (frames from a creature's first hit to its death, by the killer's weapon; rounds 1-10, perfect aim):
+
+| Weapon (price) | courtyard | bedroom | lab | furnace | before (courtyard / lab) |
+|---|---|---|---|---|---|
+| Handgun (-) | 175 | 274 | 198 | 269 | 178 / 174 |
+| SMG (1000) | 33 | 109 | 51 | 99 | 29 / 53 |
+| Double Pistols (1500), 100 -> 200 % | 33 | 141 | 53 | 120 | 161 / 149 |
+| Assault Rifle (2500) | 24 | 93 | 46 | 92 | 25 / 33 |
+| Shotgun (3000), 100 -> 130 % | 21 | 153 | 40 | 174 | 51 / 50 |
+| Magician's Hand (8000), 250 -> 350 % + its burst | 35 | 109 | 33 | 101 | 66 / 52 (with the root fix) |
+
+The Double Pistols were the handgun: both guns' hits on one creature in a frame count once, so the second gun only
+helped against a second creature; at 200 % a pull of both is worth two handgun shots. The shotgun's pellets on one
+creature count once too (130 %; still weak at the long range of the bedroom and the furnace: its 170-unit range). The
+Hand's burst marked the body's root when the creature stood right at the camera (never damaged: the round never
+ended; fixed). Rounds reached at game over (real lives, before -> after; courtyard / bedroom / lab / furnace): bot 0.9
+7/6/8/7 -> 9/5/8/7, bot 0.6 6/4/4/5 -> 5/4/4/4, autofire every 25 frames 8/8/8/10 -> 9/8/9/10, every 40 6/4/6/7 ->
+9/7/9/9 (the stronger Double Pistols).
+
+## The SMG and the other weapons
+
+Since 2026-11-04 the SMG is one of the six weapons of [weapons.md](weapons.md) (data-driven:
+`data/weapons.ini`), as survival2 tuned it: 30 rounds (45 with Big Mag), four magazines of reserve, a held trigger
+fires every 5 frames, a pad's / light gun's pull a burst of 3, the handgun's damage. `--survival-smg-wave N` still
+gives it free from round N; `--survival-weapons-wave N` every weapon (testing).
+
+**Sounds** (the weapons' in `data/weapons/`, the SMG's also in `survivalSoundDir()`: the first data folder with
+`data/survival/`):
 
 | File | Played | Stand-in until the file is there |
 |---|---|---|
-| `data/survival/smg_fire.wav` | each SMG shot (instead of the handgun's 0xA01208 / 0xA01207) | the handgun's shot (PC cue 30) 1.4 x faster, its first 40 %, 90 % volume |
-| `data/survival/smg_reload.wav` | the reload with the SMG (instead of 0xA01200) | the reload (PC cue 28) at 0.8 x |
+| `data/weapons/smg_fire.wav` (or `data/survival/`) | each SMG shot (instead of the handgun's 0xA01208 / 0xA01207) | the handgun's shot (PC cue 30) 1.4 x faster, its first 40 %, 90 % volume |
+| `data/weapons/smg_reload.wav` (or `data/survival/`) | the reload with the SMG (instead of 0xA01200) | the reload (PC cue 28) at 0.8 x |
+| the other weapons' (weapons.md) | | |
 | `data/survival/wave_start.wav` | a wave's start | none (silent until the file is there) |
 | `data/survival/wave_clear.wav` | a wave cleared | none (silent until the file is there) |
 
@@ -237,7 +429,8 @@ Every Survival hook does nothing while Survival Mode is off: `Game::evt_spawned`
 `extraBodySlots` (0), `Game::survivalScoring` (false: `add_score` as always, no `survival_hits`; `survivalHitSeats` is
 only written), the runtime's event task case and lead-in loop (`survival.active()`), `sound_cue`'s first look, the
 input's gun (`survival.gunInput` only while active), the Auto Reload override (only while active), the view's
-`actorAreaLook` (empty). Checked: the input test, Chapter 1 (arcade and PC
+`actorAreaLook` (empty), `Game::seatsHeldOut` / `Runtime::livesKeptSkip` (0: the start check, the 4P start, the PRESS
+START prompt and `--lives-kept` as before; `coop4_seat_start` is the 4P start button's own code moved out). Checked: the input test, Chapter 1 (arcade and PC
 models) and Chapter 4 `--strict` give the same results as before (see the worker's STATUS.md).
 
 ## Open

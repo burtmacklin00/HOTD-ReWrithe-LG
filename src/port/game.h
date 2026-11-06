@@ -30,6 +30,11 @@ extern bool (*gHitHold)(int player);
 // it chases waits before its bite / strike (its prompt's rescue timer has not run out): the run-after routines'
 // arrival tests (enemy_actions.cpp). Null outside those ticks
 extern bool (*gPreyHold)(uint32_t obj);
+// and (totd8, 2026-11-05: "a boss's strikes between sentences play with no damage: hold the strike animation itself")
+// whether a boss's own strike waits: asked where each boss begins one (the Chariot's and the Hermit's attack actions,
+// the Hangedman's claw and swoops, the Magician's lunge); held, the boss goes on with its idle / hover / swoops. Null
+// outside those ticks
+extern bool (*gBossHold)(uint32_t obj);
 // Gameplay "Attract Gore" (default on): the attract's hit parts and blow-offs (damage.cpp) and the prologue's sewer
 // corpses (event.cpp evt_attract_restore) as the 1998 PC; off: Revision A exactly
 extern bool gAttractGore;
@@ -87,6 +92,10 @@ public:
     // Boss Mode (THOTD.EXE front-end state 4; game/bossmode.h): no continue, game over as soon as every player is out
     // (game_continue_begin 0x458808 / game_continue_countdown 0x4588A0). Set by the runtime; false in the proofs
     bool bossNoContinue = false;
+    // Survival with 2-4 players (ours, survrevive; game/survival.cpp): bit p = seat p lost its last life while another
+    // played on and is out until the next round: its start button does nothing (player_start_check, coop4_seat_frame),
+    // no PRESS START. Set by the runtime; 0 in every other game and in the proofs
+    uint8_t seatsHeldOut = 0;
     // Boss Mode's rules in the boss code (pmrest, docs/teaser_status/bossmode.md "PC rules"): the PC's own tests of
     // frontend_state == 4. The runtime sets boss_mode (THOTD.EXE 0xC723B8: 2-6; 0 in every other game and in the
     // proofs) and boss_next (pc_boss_next 0x5CD360: the walk to the boss is run undrawn, without sounds, ENTB3
@@ -608,6 +617,78 @@ public:
     bool survivalScoring = false;
     uint32_t survivalHitSeats = 0;   // (part_hit: the seats whose shots hit a part of the creature this frame; read only by Survival)
     virtual void survival_hits(uint32_t obj, uint32_t seats, int killer, uint32_t headSeats) { (void)obj, (void)seats, (void)killer, (void)headSeats; }
+    // weapons (ours, user 2026-11-04; game/weapons.h, docs/weapons.md): Survival's guns. The runtime sets each
+    // seat's shot before the frame: extra rays at offsets from the aim (the shotgun's spread, the double pistols' second
+    // gun; their flashes), a range for them, an explosion's radius at the hit (the Magician's Hand: area damage, given
+    // to the creatures near it by enemy_part_hits), the damage in percent of the handgun's (part_hit's tally scaled).
+    // weaponHooks false (every other game, the proofs): nothing of it runs, hud_ammo_draw as the original
+    struct WeaponShot {
+        int rays = 0;                // extra rays (at most 16)
+        float off[16][2] = {};       // their offsets from the aim (arcade screen units)
+        bool flashes = false;        // each extra ray its own shot flash (the double pistols' second gun)
+        float range = 0.0f;          // the extra rays hit only nearer than this (camera units; 0: any)
+        float area = 0.0f;           // an explosion of this radius at the hit (camera units; 0: none)
+        bool projectile = false;     // the explosion flies there first (the Magician's Hand: his fireball; no direct hit)
+        int damage = 100;            // the damage of each hit, percent of the game's own
+    };
+    bool weaponHooks = false;
+    WeaponShot weaponShot[4];
+    // totd6 (The Typing of the Dead 0; the PC TotD shows no bullets, user 2026-11-05): player 1's bullet row is not
+    // drawn (hud_ammo_draw puts its places out); false everywhere else
+    bool noAmmoRow = false;
+    // vr dual pistols (ours, player request 2026-11-04; docs/vr.md "Dual pistols"): a seat with a gun in each VR hand.
+    // on: the seat holds two guns (the double pistols' fixed second ray is not added: each gun aims for itself); fire:
+    // both triggers were pulled in this frame: the second gun's own ray at (x, y) (arcade screen units, absolute, its
+    // own shot flash) after the seat's shot, as the double pistols' second gun (one round for the pair). Set by the
+    // runtime's VR input before the frame, cleared by the shot; never set outside VR (nothing of it runs). shots /
+    // hits: the second ray's (tests)
+    struct SecondGun {
+        bool on = false, fire = false;
+        float x = 0, y = 0;
+        int shots = 0, hits = 0;
+    };
+    SecondGun secondGun[4];
+    // pct: the damage percent of a hit at its middle (survfix3: falling off to 40 % at the radius; blastObj / blastPct:
+    // the creature enemy_part_hits is on and its percent, for weapon_damage)
+    struct WeaponBlast { float at[3] = {}; float radius = 0; int seat = -1; int pct = 100; uint64_t frame = 0; uint32_t done[32] = {}; int doneN = 0; };
+    WeaponBlast weaponBlast;         // the last explosion (camera space; the creatures near it take a hit once)
+    uint32_t blastObj = 0;
+    int blastPct = 100;
+    // survfix (user 2026-11-04: the Magician's Hand "shoots the Magician's own projectiles" that explode on impact): a
+    // projectile weapon's shot is a bolt flying from the aim (just ahead of the camera) to what the aim ray meets first
+    // (survfix3: a creature or an item the shot test finds, or the stage itself: weapon_world_ray; nothing within 300
+    // units: there), world space, kWeaponBoltSpeed units a frame; there the explosion (weapon_blast_at). age counts its
+    // frames; burst > 0: the explosion's look (the fireball's burst, magician_fireball_frame) frames left. item: the
+    // shot test's candidate it flew to was not a creature (a prop, a crate, a scene item: cand, its raw 0x24 bytes;
+    // serial: the object's task serial), hit on arrival as the game's shot hits it
+    static constexpr float kWeaponBoltSpeed = 24.0f;   // (was 8: "does not feel responsive", user 2026-11-05)
+    static constexpr int kWeaponBoltMaxFrames = 12;     // (and never longer than about 0.2 s to its hit)
+    static constexpr float kWeaponBoltRange = 300.0f;
+    struct WeaponBolt {
+        int seat = -1; float from[3] = {}, to[3] = {}; int age = 0, frames = 0, burst = 0; float radius = 0; int pct = 100;
+        bool item = false; uint32_t cand[9] = {}; int32_t serial = 0; int what = 0;   // what: 0 nothing, 1 creature / item, 2 the stage
+    };
+    WeaponBolt weaponBolts[8];
+    int blastsN = 0, blastsHit = 0, blastsMulti = 0, blastHits = 0;   // (tests: explosions, those that hit, hit 2+, creatures hit)
+    int blastsWorld = 0, blastsItems = 0, blastKills = 0;             // (tests: on the stage, items hit, creatures killed by one)
+    float weaponAim[4][3] = {};      // shot_resolve: a projectile seat's target this frame (camera space)
+    bool weaponAimSet[4] = {};
+    int weaponAimWhat[4] = {};       // (its WeaponBolt::what)
+    bool weaponAimItem[4] = {};      // (the target a non-creature candidate: weaponAimCand)
+    uint32_t weaponAimCand[4][9] = {};
+    void weapon_aim_target(int p, bool hitMain);    // shot_resolve: a projectile seat's target (survfix3)
+    // survfix3: the aim ray (world space: o, the unit direction d) against the stage (the view's walls and ground, the
+    // ragdolls' triangles; headless: the floor of the creatures near the ray); t: the distance to the first triangle
+    // within maxT. The runtime's (game/weapons.cpp Weapons::worldRay); none: false
+    virtual bool weapon_world_ray(const float o[3], const float d[3], float maxT, float& t) { (void)o, (void)d, (void)maxT, (void)t; return false; }
+    void weapon_bolts_update();                     // shot_resolve, each frame: the bolts fly, explode on arrival
+    void weapon_blast_at(int seat, const float at[3], float radius, int pct = 100);   // the explosion (camera space): hits, look, sound
+    void weapon_blast_items(int seat, const float at[3], float radius, uint32_t skip);   // survfix3: the items within it hit as a shot
+    uint64_t weaponFrame = 0;        // the runtime's frame (the explosion's age)
+    virtual void weapon_kill(uint32_t obj, int killer) { (void)obj, (void)killer; }   // a creature's hits killed it (the drops)
+    void weapon_extra_shots(int p, bool hitMain);   // shot_resolve: the seat's extra rays and explosion (shooting.cpp)
+    void weapon_blast_hit(uint32_t obj);            // enemy_part_hits: the explosion's hit on this creature
+    void weapon_damage();                           // enemy_part_hits: the seats' damage percent
     // Survival Mode: body slots past the original's (player_bodies 0x51F440, 16 words: the creatures' slots 0-13, the
     // players' bodies 14 / 15; a body's slot +0x2E6 also picks its place in the three skin buffers, 0x348 bytes a slot):
     // slots 16.. in a table of the runtime's (extraBodyTable, extraBodySlots words), used only when 0-13 are all taken.

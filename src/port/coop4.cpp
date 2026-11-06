@@ -96,25 +96,11 @@ template <class P> void Game<P>::coop4_seat_frame(uint32_t task)
         if (pl.state == 9 || pl.state == 4) {
             // PC Mode: the shared credits of the Continues option, as players 1 / 2 (player_start_check: can_continue,
             // the start takes one)
-            if (start && mode == 4 && (!pm_on() || pm_can_continue())) {
+            // (Survival, survrevive: a seat out until the next round cannot start: seatsHeldOut)
+            if (start && mode == 4 && (!pm_on() || pm_can_continue()) && !((seatsHeldOut >> p) & 1)) {
                 if (pm_on())
                     pm_credit_take();
-                // the invulnerability of PlStartInit's row (0xA8700: 1 continue, 3 join; +4), as players 1 / 2 get it
-                mem.at<int32_t>(coop4::kInvulnerable + uint32_t(p - 2) * 4) = mem.at<int16_t>(0xA8700 + (pl.state == 4 ? 1u : 3u) * 0x14 + 4);
-                if (pl.state == 4)
-                    pl.score += 1;
-                else
-                    pl.score = 0;
-                pl.state = 5;
-                pm_join_char(p);
-                pl.lives = pl.lives_saved = pm_on() ? int32_t(pm_table(pm_seat_char(p)).hp)
-                                                    : int32_t(mem.at<uint8_t>(0x51F5B1));   // the lives setting's start lives
-                pl.rounds = pm_full_rounds(p);
-                pl.empty = 0;
-                mem.at<uint8_t>(coop4::kSeatsJoined) = uint8_t(mem.at<uint8_t>(coop4::kSeatsJoined) | (1u << p));
-                // the start's gun-cock sound, as player_start_check gives players 1 / 2 (0x6020: 0xA01354 when one
-                // started; user 2026-10-26: player 3's join was silent)
-                sound_send3(0xA01354);
+                coop4_seat_start(p);
             }
             mem.at<int16_t>(coop4::kPlayersReal) = int16_t(coop4_players_real());
             return;
@@ -140,6 +126,35 @@ template <class P> void Game<P>::coop4_seat_frame(uint32_t task)
         mem.at<int16_t>(coop4::kPlayersReal) = int16_t(coop4_players_real());
     } else {
         (void)task;
+    }
+}
+
+// seat 2 / 3's start (coop4_seat_frame's start button, Survival's return): from state 4 a continue (the score + 1),
+// else a join (score 0); the lives setting's lives (PC Mode: the character's), a full gun, PlStartInit's invulnerability
+template <class P> void Game<P>::coop4_seat_start(int p)
+{
+    if constexpr (Seats<P>::max == 4) {
+        if (p < 2 || p > 3)
+            return;
+        Player& pl = mem.at<Player>(player_rec(p));
+        // the invulnerability of PlStartInit's row (0xA8700: 1 continue, 3 join; +4), as players 1 / 2 get it
+        mem.at<int32_t>(coop4::kInvulnerable + uint32_t(p - 2) * 4) = mem.at<int16_t>(0xA8700 + (pl.state == 4 ? 1u : 3u) * 0x14 + 4);
+        if (pl.state == 4)
+            pl.score += 1;
+        else
+            pl.score = 0;
+        pl.state = 5;
+        pm_join_char(p);
+        pl.lives = pl.lives_saved = pm_on() ? int32_t(pm_table(pm_seat_char(p)).hp)
+                                            : int32_t(mem.at<uint8_t>(0x51F5B1));   // the lives setting's start lives
+        pl.rounds = pm_full_rounds(p);
+        pl.empty = 0;
+        mem.at<uint8_t>(coop4::kSeatsJoined) = uint8_t(mem.at<uint8_t>(coop4::kSeatsJoined) | (1u << p));
+        // the start's gun-cock sound, as player_start_check gives players 1 / 2 (0x6020: 0xA01354 when one
+        // started; user 2026-10-26: player 3's join was silent)
+        sound_send3(0xA01354);
+    } else {
+        (void)p;
     }
 }
 

@@ -7,8 +7,8 @@
 #   tools/make_linux_package.sh [-b <build folder>] [-o <output folder>] [--no-build] [--no-tar] [--experimental]
 #
 # Default build folder: build-linux (cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
-# -DHOTD_EXPERIMENTAL_MODES=OFF ..., docs/porting.md). A release package needs HOTD_EXPERIMENTAL_MODES=OFF (no Typing of
-# the Dead 0 or Horde, Survival Mode in: docs/porting.md "Experimental modes"): the script stops on a build folder with them on,
+# -DHOTD_EXPERIMENTAL_MODES=OFF ..., docs/porting.md). A release package needs HOTD_EXPERIMENTAL_MODES=OFF (no unreleased mode;
+# The Typing of the Dead 0 and Survival Mode in: docs/porting.md "Experimental modes"): the script stops on a build folder with them on,
 # unless --experimental (a package for testing only).
 # Default output: <main checkout>/private/portable/HOTD ReWrithe Linux (inside private/, never committed).
 # For a binary that runs on every SteamOS / older desktop Linux, build in Valve's Steam Runtime "sniper" SDK (glibc
@@ -40,8 +40,8 @@ fi
 
 # 0. the experimental modes off (a release package; docs/porting.md "Experimental modes")
 if [ "$experimental" = 0 ] && ! grep -Eq '^HOTD_EXPERIMENTAL_MODES:BOOL=(OFF|0|FALSE|NO)$' "$build/CMakeCache.txt" 2>/dev/null; then
-    echo "error: $build is not configured with -DHOTD_EXPERIMENTAL_MODES=OFF (a release package leaves out Typing of the Dead 0," >&2
-    echo "       and Horde; Survival Mode stays in); reconfigure it, or pass --experimental for a testing package" >&2
+    echo "error: $build is not configured with -DHOTD_EXPERIMENTAL_MODES=OFF (a release package leaves out the unreleased modes;" >&2
+    echo "       The Typing of the Dead 0 and Survival Mode stay in); reconfigure it, or pass --experimental for a testing package" >&2
     exit 2
 fi
 
@@ -161,15 +161,14 @@ Made by tools/make_linux_package.sh in the rewrite's repository.
 EOF
 # relprep: the repo's shipped data, as the Windows package (data/ui with the prompts and their licences, data/fonts with
 # OFL.txt, data/lang, data/mods): our own or third-party files with their licences in NOTICE.md, no game data
-for d in ui fonts lang mods; do
+for d in ui fonts lang mods typing; do   # (typing: The Typing of the Dead 0, docs/typing.md; rel130)
     [ -d "$repo/data/$d" ] && mkdir -p "$out/data/$d" && cp -R "$repo/data/$d/." "$out/data/$d/"
 done
-# a release package: the modes left out (Typing of the Dead 0, Horde) leave the language files too, as the Windows
+# a release package: the modes left out leave the language files too (their "# [unreleased]" sections), as the Windows
 # package (make_portable_hotd.ps1 -Release; the user, 2026-11-03: "don't even show them")
 if [ "$experimental" = 0 ]; then
     for f in "$out"/data/lang/*.txt; do
-        awk '{ if ($0 !~ /^[ \t]*#/ && index($0, " = ")) { k = tolower(substr($0, 1, index($0, " = ") - 1));
-               if (k ~ /typing of the dead|totd|horde/) next } print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+        awk '/^[ \t]*#[ \t]*\[unreleased\]/ { s = 1; next } /^[ \t]*#[ \t]*\[\/unreleased\]/ { s = 0; next } !s' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
     done
 fi
 cp "$repo/LICENSE" "$out/LICENSE.txt"
@@ -179,7 +178,8 @@ cp "$repo/CHANGELOG.md" "$out/CHANGELOG.txt"   # setup2: What's New reads it
 cp "$repo/docs/online_howto.md" "$out/ONLINE HOWTO.txt"
 
 # 4. Checks: no game data, the bundled SDL is the one the exe loads, the newest glibc it needs
-bad="$(find "$out" -type f \( -iname '*.zip' -o -iname '*.7z' -o -iname '*.rar' -o -iname '*.ogg' -o -iname '*.mp3' -o -iname '*.wav' \
+# (data/typing/ding.wav is ours: TotD 0's ding, a CC0 recording, NOTICE.md; v1.3.0's Linux job stopped on it)
+bad="$(find "$out" -type f -not -path '*/data/typing/ding.wav' \( -iname '*.zip' -o -iname '*.7z' -o -iname '*.rar' -o -iname '*.ogg' -o -iname '*.mp3' -o -iname '*.wav' \
       -o -iname '*.rbh' -o -iname '*.vmc' -o -iname '*.bin' -o -iname '*.rom' -o -iname '*.iso' -o -iname 'epr-*' -o -iname 'mpr-*' -o -iname 'thotd.exe' \))"
 [ -z "$bad" ] || { echo "game data in the package: $bad" >&2; exit 1; }
 loaded="$(LD_LIBRARY_PATH= sdlOf "$out/bin/hotd")"

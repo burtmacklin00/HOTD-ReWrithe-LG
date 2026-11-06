@@ -111,12 +111,17 @@ inline int nextMenuSong(int track)
 // (SDL_GetGamepadType): DualSense / DualShock 4 / Switch Pro / Joy-Con with a gyro: Motion + stick; others: Classic.
 constexpr int kPadStyles = 4;
 // The aim's feel (worker "padfeel", 2026-10-20; launcher.ini padv=2: older files' feel values are reset to these)
+// GitHub #36 (user 2026-11-04, sens36: "they need to be independent from each other"): each way of aiming its own
+// whole speed in %, nothing shared multiplied on top (was: the style's Sensitivity 1-10 and Fine Aim Speed, then the
+// player's Aim / Stick / Gyro / Trackpad Sensitivity; launcher.ini padv < 4 converts once, launcher.cpp)
+constexpr int kPadSensLo = 10, kPadSensHi = 500, kPadSensStep = 10;
 struct PadStyle {
-    int speed = 5;        // 1-10: the stick's top speed (Classic: 1.1 .. 5.8 screen heights / s, 5 = 2.4), the
-                          // gyro's sensitivity (0.5x .. 2.5x, 5 = 1.0x = 36 degrees of turn across the window's
-                          // width), the trackpad's speed (Touchpad)
-    int fine = 4;         // 1-10: the fine-aim stick's speed, x 10 % of the aiming speed
-    int vert = 10;        // 5-15: the vertical sensitivity, x 10 % of the horizontal
+    int stickSens = 100;  // 10-500 %: Classic's aiming stick at full tilt (100 %: 2.4 screen heights / s)
+    int fineSens = 100;   // 10-500 %: the fine-aim stick (Classic's other stick, Motion + stick's stick; 100 %: 0.96
+                          // screen heights / s, the old Fine Aim Speed 40 % of Sensitivity 5)
+    int gyroSens = 100;   // 10-500 %: the gyro (100 %: 36 degrees of turn across the window's width)
+    int touchSens = 100;  // 10-500 %: the touchpad as a trackpad (100 %: a stroke across it = 1.2 window widths)
+    int vert = 10;       // 5-15: the vertical sensitivity, x 10 % of the horizontal
     int dead = 2;         // 0-6: the sticks' radial dead zone 0 / 4 / 8 / 12 / 16 / 20 / 25 % (default 8 %; remapped
                           // from its edge: no jump); full speed from 92 % (the outer dead zone)
     int curve = 2;        // the sticks' response curve: 0 linear, 1 low (power 1.5), 2 medium (2: the default), 3 high
@@ -146,13 +151,8 @@ struct PadProfile {
     int rumbleHit = 2;    // vibration when the player is hit: 0 off, 1-3 strength
     int rumbleEnemy = 1;  // vibration when the player's shot hits an enemy: 0 off, 1-3
     int rumbleReload = 1; // vibration on a reload: 0 off, 1-3
-    // padfix (user 2026-10-30: "players should have a sensitivity option"): Controls > Aim Sensitivity, x 10 % on every
-    // aim of the pad (the sticks, the gyro, the trackpad) on top of the style's own Sensitivity; 5-20 (50-200 %)
-    int aimSens = 10;
-    // GitHub #36 (user 2026-11-03: "Decoupled Cursor Sensitivity across all Input Methods"): each way of aiming its own
-    // sensitivity, x 10 % (5-20: 50-200 %) on top of the style's Sensitivity and Aim Sensitivity: the sticks, the gyro,
-    // the trackpad (Controller page; pad1.sticksens= / gyrosens= / touchsens=; 100 %: as before)
-    int stickSens = 10, gyroSens = 10, touchSens = 10;
+    // (padfix's Aim Sensitivity and #36's first Stick / Gyro / Trackpad Sensitivity of the player: folded into each
+    // style's own per-input values above, sens36)
 };
 // the profile's fields for launcher.ini (pad1.<key>= / pad1.<style>.<key>=) and the More Options > Controller page;
 // per style (styleMask: the styles 1-4 it matters for, bit = 1 << (style - 1)) or the player's (styleMask 0)
@@ -164,14 +164,22 @@ struct PadField {
     int lo, hi;
     const char* const* names;       // the values' names from lo (null: the number)
     unsigned styleMask;
+    int step = 1;                   // sens36: > 1: a % value (shown "N%", a bar, stepped by this much)
 };
 const PadField* padFields(int& n);
+std::string padFieldText(const PadField& f, int v);   // the value as shown ("Linear", "120%", "7")
+int padFieldNext(const PadField& f, int v, int dir);  // the next / previous value (wraps; a % value: to its steps)
 // the Controller page's presets for a style's feel: 1 Precise, 2 Balanced (the defaults), 3 Fast; padPresetOf: the
-// one the settings match, 0 custom
+// one the settings match, 0 custom. style 1-4 (the s[] index + 1): a preset sets that style's own inputs' speeds
+// (sens36: Classic its two sticks, Motion its gyro, Motion + stick the gyro and the fine stick, Touchpad its trackpad)
 constexpr int kPadPresets = 3;
 extern const char* const kPadPresetNames[kPadPresets + 1];   // Custom, Precise, Balanced, Fast
-void applyPadPreset(PadStyle& s, int preset);
-int padPresetOf(const PadStyle& s);
+void applyPadPreset(PadStyle& s, int preset, int style);
+int padPresetOf(const PadStyle& s, int style);
+// sens36: the per-input speeds (%) the old settings gave (launcher.ini padv < 4): a style's Sensitivity 1-10 and Fine
+// Aim Speed 1-10, the player's Aim / Stick / Gyro / Trackpad Sensitivity x 10 % (5-20); rounded, kPadSensLo..Hi
+struct PadSpeeds { int stick, fine, gyro, touch; };
+PadSpeeds legacyPadSpeeds(int style, int speed, int fine, int aim = 10, int stick = 10, int gyro = 10, int touch = 10);
 extern const char* const kPadStyleKeys[kPadStyles];    // launcher.ini: classic, motion, mix, touch
 extern const char* const kPadStyleNames[kPadStyles + 1];   // Auto, Classic Pad, ...
 
@@ -238,12 +246,14 @@ struct LaunchConfig {
     int buttonStyle = 0;
     int iconOutline = 0;   // menus3: Controls > Icon Outline: Xelu's icons with a light rim (launcher.ini iconoutline=; 0 Off)
     // padglyphs: the menus' cursor from player 1's pad (menu_cursor.h): Touchpad Cursor 0 Off / 1 On, Gyro Cursor
-    // 0 Off / 1 While Holding ZL / L2 / LT / 2 Always, Cursor Speed 1-10 (launcher.ini touchcursor= gyrocursor= cursorspeed=)
-    int touchCursor = 1, gyroCursor = 1, cursorSpeed = 5;
-    // GitHub #36: the menus' gyro cursor its own speed (Cursor Speed is the touchpad's now; launcher.ini
-    // gyrocursorspeed=, an older file: cursorspeed='s); each player's mouse its sensitivity x 10 % (5-20; 100 %: the
+    // 0 Off / 1 While Holding ZL / L2 / LT / 2 Always (launcher.ini touchcursor= gyrocursor=)
+    int touchCursor = 1, gyroCursor = 1;
+    // GitHub #36: the menus' touchpad and gyro cursor each their own sensitivity, % (kCursorSensLo..Hi; 100 %: the old
+    // Cursor Speed 5; launcher.ini touchcursorsens= / gyrocursorsens=; an older file: cursorspeed= / gyrocursorspeed=
+    // 1-10 x 20 %, still written for older builds). Each player's mouse its sensitivity x 10 % (5-20; 100 %: the
     // desktop cursor as before; not 100 %: that mouse moves its crosshair by its motion; launcher.ini mousesens1..2=)
-    int gyroCursorSpeed = 5;
+    static constexpr int kCursorSensLo = 10, kCursorSensHi = 300, kCursorSensStep = 10;
+    int touchCursorSens = 100, gyroCursorSens = 100;
     int mouseSens[2] = {10, 10};
     bool calibrateNext = false;  // padpass: the next game with a light gun starts with its calibration (not saved)
     int difficulty = 2;          // 0-4 VERY EASY .. VERY HARD
@@ -267,6 +277,10 @@ struct LaunchConfig {
     // launcher.ini showcrosshairs=, --no-crosshair
     bool showCrosshairs = true;
     int aspect = 0;              // display: 0 widescreen (hor+: the whole window), 1 the original 4:3 (pillarboxed), 2 16:10 (hor+ up to 16:10, pillarboxed past it)
+    // wide2d (user 2026-11-03; Video > "Widen 2D Screens"): the 4:3-only 2D screens (chapter cards, GAME OVER, the route
+    // map, the chapter clear's wall) in a wide window: 0 Stretch (widened from their own pixels, up to 16:9), 1 Original
+    // 4:3 (side bars, as before). launcher.ini widen2d=
+    int widen2d = 0;
     bool fullscreen = true;      // display: start in fullscreen (launcher.ini fullscreen= / displaymode=; F11 in play keeps it; --windowed / --fullscreen)
     // rescrash (Video > Display Mode: Windowed / Borderless / Fullscreen): the fullscreen is exclusive (in the
     // Resolution's display mode), else borderless at the desktop's size (launcher.ini exclusive=, displaymode= 0 / 1 / 2)
@@ -428,6 +442,14 @@ struct LaunchConfig {
     // and the front-end screens have their own Menu Gamma (launcher.ini menugamma=, --menu-gamma), the same steps
     int gamma = 100;
     int menuGamma = 100;
+    // bugs4 (GitHub #23, render/gamma.h kBlack*): Video > Black Level, the arcade picture's black point in MAME's output
+    // curve (64 = MAME's, the default; lower: the shadows' detail back, 0 = no curve). launcher.ini blacklevel=,
+    // --black-level 0-64
+    int blackLevel = 64;
+    // bugs4 (GitHub #20): Video > Variable Refresh Rate (G-Sync / FreeSync): Borderless covers the display exactly (not
+    // one pixel taller: screen recorders' window capture may then show nothing), V-Sync off, each game frame presented
+    // once at the game's own rate (57.52 / 60 Hz) for the display to follow. launcher.ini vrr=, --vrr 0|1
+    bool vrr = false;
     int chapter = 0;            // select: the chapter to start, 0-3 (launcher.ini chapter=1-4); only a playable one (game/chapters.h)
     // a portable package's folder (not saved): arcade / pc paths inside it are saved relative to it, so a moved or
     // copied package still finds its data\ (user 2026-10-17)

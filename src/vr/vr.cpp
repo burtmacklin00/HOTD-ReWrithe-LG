@@ -54,6 +54,7 @@ bool Settings::load(const std::string& path)
         else if (k == "panel_depth_test") panelDepthTest = truthy(v);
         else if (k == "aim_distance") aimDistance = f > 0.5f ? f : aimDistance;
         else if (k == "laser") laser = truthy(v);
+        else if (k == "dual_pistols") dualPistols = truthy(v);
         else if (k == "crosshair_degrees") crosshairDegrees = f > 0 ? f : crosshairDegrees;
         else if (k == "reload_down") reloadDown = truthy(v);
         else if (k == "reload_pitch") reloadPitch = f;

@@ -53,6 +53,10 @@ public:
     // aspect1610: the game area's widest shape (width / height; 0 = the whole window): Aspect 16:10 = 1.6, a window
     // wider than that is pillarboxed (main.cpp pillarbox), so the edge-anchored HUD and the full-picture flashes stop there
     float maxAspect = 0.0f;
+    // wide2d (Video > Widen 2D Screens: Stretch): in a wide window the 2D screens made for the 4:3 screen alone (the
+    // chapter cards, the game over's route map and GAME OVER card, the chapter clear's wall) are widened from their own
+    // pixels up to 16:9 (wideTarget) instead of side bars. False (Original 4:3): as before, byte for byte
+    bool widen2D = true;
     // the game area's width in a window ww x wh (the window's, or maxAspect's shape centred in it)
     int areaW(int ww, int wh) const
     {
@@ -93,6 +97,11 @@ public:
     bool clean = false;
     // trailer (ours): no subtitles / captions (the cut-scene viewer's Subtitles Off, Trailer Mode). Draw-only
     bool noText = false;
+    // qa2: the place (0-based) the Survival game's points take in the Survival table at its end (-1: none / not known)
+    int survivalRank = -1;
+    // rel130: The Typing of the Dead 0's start notice ("EXPERIMENTAL / PROOF OF CONCEPT", the host's 6 s), as
+    // Survival's was until survfix3: two lines in the score line's font under the title block
+    bool totdNote = false;
     // the sight's window rectangle (x0, y0 top-left, w, h in pixels) for a w x h sight centred on window pixel (x, y)
     // at the PC's size (its 480 lines scaled to the window's height); the input test checks its centre is the aim
     static void sightRect(int w, int h, int wh, float x, float y, float out[4]);
@@ -152,7 +161,12 @@ private:
     Overlay survival_, survivalBanner_;   // Survival Mode (game/survival.h): the round lines at the top, the moment's banner in the middle
     Overlay survivalSign_[SurvivalMode::kItems];   // Survival's shop signs (between the rounds)
     bool signLit_[SurvivalMode::kItems] = {};
-    void drawSurvival(const Runtime& rt, int ww, int wh, int scale);
+    void drawSurvival(const Runtime& rt, int ww, int wh, int scale);   // (and the weapons' lines)
+    void drawTotdNote(const Runtime& rt, int ww, int wh);   // rel130: totdNote's two lines
+    // a line in the font of the game's score line (Score Display; the PC's with PC models) on a canvas of the 2D
+    // picture's size, at an integer scale, with its shadow: its width
+    float scoreText(const Runtime& rt, std::vector<uint8_t>& dst, int W, int H, const std::string& s, float x, float y, int sc,
+                    int align, const uint8_t rgb[3], bool measure);
     int barRows_ = -1;
 public:
     // Light Gun Edition: the game picture's width in window pixels (4:3 / 16:10 with the bezel: the cut-scene bars stay
@@ -162,7 +176,8 @@ private:
     // the arcade 2D layer: one 496 x 384 texture, drawn over the 3D picture
     unsigned program_ = 0, vao_ = 0, texture_ = 0;
     int uRect_ = -1;
-    int uTint_ = -1;   // rainbow2: the sights in the rainbow (a > 0.5: the picture's brightest channel times rgb)
+    int uTint_ = -1;
+    int uUV_ = -1;     // wide2d: the quad's texture range (kVs uUV)   // rainbow2: the sights in the rainbow (a > 0.5: the picture's brightest channel times rgb)
     bool sightTintOn_[4] = {};
     float sightTint_[4][3] = {};   // (rainbow2: each player's sight colour this frame, drawSights)
     std::vector<uint8_t> hudMask_;   // rainbow2: the arcade layer's HUD / hit-mark cells alone (rainbow2D)
@@ -219,11 +234,21 @@ private:
     Overlay seatText_[2];
     Overlay cpuTag_[4];   // "CPU" under a computer teammate's crosshair, in its colour   // players 3 / 4's CONTINUE? when its sprite bank is not loaded (no one continued yet)
     // dx: window pixels to the right (the anchored corners)
-    void upload(const std::vector<uint8_t>& rgba, int w, int h, int ww, int wh, float dx = 0.0f, bool fit = false);
+    void upload(const std::vector<uint8_t>& rgba, int w, int h, int ww, int wh, float dx = 0.0f, bool fit = false,
+                int wide = 0, int wideW = 0);
+    // wide2d: the 4:3-only 2D screen shown now (kWide*) and the width it fills (wideW: the game area's, at most 16:9);
+    // kWideNone when Widen 2D Screens is off, in 4:3, or the window is not wider than the 4:3 screen
+    enum { kWideNone, kWideCard, kWidePicture, kWideWall };
+    int wideScreen(const Runtime& rt, int ww, int wh, int& wideW) const;
+    // wide2d: the arcade layers in `layers` (bit n: layer n) composed alone into out
+    bool composeLayers(const Runtime& rt, const uint8_t* tiles, bool high, unsigned layers, std::vector<uint8_t>& out);
+    // wide2d (the chapter clear's wall): a tiling W x H picture extended to wideW with its own tile (false: no period)
+    bool tileExtend(const std::vector<uint8_t>& pic, int W, int H, int ww, int wh, int wideW, bool sidesOnly);
+    std::vector<uint8_t> layerTiles_, wideBg_, wideTop_, wideExt_;
     void pcFadeDraw(float level, int ww, int wh);
     void fillRect(const uint8_t rgb[3], int ww, int wh, int y0, int y1);   // window rows y0..y1 (top 0), opaque
     // widescreen: the window outside the 4:3 screen black (a 4:3 card; grey 1: white); sides: bit 0 the left, bit 1 the right
-    void blackSides(int ww, int wh, float grey = 0.0f, int sides = 3);
+    void blackSides(int ww, int wh, float grey = 0.0f, int sides = 3, int gw = 0);   // (gw: the kept width; 0 the 4:3 screen's)
     // credits43: the ending's full-height 2D card (the staff roll's, GAME OVER) is up; rgba_: the 2D just drawn (W x H).
     // The sides to black (blackSides' bits): 0 none; the staff roll only the right (bugs1 #34)
     int endingCard(const Runtime& rt, int W, int H) const;

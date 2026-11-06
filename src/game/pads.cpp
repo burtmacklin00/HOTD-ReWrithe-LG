@@ -19,9 +19,9 @@ namespace {
 constexpr float kPi = 3.14159265f;
 constexpr float kDeg = kPi / 180.0f;
 // the gyro ("real world sensitivity", as Steam Input / JoyShockMapper / Gyro Wiki): at 1.0x a turn of kSpanDeg
-// degrees spans the window's width, the same pixels per degree up / down; sensitivity 1-10 = these multipliers
+// degrees spans the window's width, the same pixels per degree up / down; Gyro Sensitivity's % multiplies it (sens36:
+// was Sensitivity 1-10 = 0.5x .. 2.5x)
 constexpr float kSpanDeg = 36.0f;
-constexpr float kGyroSens[10] = {0.5f, 0.6f, 0.7f, 0.85f, 1.0f, 1.2f, 1.4f, 1.7f, 2.0f, 2.5f};
 // the gyro's tiered smoothing 1-3: below this rate (degrees / s) fully smoothed, from half of it blended, above it 1:1
 constexpr float kSmoothDeg[4] = {0.0f, 3.0f, 6.0f, 10.0f};
 constexpr float kSmoothTau = 0.06f;            // the smoothed part's time constant (s)
@@ -30,10 +30,13 @@ constexpr float kAccelLo[3] = {1.0f, 0.8f, 0.6f}, kAccelHi[3] = {1.0f, 1.4f, 2.0
 // the drift: "still" = the rates' 0.5 s mean below 1.5 degrees / s, their noise below 0.4 degrees / s and the
 // accelerometer steady, for 1 s; the bias then follows the mean (time constant 1 s)
 constexpr float kStillRate = 1.5f * kDeg, kStillNoise = 0.4f * kDeg;
-// the sticks: the top speed (screen heights / s at full tilt) by sensitivity 1-10; the radial dead zones; the curve's
-// power; the turbo (held at full tilt: after 0.15 s up to x kTurbo over 0.4 s)
+// the sticks: the top speed (screen heights / s at full tilt) at 100 % (sens36: Stick Sensitivity's / Fine Stick
+// Sensitivity's % multiply them; was Sensitivity 1-10 = 1.1 .. 5.8, Fine Aim Speed x 10 % of it); the radial dead
+// zones; the curve's power; the turbo (held at full tilt: after 0.15 s up to x kTurbo over 0.4 s)
 // (padfix, user 2026-10-30: "the right stick should move a little faster": every step 20 % faster, 5 = 2.4; was 2.0)
-constexpr float kStickTop[10] = {1.1f, 1.3f, 1.6f, 2.0f, 2.4f, 2.9f, 3.5f, 4.1f, 4.8f, 5.8f};
+constexpr float kStickTop = 2.4f, kFineTop = 0.96f;
+// sens36: a per-input speed's % as a factor
+float sensOf(int pct) { return float(std::clamp(pct, kPadSensLo, kPadSensHi)) / 100.0f; }
 constexpr float kDead[7] = {0.0f, 0.04f, 0.08f, 0.12f, 0.16f, 0.20f, 0.25f};
 constexpr float kOuter = 0.92f;
 constexpr float kCurve[4] = {1.0f, 1.5f, 2.0f, 2.5f};
@@ -700,6 +703,18 @@ bool Pads::event(const SDL_Event& e)
         refresh();
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        if (Pad* d = find(e.gbutton.which); d && weaponShoulders && d->player >= 0 && d->player < kInputPlayers) {
+            // weapons (Survival): L1 / d-pad left the previous weapon, R1 / d-pad right the next
+            const int b = e.gbutton.button;
+            if (b == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER || b == SDL_GAMEPAD_BUTTON_DPAD_LEFT) {
+                --weaponStep[d->player];
+                break;
+            }
+            if (b == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER || b == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
+                ++weaponStep[d->player];
+                break;
+            }
+        }
         if (Pad* d = find(e.gbutton.which); d && custom(*d)) {
             // keybind: the player's own buttons; the pause menu's keep theirs (South chooses, East closes, the d-pad picks)
             const SDL_GamepadButton btn = SDL_GamepadButton(e.gbutton.button);
@@ -1005,7 +1020,6 @@ void Pads::aim(GunState guns[], int lw, int lh, float dt)
         const int s = styleOf(d), t = touchOf(d);
         const PadStyle& st = styleSet(d);
         const float slow = d.precise ? kPrecise : 1.0f;
-        const int speedK = std::clamp(st.speed, 1, 10);
         float dx = 0, dy = 0;
         if (s == 1 || s == 3) {   // the sticks: Classic = one aims, the other fine-adjusts; Motion + stick = the fine one
             const float dead = kDead[std::clamp(st.dead, 0, 6)], curve = kCurve[std::clamp(st.curve, 0, 3)];
@@ -1022,27 +1036,25 @@ void Pads::aim(GunState guns[], int lw, int lh, float dt)
                 vy *= mult;
             }
             stickCurve(axis(d.g, fxA), axis(d.g, fyA), dead, curve, fx, fy);
-            // pixels a second at full tilt: Classic's sensitivity; Motion + stick's fine stick: as Classic's default
-            const float speed = float(lh) * kStickTop[s == 1 ? speedK - 1 : 4];
-            const float fine = float(std::clamp(st.fine, 1, 10)) / 10.0f;
-            float sx = (vx + fine * fx) * speed * dt * slow, sy = (vy + fine * fy) * speed * dt * slow;
+            // pixels a second at full tilt (sens36, GitHub #36): the aiming stick's own Stick Sensitivity, the fine
+            // stick's own Fine Stick Sensitivity (Classic's other stick, Motion + stick's), nothing shared on top
+            const float speed = float(lh) * kStickTop * sensOf(st.stickSens), fine = float(lh) * kFineTop * sensOf(st.fineSens);
+            float sx = (vx * speed + fx * fine) * dt * slow, sy = (vy * speed + fy * fine) * dt * slow;
             if (s == 1 && (st.invert & 1)) sx = -sx;   // (Motion + stick: the invert is the gyro's)
             if (s == 1 && (st.invert & 2)) sy = -sy;
-            // GitHub #36: Stick Sensitivity (the player's, the sticks alone; 100 %: as before)
-            const float stickK = float(std::clamp(prof[p].stickSens, 5, 20)) / 10.0f;
-            dx += sx * stickK;
-            dy += sy * stickK;
+            dx += sx;
+            dy += sy;
         }
         if (s >= 2 && s <= 3) {   // the gyro: the turn since the last call (every reading integrated)
-            // (#36: x Gyro Sensitivity, the gyro alone)
-            const float perRad = float(lw) * kGyroSens[speedK - 1] / (kSpanDeg * kDeg) * (float(std::clamp(prof[p].gyroSens, 5, 20)) / 10.0f);
+            // (#36, sens36: Gyro Sensitivity, the gyro's whole speed)
+            const float perRad = float(lw) * sensOf(st.gyroSens) / (kSpanDeg * kDeg);
             dx += d.acc[0] * perRad * slow;
             dy += d.acc[1] * perRad * slow;
         }
         d.acc[0] = d.acc[1] = 0;
         if (t == 3) {   // the trackpad: the finger's motion (the touchpad about 2.2 : 1: the same speed both ways)
-            // (#36: x Trackpad Sensitivity, the trackpad alone)
-            const float k = float(lw) * 1.2f * (s == 4 ? float(speedK) / 5.0f : 1.0f) * slow * (float(std::clamp(prof[p].touchSens, 5, 20)) / 10.0f);
+            // (#36, sens36: Trackpad Sensitivity, the trackpad's whole speed in every style)
+            const float k = float(lw) * 1.2f * sensOf(st.touchSens) * slow;
             float tx = d.tDx * k, ty = d.tDy * k * 0.45f;
             if (s == 4 || s == 1) {   // (the gyro's invert is applied to its own rates)
                 if (st.invert & 1) tx = -tx;
@@ -1053,10 +1065,7 @@ void Pads::aim(GunState guns[], int lw, int lh, float dt)
         }
         d.tDx = d.tDy = 0;
         dy *= float(std::clamp(st.vert, 5, 15)) / 10.0f;
-        // padfix: Controls > Aim Sensitivity (the player's, over every way the pad aims)
-        const float sens = float(std::clamp(prof[p].aimSens, 5, 20)) / 10.0f;
-        dx *= sens;
-        dy *= sens;
+        // (sens36: no Aim Sensitivity over them any more: each input's own speed above is its whole speed)
         // the stick, the gyro and the touchpad, as a light gun, can point a little past the window's edges: a trigger
         // pull there is the off-screen reload (padfix, user 2026-10-30: "you can't shoot outside the screen": the
         // sticks stopped at the edge before)
@@ -1076,7 +1085,6 @@ Pads::AimProbe Pads::probe(int p, int lw, int lh) const
     a.pad = true;
     const int s = styleOf(*d);
     const PadStyle& st = styleSet(*d);
-    const int speedK = std::clamp(st.speed, 1, 10);
     a.gyro = d->gyro && s >= 2 && s <= 3;
     a.shakes = d->shakes;
     a.calib = d->cal ? std::min(d->calDone, 99) : d->calDone;
@@ -1084,8 +1092,8 @@ Pads::AimProbe Pads::probe(int p, int lw, int lh) const
     float widths = 0;
     if (a.gyro) {
         a.gyroDeg = d->liveDeg;
-        a.spanDeg = kSpanDeg / kGyroSens[speedK - 1];
-        widths = a.gyroDeg / a.spanDeg * (float(std::clamp(prof[p].gyroSens, 5, 20)) / 10.0f);   // (#36)
+        a.spanDeg = kSpanDeg / sensOf(st.gyroSens);   // (sens36: Gyro Sensitivity alone)
+        widths = a.gyroDeg / a.spanDeg;
     }
     if (s == 1 || s == 3) {
         SDL_GamepadAxis ax, ay, fxA, fyA;
@@ -1095,11 +1103,12 @@ Pads::AimProbe Pads::probe(int p, int lw, int lh) const
         float vx, vy;
         stickCurve(lx, ly, kDead[std::clamp(st.dead, 0, 6)], kCurve[std::clamp(st.curve, 0, 3)], vx, vy);
         a.stick = std::min(1.0f, std::sqrt(lx * lx + ly * ly));
-        a.stickOut = std::sqrt(vx * vx + vy * vy) * (s == 1 ? turboOf(st, d->edgeT) : float(std::clamp(st.fine, 1, 10)) / 10.0f);
-        widths += a.stickOut * kStickTop[s == 1 ? speedK - 1 : 4] * float(lh) / float(std::max(lw, 1)) *
-                  (float(std::clamp(prof[p].stickSens, 5, 20)) / 10.0f);   // (#36)
+        // (sens36: Classic's aiming stick x its Stick Sensitivity; Motion + stick's fine stick against Classic's 100 %
+        // top speed, x its Fine Stick Sensitivity: 40 % at 100 %, as Fine Aim Speed's default before)
+        a.stickOut = std::sqrt(vx * vx + vy * vy) * (s == 1 ? turboOf(st, d->edgeT) : kFineTop / kStickTop * sensOf(st.fineSens));
+        widths += a.stickOut * kStickTop * (s == 1 ? sensOf(st.stickSens) : 1.0f) * float(lh) / float(std::max(lw, 1));
     }
-    a.widths = widths * (d->precise ? kPrecise : 1.0f) * float(std::clamp(prof[p].aimSens, 5, 20)) / 10.0f;   // (padfix: Aim Sensitivity)
+    a.widths = widths * (d->precise ? kPrecise : 1.0f);
     return a;
 }
 

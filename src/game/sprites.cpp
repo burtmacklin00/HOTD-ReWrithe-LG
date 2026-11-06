@@ -653,6 +653,8 @@ void Runtime::hud_player_notice_show(uint32_t task, int n)
 void Runtime::hud_start_prompt(int p, int which, int on)
 {
     sprites_ensure();
+    if ((seatsHeldOut >> (p & 7)) & 1)   // (Survival, survrevive: a seat out until the next round has no PRESS START)
+        on = 0;
     port::Game<A>::hud_start_prompt(p, which, on);
 }
 
@@ -662,7 +664,7 @@ void Runtime::hud_start_prompt(int p, int which, int on)
 // other prompt cycles (0x20870, 0x20CB0 / 0x20D80) need credits. UNVERIFIED (teaser)
 void Runtime::hud_prompt_anim(uint32_t, int x, int y, int, int on)
 {
-    const int phase = on == 0 ? 2 : int((mem.u32(kHudCounter) >> 5) % 3);
+    const int phase = on == 0 || noStartPrompt ? 2 : int((mem.u32(kHudCounter) >> 5) % 3);   // (totd5: none in TotD 0)
     if (phase == 2) {
         tilemap_clear_rect(kTileRam, x, y, 0x13, 4);   // hud_sprite_clear
         return;

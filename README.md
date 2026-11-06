@@ -78,10 +78,7 @@ arcade version's more detailed models and textures or the PC's.
 >
 > **Mature content:** an unrated fan project with horror violence and blood (Options: Blood Color can make it green, blue, purple, yellow or a custom colour; there is no "off"), intended for adults.
 >
-> **Made with AI assistance:** Anthropic's Claude assisted with the reverse engineering and with rewriting and combining
-> the existing code, directed and tested by the project's author (Tawhid);
-> the translations are machine-made and marked as such. No AI-generated images/assets are shipped (the button icons are CC0
-> packs, the menu wordmark was set in a free font). Details: [docs/release/compliance_v1.0.0.md](docs/release/compliance_v1.0.0.md).
+> **AI disclaimer:** ReWrithe was made with AI assistance: AI tools helped reverse engineer the original game and combine its code to bring the arcade and PC versions together. No generative AI has been or ever will be used to create artistic assets. Everything you see and hear comes from the original games or from human-made work. Any new model, texture or sound effect will always be made by humans.
 
 > **Expect bugs:** v1.0.0 is the first public release. Every chapter plays from start to end, but not every mode,
 > chapter and setting has been played through by a person. If something looks or plays wrong, please report it on
@@ -510,8 +507,10 @@ also adds to the other styles (its own setting there: Off / Pointer / Trackpad; 
 DualShock 4); its click and a tap = reload or shoot (Touchpad Click). Gyro Space **World** uses the accelerometer's
 gravity so that up stays up when the pad is tilted or rolled; **Local** uses the pad's own axes as held when you last
 recentred; **Player** (the default) is Gyro Wiki's player space: turning or rolling the wrist turns the crosshair,
-raising the front aims up. **Sensitivity** is physical: at 5 (1.0x) a 36 degree turn of the pad crosses the screen's
-width (0.5x .. 2.5x). Gyro Smoothing (default Low) smooths only motion slower than 3 / 6 / 10 degrees/s (faster motion
+raising the front aims up. Each way of aiming has its own speed, nothing shared on top (GitHub #36): **Stick
+Sensitivity** (Classic), **Fine Stick Sensitivity** (the fine-aim stick), **Gyro Sensitivity** and **Trackpad
+Sensitivity**, 10-500 %, 100 % = the default feel. Gyro Sensitivity is physical: at 100 % a 36 degree turn of the pad
+crosses the screen's width. Gyro Smoothing (default Low) smooths only motion slower than 3 / 6 / 10 degrees/s (faster motion
 is 1:1, nothing is lost); Gyro Tightening and Gyro Acceleration are off by default. Gyro drift is learnt while the pad
 lies still; **Aim Test** (on the Controller page) shows the live gyro rate, stick deflection and crosshair speed and has
 **Calibrate Gyro** (hold the pad still 2 s). **Feel Preset**: Precise / Balanced (the defaults) / Fast. **Shake to
@@ -542,7 +541,7 @@ resistance that gives way with a click (Adaptive Trigger Off / Light / Medium / 
 software running), Ultimarc AimTrak, GunCon 3 through a mouse driver / feeder, a Wii Remote through a Mayflash
 DolphinBar in mouse mode, and similar (the Wii Remote's own camera is not read without the DolphinBar). The game needs
 no vendor software of its own. In the menus a DualSense / DualShock 4 touchpad, or tilting a pad with a gyro while
-ZL / L2 / LT is held, moves the bone hand too (Controls > Touchpad Cursor / Gyro Cursor / Cursor Speed); the prompts
+ZL / L2 / LT is held, moves the bone hand too (Controls > Touchpad Cursor / Gyro Cursor, each with its own Cursor Sensitivity); the prompts
 show your pad's own buttons (Controls > Button Icons / Button Style). Set the player's input to
 **Light Gun**: the game then reads every mouse through Windows' raw input itself, so two guns (or a gun and a mouse)
 each get their own crosshair. Which gun is whose: Options -> Controls -> **Light Guns** (Assign): pick a seat (P1-P4)
@@ -619,9 +618,30 @@ what does not fit). The bundled Noto Sans fonts (Korean, Japanese, Arabic, Hebre
   Design and limits: [docs/coop4.md](docs/coop4.md).
 - **Game speed** (Options > Video): **Auto** (default) runs the game at the arcade's 57.52 Hz, and PC Mode at 60 Hz as
   the PC did; Arcade and 60 Hz force one of them. **Frame rate** and vsync set how often the picture is drawn, and
-  **Smooth Motion** blends frames between game ticks so that motion stays even on any monitor.
+  **Smooth Motion** blends frames between game ticks so that motion stays even on any monitor (the main menu's live
+  background too).
+- **VRR (G-Sync / FreeSync)** (Options > Video, default Off): variable refresh rate, for a G-Sync / FreeSync display. On: each game frame
+  is shown exactly once at the game's own rate (57.52 Hz, or 60 in PC Mode / at 60 Hz), Vsync and Smooth Motion off,
+  and Borderless covers the display exactly so the driver's fullscreen flip (and with it G-Sync / FreeSync) can engage.
+  The trade-off: Off keeps Borderless one pixel taller than the display, because a window that covers the display
+  exactly is taken out of the desktop compositor and screen recorders' *window* capture (OBS) shows nothing; with VRR
+  on, capture the display instead. Display Mode: Fullscreen (exclusive) also works with it. `launcher.ini` `vrr=1`,
+  `--vrr 1`.
 - **CRT filter** (Options > Video > CRT Filter): Off, Arcade Monitor, Consumer TV, Sharp Scanlines or Custom; aiming follows
   the screen's curvature.
+
+## The Typing of the Dead 0 (Experimental / Proof of Concept)
+
+The House of the Dead played by typing, after SEGA's The Typing of the Dead (2000). **Experimental / proof of
+concept:** playable from Chapter 1 to the ending, but rough (placeholder HUD look, offline only, keyboard only).
+
+- **Start it:** main menu > More Modes > **The Typing of the Dead 0** (or `hotd.exe --totd`).
+- **Play:** type the word over an enemy to shoot it; its first letter locks on, each correct letter is a shot. Bats and
+  thrown axes / knives get a letter or two and break into the word you are typing. Escape drops the lock (with no lock:
+  pause). Options > Difficulty sets the word lengths; Sonic Mode works and has its own top 10s.
+- **Tuning:** `data\typing\typing.ini` (word lengths per difficulty, the dictionary, how slowly thrown things fly, the
+  grades); the word lists are in `data\typing\default\`. A mod can ship its own `typing.ini`. Details:
+  [docs/typing.md](docs/typing.md).
 
 ## If something goes wrong
 
@@ -697,6 +717,11 @@ PC models, the HUD, VR, F12 screenshots and `--render`. Game Gamma is the play; 
 the other screens outside the play (so Menu Gamma changes while you move its bar; Game Gamma shows in the game, and in
 the pause menu's settings). `launcher.ini` `gamma=1.00` (Game Gamma, as before) and `menugamma=1.00`; `--gamma
 <0.6-2.0>`, `--menu-gamma <0.6-2.0>`.
+
+Options -> Video -> **Black Level** (arcade models): 64 (default, MAME's) down to 0 in steps of 4. The arcade picture goes
+through MAME's monitor curve, which turns every value up to 64 black; Gamma cannot bring those shades back (it only
+greys them). Lowering the Black Level moves that point inside the renderer, so the detail in dark areas comes back.
+64 gives exactly the picture as before. `launcher.ini` `blacklevel=64`, `--black-level <0-64>`.
 
 ## Crosshairs
 

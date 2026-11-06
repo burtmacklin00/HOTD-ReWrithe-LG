@@ -49,6 +49,15 @@ private:
     std::vector<std::string> lines_;
 };
 
+// checks1 (--text-fit, testing, docs/testing.md): with gTextFit on, each text drawn (an Overlay's panel, the HUD's
+// score-font lines: Hud::scoreText) that runs past its picture's edge (W x H: the window, or the 2D canvas) is noted
+// once, with its largest overrun in pixels; main.cpp lists them at the run's end
+struct TextFitMiss { std::string text; int over, w, h; };
+extern bool gTextFit;
+extern long gTextFitChecked;   // (the texts / pictures drawn while it was on: the report's count)
+void textFitNote(const std::string& text, float x, float y, float w, float h, int W, int H);
+std::vector<TextFitMiss>& textFitMisses();
+
 // a cut-scene's hold-to-skip (main.cpp): a plain red ring filling clockwise from the top (fill 0..1)
 class SkipRing {
 public:

@@ -57,8 +57,8 @@ Not now); your settings and game files are kept.
 - Red specks on bright highlights, e.g. the axes on Chapter 1's walls (#28).
 - PC models: the punch shows the PC's own blood splat (#9).
 - PC sound: the chainsaw and the electric sounds popped (#3).
-- Attract demo: fully uncensored as on the 1998 PC (Attract Gore, on by default): the dead researcher and his blood
-  pool in the sewer are back, and the prologue's hostage close-up uses the PC's camera. Off plays the arcade's
+- Attract demo: fully uncensored as on the 1998 PC (Attract Gore, on by default): both dead researchers and their
+  blood pools in the sewer are back, and the prologue's hostage close-up uses the PC's camera. Off plays the arcade's
   Revision A.
 - Edge Reload works in PC Mode too (#42).
 - The menus' text stays inside its boxes (More Modes, the Gallery, the classic menu).

@@ -15,7 +15,7 @@
 
 #include "game/bossmode.h"
 #include "game/survival.h"
-#include "game/horde.h"
+#include "game/weapons.h"
 #include "port/game.h"
 
 #include <array>
@@ -106,6 +106,7 @@ public:
     // --input-test (docs/teaser_status/input.md): what the input task handed the game, counted
     uint32_t inputFrames = 0, shotsIn[4] = {}, reloadsIn[4] = {}, startsIn[4] = {};
     bool livesKept = false;          // testing: a player at 0 lives gets 1 back (game over is not ported yet)
+    uint8_t livesKeptSkip = 0;       // testing (Survival's HOTD_SURVIVAL_DRAIN): bit p = seat p is not kept by livesKept
     // GitHub #29 (user 2026-11-03): a one-player game in player 2's seat (1), as the arcade's player 2 start button alone
     // gives it: chapter_start puts player 2 in play and player 1 waiting (arcade games only: not PC Mode / 4P)
     int soloSeat = 0;
@@ -502,6 +503,9 @@ public:
     std::map<int, uint8_t> routeForce;   // --route C:E=V (T1): route_choice = V in chapter C (1-based) event E (key (C-1) x 100 + E)
     void letterbox_task(uint32_t task);                                     // 0x44840 UNVERIFIED (teaser)
     int letterbox = 0;                                                      // the bars' size this frame (task +0x50, 0..0x28; the HUD draws them)
+    // totd5 (The Typing of the Dead 0, user 2026-11-04: "no P2 Start / press start prompt for other players"): the
+    // PRESS START prompts are not drawn (hud_prompt_anim clears its place; players 3 / 4's corner prompt off)
+    bool noStartPrompt = false;
     uint32_t player_start_check(uint32_t task, int state) override;         // 0x6020: the port's + a log line
     // player_st1_continue 0x4F80, player_st2_rejoin 0x4FE0, player_st3_join 0x4FF0, PlStartInit 0x5870: the port's
     // (src/port/player_join.cpp, proofs-7)
@@ -523,20 +527,24 @@ public:
     // Survival Mode (game/survival.h): its lead-in runs undrawn in frame(), its director in the event task's slot (run,
     // evt_run), its end checked after each frame. Off: none of these hooks does anything
     SurvivalMode survival;
-    // Horde Mode (game/horde.h): the script's standard creatures get copies (evt_spawned); off (size 0): nothing
-    HordeMode horde;
     void evt_spawned(uint32_t task, uint32_t rec) override
     {
         if (survival.leadIn())
             survival.captured(*this, task, rec);
-        else if (horde.on() && !survival.active())
-            horde.spawned(*this, task, rec);
     }
     // Survival Mode's points (game.h survival_hits: only while survivalScoring)
     void survival_hits(uint32_t obj, uint32_t seats, int killer, uint32_t headSeats) override
     {
         survival.hits(*this, obj, seats, killer, headSeats);
     }
+    // the weapons of Survival (game/weapons.h): Off (every other game): weaponHooks false, nothing runs
+    Weapons weapons;
+    void weapon_kill(uint32_t obj, int killer) override
+    {
+        weapons.kill(*this, obj, killer);
+    }
+    // survfix3: the Magician's Hand's aim ray against the stage (Weapons::worldRay)
+    bool weapon_world_ray(const float o[3], const float d[3], float maxT, float& t) override { return weapons.worldRay(*this, o, d, maxT, t); }
     // a creature as ENTB3 makes one (kind -> obj_kinds, the record's fields), in the current task group (survival.cpp)
     uint32_t survival_spawn(uint32_t kind, uint32_t flags, const float pos[3], const int32_t ang[3], int type, int action,
                          int life, uint32_t delay, uint32_t substate);

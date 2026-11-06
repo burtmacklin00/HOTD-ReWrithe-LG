@@ -677,6 +677,10 @@ template <class P> void Game<P>::hangedman_hover(uint32_t obj)
         of<int32_t>(obj, 0x2F8) = n;
         if (n > 0)
             return;
+        if (gBossHold && gBossHold(obj)) {   // (ours, totd8: the boss strike hold, game.h: hovers on, asked again)
+            of<int32_t>(obj, 0x2F8) = 1;
+            return;
+        }
         pick_target_player(obj);
         if (of<uint8_t>(obj, 0x2E8) == 0xFF) {
             of<int32_t>(obj, 0x2F8) = mem.at<int32_t>(hangedman::hover_times + uint32_t(of<int32_t>(obj, 0x320) * 4));
@@ -701,6 +705,9 @@ template <class P> void Game<P>::hangedman_claw_attack(uint32_t obj)
         if (sub != 0 && sub != 1)
             return;
         if (sub == 0) {
+            // (ours, totd8: The Typing of the Dead 0's boss strike hold, game.h: the claw run waits where he is)
+            if (gBossHold && gBossHold(obj))
+                return;
             int32_t n = of<int32_t>(obj, 0x320) + 1;
             if (n > 7)
                 n = 0;
@@ -1211,21 +1218,21 @@ template <class P> void Game<P>::hangedman_dive_attack(uint32_t obj)
             of<uint32_t>(obj, 0x2C) = of<int8_t>(obj, 0x2E5) >= 0 ? pitch : 0;
         }
         bool swoop = false;
+        uint8_t swoopAi = 0;
         if (pat == 1) {
-            if (w30c() > 100.0f && w30c() < 200.0f && of<int8_t>(obj, 0x2E5) < 0) {
-                ai() = 4;
-                swoop = true;
-            }
+            if (w30c() > 100.0f && w30c() < 200.0f && of<int8_t>(obj, 0x2E5) < 0)
+                swoopAi = 4;
         } else if (pat == 0) {
-            if (w30c() < 300.0f && w30c() > 200.0f && of<int8_t>(obj, 0x2E5) < 0) {
-                ai() = 3;
-                swoop = true;
-            }
+            if (w30c() < 300.0f && w30c() > 200.0f && of<int8_t>(obj, 0x2E5) < 0)
+                swoopAi = 3;
         } else if (pat == 2 || pat == 3) {
-            if (w30c() > 100.0f && w30c() < 200.0f && ai() == 0xFE) {
-                ai() = 5;
-                swoop = true;
-            }
+            if (w30c() > 100.0f && w30c() < 200.0f && ai() == 0xFE)
+                swoopAi = 5;
+        }
+        // (ours, totd8: The Typing of the Dead 0's boss strike hold, game.h: no swoop, the dive flies on)
+        if (swoopAi && !(gBossHold && gBossHold(obj))) {
+            ai() = swoopAi;
+            swoop = true;
         }
         if (swoop) {
             of<int32_t>(obj, 0x328) = 0;

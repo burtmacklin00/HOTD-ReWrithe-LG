@@ -54,6 +54,12 @@ with.
   GameCube, paddles, Joy-Con SL / SR) are from **Input Prompts** 1.5A by Kenney (kenney.nl); Creative Commons Zero
   (CC0 1.0): `data/ui/prompts/LICENSE-Kenney.txt`. Only the icons the game uses (Default 64 px and Double 128 px),
   unchanged. Button Style "Simple" draws its own caps and shapes (`src/game/frontend_remake.cpp`, this project's code).
+- `data/typing/ding.wav` (The Typing of the Dead 0's bell) is made from **"Typewriter, bell #2"** by Joseph SARDIN,
+  BigSoundBank.com (sound 2845); public domain under Creative Commons Zero (CC0 1.0). Mixed half clean, half 8-bit
+  22 kHz for this project.
+- The Typing of the Dead 0's design reference (no footage is included or used in the game): the playthrough video "The
+  Typing of the Dead [PC] by SEGA ($6,132,600) [HD] [1080p60]" by the YouTube channel **Saturn Memories**
+  (youtube.com/@SaturnMemories, https://www.youtube.com/watch?v=SDK88HHndK4).
 - The Windows package also carries Microsoft's Visual C++ runtime DLLs (`msvcp140*.dll`, `vcruntime140*.dll`), the
   redistributable files of Visual Studio 2022, shipped as Microsoft allows for programs built with it.
 - Third-party code that is NOT compiled into the program: the Model 2 knowledge above (MAME), the developer tools in
@@ -72,6 +78,7 @@ with.
 | Noto Sans KR / JP / SC / Arabic / Hebrew, Noto Sans | `data/fonts/` | SIL OFL 1.1 | `data/fonts/OFL.txt` |
 | Xelu's Free Controller & Key Prompts | `data/ui/prompts/xelu/` | CC0 1.0 | `data/ui/prompts/LICENSE-Xelu.txt` |
 | Kenney Input Prompts 1.5A | `data/ui/prompts/kenney/` | CC0 1.0 | `data/ui/prompts/LICENSE-Kenney.txt` |
+| "Typewriter, bell #2" (Joseph SARDIN, BigSoundBank.com, sound 2845) | `data/typing/ding.wav` | CC0 1.0 | not required |
 | Visual C++ runtime (Windows only) | `bin/` | Microsoft Visual Studio redistributable | Visual Studio's license terms |
 | ANGLE (The ANGLE Project Authors, chromium/7258; Windows only) | `bin/libEGL.dll`, `bin/libGLESv2.dll` (the DirectX renderer; built by vcpkg's `angle` port from Google's sources) | BSD-3-Clause | below |
 | xxHash (Yann Collet; inside ANGLE) | `bin/libGLESv2.dll` | BSD-2-Clause | below |

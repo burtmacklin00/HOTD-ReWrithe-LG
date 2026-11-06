@@ -410,7 +410,7 @@ void Frontend::remakeChapters()
     remakePage(9, "chapters", true);
     rebuild_ = [this]() { remakeChapters(); };
     rGrid_ = true;
-    Widget* title = rWidget(0, 12, cw_, 44, &Frontend::drawRLabel, hordeChapters ? "Horde - Chapter Select" : "Chapter Select");
+    Widget* title = rWidget(0, 12, cw_, 44, &Frontend::drawRLabel, "Chapter Select");
     title->user = int(kRowLit), title->seed = 17;
     static const char* const kBoss[4] = {"The Chariot", "The Hanged Man", "The Hermit", "The Magician"};
     const int gap = 14, cardW = std::min(176, (cw_ - 48 - 3 * gap) / 4), x0 = (cw_ - (4 * cardW + 3 * gap)) / 2;
@@ -429,7 +429,7 @@ void Frontend::remakeChapters()
                 walking_ = false;
                 if (onChapter) {   // playerpick: the players first (Back: Chapter Select)
                     const auto f = onChapter;
-                    askPlayers((hordeChapters ? "Horde - Chapter " : "Chapter ") + std::to_string(c + 1), [f, c]() { f(c); }, [this]() { screenChapters(); });
+                    askPlayers("Chapter " + std::to_string(c + 1), [f, c]() { f(c); }, [this]() { screenChapters(); });
                 }
             }, &Frontend::hitRect);
             card->nav = true;

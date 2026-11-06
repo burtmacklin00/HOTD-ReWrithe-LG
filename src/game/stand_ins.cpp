@@ -189,8 +189,10 @@ void Runtime::input_task_stand_in(uint32_t)
     for (int p = 0; p < seat_count(); ++p) {   // 4P: seats 3 / 4 too (their records in the 4P block)
         port::a::Player& pl = mem.at<port::a::Player>(player_rec(p));
         GunInput in = gun[p];
-        if (survival.active())   // Survival Mode's gun (game/survival.h gunInput): the shop's signs, the reload by hand, the SMG
+        if (survival.active())   // Survival Mode's gun (game/survival.h gunInput): the shop's signs and items
             survival.gunInput(*this, p, in.trigger, in.onScreen, in.held, in.x, in.y);
+        if (weapons.on())   // the weapons (game/weapons.h): the switch, the pickups, the reload by hand, the fire
+            weapons.gunInput(*this, p, in.trigger, in.onScreen, in.held, in.x, in.y);
         pl.on_screen = in.onScreen ? 1 : 0;
         pl.aim[0] = int16_t(in.onScreen ? in.x : 1000.0f);
         pl.aim[1] = int16_t(in.onScreen ? in.y : 1000.0f);

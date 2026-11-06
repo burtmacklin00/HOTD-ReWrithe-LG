@@ -1115,7 +1115,11 @@ template <class P> void Game<P>::magician_attack(uint32_t obj)
         const int32_t c = of<int32_t>(obj, 0x328) + 1;
         const int32_t kit = of<int32_t>(obj, 0x32C);
         of<int32_t>(obj, 0x328) = c;
-        if (!(c < mem.at<int32_t>(swoop_counts + 4 * uint32_t(kit)))) {
+        // (ours, totd8: The Typing of the Dead 0's boss strike hold, game.h: no lunge yet, one more swoop, asked again
+        // at its end)
+        if (!(c < mem.at<int32_t>(swoop_counts + 4 * uint32_t(kit))) && gBossHold && gBossHold(obj))
+            of<int32_t>(obj, 0x328) = c - 1;
+        else if (!(c < mem.at<int32_t>(swoop_counts + 4 * uint32_t(kit)))) {
             of<int32_t>(obj, 0x328) = 0;
             const int32_t k2 = of<int32_t>(obj, 0x32C) + 1;
             of<int32_t>(obj, 0x32C) = k2;

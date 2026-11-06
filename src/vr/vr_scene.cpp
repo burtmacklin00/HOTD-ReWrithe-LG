@@ -44,6 +44,19 @@ Rigid gunAnchor()
     return a;
 }
 
+// dual pistols (docs/vr.md "Dual pistols"): the left gun is the same gun hand mirrored (model x -> -x: a left hand
+// holding the handgun; the renderer turns the normals by the same matrix, so the faces and the light stay right), placed
+// as gunAnchor places the right one (the mirrored slide's back on the left aim pose's origin)
+Rigid gunAnchorLeft()
+{
+    Rigid a = gunAnchor();
+    for (int k = 0; k < 3; ++k) a.r[k * 3] = -a.r[k * 3];   // (R x diag(-1, 1, 1))
+    float p[3];
+    a.rotate(kGunRear, p);
+    for (int k = 0; k < 3; ++k) a.t[k] = -p[k];
+    return a;
+}
+
 // the left hand into the grip pose's local frame: the fingers (+x) ahead, the palm (-z) to the right (towards the
 // controller in the hand), the thumb (+y) up; the palm's middle on the grip pose's origin (the palm, OpenXR's grip)
 Rigid leftAnchor()
@@ -313,6 +326,7 @@ void Scene::frame(const Frame& f)
     const game::Runtime& rt = *f.rt;
     const float upm = settings.unitsPerMetre;
     backend_->setOutputSize(f.outW, f.outH);
+    backend_->setDual(dual);   // (dual pistols: the preview points the left hand too)
     backend_->beginFrame(fs_);
 
     // the 2D HUD into the panel (the game area's shape, 960 lines)
@@ -342,7 +356,15 @@ void Scene::frame(const Frame& f)
     const bool clearWas = view.opt.clearColor;
     view.opt.clearColor = true;
     Rigid ref;
-    float gunO[3] = {0, 0, 0}, gunD[3] = {0, 0, 1}, hitDist = settings.aimDistance * upm, hit[3] = {0, 0, 0};
+    // the guns: [1] the right (always), [0] the left (dual pistols only); each its muzzle, barrel, how far its ray goes
+    struct Gun {
+        bool on = false;
+        float o[3] = {0, 0, 0}, d[3] = {0, 0, 1}, dist = 0, hit[3] = {0, 0, 0};
+    } gun[2];
+    for (Gun& g : gun) g.dist = settings.aimDistance * upm;
+    float* gunO = gun[1].o;
+    float* gunD = gun[1].d;
+    const bool dual = this->dual;
     view.drawOverride = [&](const std::vector<DrawItem>& items) {
         const Camera& base = view.camOverride ? *view.camOverride : view.cam;
         ref = referenceFrom(base, settings.follow);
@@ -371,20 +393,29 @@ void Scene::frame(const Frame& f)
             return poseToLocal(p, upm);
         };
         const bool right = fs_.hand[1].active && fs_.hand[1].aim.valid;
+        gun[1].on = right;
+        gun[0].on = dual && fs_.hand[0].active && fs_.hand[0].aim.valid;
+        // the left gun's tune: gun_offset / gun_rotate mirrored (x, yaw and roll the other way)
+        const float offL[3] = {-settings.gunOffset[0], settings.gunOffset[1], settings.gunOffset[2]};
+        const float rotL[3] = {settings.gunRotate[0], -settings.gunRotate[1], -settings.gunRotate[2]};
         const Rigid gunW = ref * poseToLocal(fs_.hand[1].aim, upm) * tune(settings.gunOffset, settings.gunRotate) * gunAnchor();
-        {
+        const Rigid gunLW = ref * poseToLocal(fs_.hand[0].aim, upm) * tune(offL, rotL) * gunAnchorLeft();
+        for (int h = 0; h < 2; ++h) {
+            const Rigid& w = h == 1 ? gunW : gunLW;
             float ahead[3];
-            gunW.apply(kGunMuzzle, gunO);
+            w.apply(kGunMuzzle, gun[h].o);
             const float back[3] = {kGunMuzzle[0], kGunMuzzle[1] + 1.0f, kGunMuzzle[2]};   // (the barrel: model -y)
-            gunW.apply(back, ahead);
-            for (int k = 0; k < 3; ++k) gunD[k] = gunO[k] - ahead[k];
-            normalize3(gunD);
+            w.apply(back, ahead);
+            for (int k = 0; k < 3; ++k) gun[h].d[k] = gun[h].o[k] - ahead[k];
+            normalize3(gun[h].d);
         }
-        const bool left = settings.leftHand && fs_.hand[0].active && fs_.hand[0].grip.valid;
+        const bool left = !dual && settings.leftHand && fs_.hand[0].active && fs_.hand[0].grip.valid;
         const Rigid leftW = ref * poseToLocal(fs_.hand[0].grip, upm) * tune(settings.leftOffset, settings.leftRotate) * leftAnchor();
         std::vector<DrawItem> hands;
         DrawItem hi;
         if (right && view.placedItem(0, kGunHandModel, gunW.r, gunW.t, hi))
+            hands.push_back(hi);
+        if (gun[0].on && view.placedItem(1, kGunHandModel, gunLW.r, gunLW.t, hi))   // (dual pistols: mirrored)
             hands.push_back(hi);
         if (left && view.placedItem(1, kLeftHandModel, leftW.r, leftW.t, hi))
             hands.push_back(hi);
@@ -406,10 +437,13 @@ void Scene::frame(const Frame& f)
             float vp[16];
             std::memcpy(vp, view.renderer.lastViewProj, sizeof vp);
             if (i == 1) {
-                const float t = right ? march(gunO, gunD, vp, e.width, e.height, 60.0f * upm) : -1.0f;
-                hitDist = t > 0 ? t : settings.aimDistance * upm;
-                for (int k = 0; k < 3; ++k) hit[k] = gunO[k] + gunD[k] * hitDist;
-                if (t > 0) ++test.depthHits;
+                for (int h : {1, 0}) {   // each gun's ray in the right eye's depth (dual pistols: the left one too)
+                    Gun& g = gun[h];
+                    const float t = g.on ? march(g.o, g.d, vp, e.width, e.height, 60.0f * upm) : -1.0f;
+                    g.dist = t > 0 ? t : settings.aimDistance * upm;
+                    for (int k = 0; k < 3; ++k) g.hit[k] = g.o[k] + g.d[k] * g.dist;
+                    if (t > 0) ++(h == 1 ? test.depthHits : test.leftDepthHits);
+                }
                 float co[3], cd[3];   // the preview: how far the cursor's ray goes (its gun aims there next frame)
                 if (backend_->desktopCursorRay(co, cd)) {
                     const Rigid pl = ref;   // the cursor ray: tracking -> the world (as a pose's point and axis)
@@ -431,7 +465,7 @@ void Scene::frame(const Frame& f)
                 }
                 if (followGameAim) {   // --vr-preview-test: the round trip through the game's own aim
                     ++test.frames;
-                    const float ax = rt.gun[0].x, ay = rt.gun[0].y;
+                    const float ax = testAimSet ? testAim[0] : rt.gun[0].x, ay = testAimSet ? testAim[1] : rt.gun[0].y;
                     float dirC[3] = {ax, ay, gcam.focal}, dirW[3];
                     normalize3(dirC);
                     gcam.toWorld.rotate(dirC, dirW);
@@ -444,24 +478,35 @@ void Scene::frame(const Frame& f)
                         for (int r = 0; r < 4; ++r) c[r] = vp[r] * wpt[0] + vp[4 + r] * wpt[1] + vp[8 + r] * wpt[2] + vp[12 + r];
                         if (c[3] > 0) backend_->setCursor(1, (c[0] / c[3]) * 0.5f + 0.5f, 0.5f - (c[1] / c[3]) * 0.5f);
                         // this frame's chain: the muzzle's ray to the point, its hit in the depth, back to the arcade
-                        float rd[3] = {wpt[0] - gunO[0], wpt[1] - gunO[1], wpt[2] - gunO[2]};
-                        const float len = std::sqrt(dot3(rd, rd));
-                        normalize3(rd);
-                        const float th = march(gunO, rd, vp, e.width, e.height, 60.0f * upm);
-                        // the gun's view to the point blocked (something between the hand and it, as a hand behind
-                        // a door frame): the gun hits that first, which is right; counted apart
-                        if (th > 0 && th < 0.9f * len) {
-                            ++test.blocked;
-                        } else if (th > 0) {
-                            const AimResult a = aimFromRay(gcam, gunO, rd, th, worldUp, 89.0f);
-                            const double err = std::max(std::abs(a.x - ax), std::abs(a.y - ay));
-                            ++test.checked;
-                            test.sum += err;
-                            test.worst = std::max(test.worst, err);
-                            if (err > 6.0) ++test.over;
-                            if (err > 6.0 && std::getenv("HOTD_VR_DEBUG"))
-                                SDL_Log("vr test: frame %llu aim %.1f %.1f -> %.1f %.1f, camera ray %.1f, gun ray %.1f of %.1f",
-                                        (unsigned long long)rt.frameCount, ax, ay, a.x, a.y, tg, th, len);
+                        // (dual pistols: the left gun's from its own muzzle too)
+                        for (int h : {1, 0}) {
+                            if (!gun[h].on)
+                                continue;
+                            const float* mo = gun[h].o;
+                            float rd[3] = {wpt[0] - mo[0], wpt[1] - mo[1], wpt[2] - mo[2]};
+                            const float len = std::sqrt(dot3(rd, rd));
+                            normalize3(rd);
+                            const float th = march(mo, rd, vp, e.width, e.height, 60.0f * upm);
+                            // the gun's view to the point blocked (something between the hand and it, as a hand
+                            // behind a door frame): the gun hits that first, which is right; counted apart
+                            if (th > 0 && th < 0.9f * len) {
+                                if (h == 1) ++test.blocked;
+                            } else if (th > 0) {
+                                const AimResult a = aimFromRay(gcam, mo, rd, th, worldUp, 89.0f);
+                                const double err = std::max(std::abs(a.x - ax), std::abs(a.y - ay));
+                                if (h == 0) {
+                                    ++test.leftChecked;
+                                    test.leftSum += err;
+                                    continue;
+                                }
+                                ++test.checked;
+                                test.sum += err;
+                                test.worst = std::max(test.worst, err);
+                                if (err > 6.0) ++test.over;
+                                if (err > 6.0 && std::getenv("HOTD_VR_DEBUG"))
+                                    SDL_Log("vr test: frame %llu aim %.1f %.1f -> %.1f %.1f, camera ray %.1f, gun ray %.1f of %.1f",
+                                            (unsigned long long)rt.frameCount, ax, ay, a.x, a.y, tg, th, len);
+                            }
                         }
                     }
                 }
@@ -481,9 +526,12 @@ void Scene::frame(const Frame& f)
             float eyeR[3], eyeU[3];
             eyeW.axis(0, eyeR);
             eyeW.axis(1, eyeU);
-            if (right && settings.laser) {   // a ribbon from the muzzle to the hit, turned to the eye
+            for (const Gun& g : gun) {   // a ribbon from each muzzle to its hit, turned to the eye
+                if (!g.on || !settings.laser)
+                    continue;
+                const float *gunO = g.o, *hit = g.hit;
                 float toEye[3] = {eyeW.t[0] - gunO[0], eyeW.t[1] - gunO[1], eyeW.t[2] - gunO[2]}, side[3];
-                cross3(gunD, toEye, side);
+                cross3(g.d, toEye, side);
                 normalize3(side);
                 const float wdt = 0.004f * upm;
                 const float v[20] = {gunO[0] - side[0] * wdt, gunO[1] - side[1] * wdt, gunO[2] - side[2] * wdt, 0, 0,
@@ -494,7 +542,10 @@ void Scene::frame(const Frame& f)
                 drawSprite(v, 4, 0, 2, tint, vp);
             }
             gl::Disable(gl::DEPTH_TEST);   // (the crosshair and the panel: on top)
-            if (right && sight) {   // the game's own sight, the same angular size at any distance
+            for (const Gun& g : gun) {   // the game's own sight at each gun's hit, the same angular size at any distance
+                if (!g.on || !sight)
+                    continue;
+                const float* hit = g.hit;
                 const float dx = hit[0] - eyeW.t[0], dy = hit[1] - eyeW.t[1], dz = hit[2] - eyeW.t[2];
                 const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
                 const float hs = dist * std::tan(settings.crosshairDegrees * kPi / 360.0f), hw = hs * sightAspect;
@@ -551,9 +602,9 @@ void Scene::frame(const Frame& f)
     gl::Viewport(0, 0, f.outW, f.outH);
 
     // the aim for the next tick
-    lastHitDist = hitDist;
-    lastAim = aimFromRay(gcam, gunO, gunD, hitDist, worldUp, settings.reloadPitch);
-    std::copy(hit, hit + 3, lastAim.hit);
+    lastHitDist = gun[1].dist;
+    lastAim = aimFromRay(gcam, gunO, gunD, gun[1].dist, worldUp, settings.reloadPitch);
+    std::copy(gun[1].hit, gun[1].hit + 3, lastAim.hit);
     pending_.valid = fs_.hand[1].active;
     pending_.x = std::clamp(lastAim.x, -4000.0f, 4000.0f);
     pending_.y = std::clamp(lastAim.y, -4000.0f, 4000.0f);
@@ -569,6 +620,30 @@ void Scene::frame(const Frame& f)
 
     if (settings.reloadDown && lastAim.down && !wasLow_) pending_.reload = true;
     wasLow_ = lastAim.down;
+    // dual pistols: the left gun the same way (its own aim, trigger, rumble; pointing it down reloads the pair)
+    pending_.dual = dual;
+    if (gun[0].on) {
+        lastAimLeft = aimFromRay(gcam, gun[0].o, gun[0].d, gun[0].dist, worldUp, settings.reloadPitch);
+        std::copy(gun[0].hit, gun[0].hit + 3, lastAimLeft.hit);
+        Aim::Gun& l = pending_.left;
+        l.valid = true;
+        l.x = std::clamp(lastAimLeft.x, -4000.0f, 4000.0f);
+        l.y = std::clamp(lastAimLeft.y, -4000.0f, 4000.0f);
+        l.onScreen = lastAimLeft.onScreen;
+        const float tl = fs_.hand[0].trigger;
+        triggerDownL_ = triggerDownL_ ? tl > 0.4f : tl > 0.6f;
+        if (triggerDownL_ && !wasDownL_) {
+            ++l.pulls;
+            backend_->haptic(0, 0.7f, 0.06f);   // (the left controller's own kick)
+        }
+        wasDownL_ = triggerDownL_;
+        l.held = triggerDownL_;
+        if (settings.reloadDown && lastAimLeft.down && !wasLowL_) pending_.reload = true;
+        wasLowL_ = lastAimLeft.down;
+    } else {
+        pending_.left = Aim::Gun{};
+        triggerDownL_ = wasDownL_ = wasLowL_ = false;
+    }
     // openxr: either hand's grip, the right A / B (Vive / WMR: the right trackpad), the left Y reload; the left X (Index:
     // left A; Vive / WMR: the left trackpad) is Start (join / continue); the menu button pauses
     for (int h = 0; h < 2; ++h) {
@@ -600,6 +675,7 @@ Scene::Aim Scene::takeAim()
     pending_.pulls = 0;
     pending_.reload = false;
     pending_.start = false;
+    pending_.left.pulls = 0;
     return a;
 }
 

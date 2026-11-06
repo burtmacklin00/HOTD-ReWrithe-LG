@@ -3,7 +3,9 @@
 
 #include "game/audio.h"
 #include "game/lang.h"
+#include "game/ragdoll.h"
 #include "game/runtime.h"
+#include "game/weapons.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -12,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 
@@ -62,10 +65,16 @@ const std::vector<SurvivalArena>& survivalArenas()
     // chapter's standard creatures (kind 0 records), the weaker ones first (the early waves take from the front)
     static const std::vector<SurvivalArena> k = {
         // (picked from the lead-in's logged waits, HOTD_SURVIVAL_WAIT, and pictures of each: docs/survival.md)
-        {"courtyard", "Chapter 1: the courtyard", 0, 1, 0, {11, 28, 24, 16, 57, 29, 30}},
-        {"bedroom", "Chapter 2: the green bedroom", 1, 1, 5, {11, 28, 16, 29, 51, 33, 45, 30, 32, 58}},
-        {"lab", "Chapter 3: the laboratory", 2, 1, 0, {28, 61, 86, 62, 73, 83, 3, 29, 53, 65, 72, 63, 84}},
-        {"furnace", "Chapter 3: the furnace bridge", 2, 1, 6, {28, 61, 86, 62, 73, 83, 3, 29, 53, 65, 72, 63, 84}},
+        // arenas (user 2026-11-05: "the chapter locations are weird, especially Chapter 2: not open enough"): every
+        // creature wait of the four chapters (all routes) pictured and measured (the walkable floor at the camera's
+        // height in its view, the walls, the ways in); one arena a chapter, the most open; the doors: the room's
+        // entrances on its floor, each with a clear walk to the camera (docs/survival.md "Arenas")
+        // (the courtyard keeps the original's own places, no doors: the user 2026-11-05, "they spawn super far now, it was
+        // perfect last time": the arenas pass's doors there were 700-1100 units away, the mansion gate and the far side)
+        {"courtyard", "Chapter 1: the courtyard", 0, 1, 0, {11, 28, 24, 16, 57, 29, 30}, {}, {}},
+        // (Chapters 2-4 removed, user 2026-11-05: "get rid of chapter 2-4 locations, they don't work"; the tried ones,
+        // the green bedroom / dining hall, the laboratory / furnace bridge and the octagon hall with their door lists,
+        // are in git history (2188e467) and docs/survival.md "Arenas")
     };
     return k;
 }
@@ -73,8 +82,11 @@ const std::vector<SurvivalArena>& survivalArenas()
 int survivalArenaParse(const std::string& v)
 {
     const auto& a = survivalArenas();
-    for (size_t i = 0; i < a.size(); ++i)
+    for (size_t i = 0; i < a.size(); ++i) {
         if (v == a[i].key) return int(i);
+        for (const char* old : a[i].aliases)
+            if (v == old) return int(i);
+    }
     const int n = std::atoi(v.c_str());
     return n >= 1 && n <= int(a.size()) ? n - 1 : v.empty() ? 0 : -1;
 }
@@ -95,36 +107,10 @@ const std::vector<SurvivalCut>& survivalCuts()
     return k;
 }
 
-uint32_t SurvivalMode::next()
+// the cut creatures' borrowed tables and damage rows (written into the program ROM image, set back by
+// Runtime::survival_restore): Survival's start (and the other modes' placed cut creatures)
+void survivalCutTables(Runtime& rt)
 {
-    rng_ = rng_ * 1103515245u + 12345u;
-    return (rng_ >> 8) & 0xFFFFFF;
-}
-
-void SurvivalMode::begin(int arenaIndex)
-{
-    const int keepArena = arenaIndex, keepSmg = smgWave, keepMax = maxAlive;
-    const bool keepCut = cutCreatures, keepBuyer = testBuyer;
-    const uint32_t keepSeed = seed;
-    *this = SurvivalMode();
-    arena = keepArena, smgWave = keepSmg, maxAlive = keepMax, cutCreatures = keepCut, seed = keepSeed, testBuyer = keepBuyer;
-    rng_ = seed;
-    phase = arena >= 0 ? LeadIn : Off;
-}
-
-void SurvivalMode::startGame(Runtime& rt, int players)
-{
-    begin(arena);
-    if (!active())
-        return;
-    const SurvivalArena& a = survivalArenas()[size_t(arena)];
-    rt.bossNoContinue = true;   // no continue: game over as soon as every player is out (as Boss Mode)
-    players_ = std::max(1, players);
-    for (int p = 0; p < 4; ++p)
-        rt.survivalRounds[p] = kPistolRounds;   // (the handgun's 6 until the shop changes it)
-    rt.survivalScoring = true;                  // Survival's points instead of the game's score (game.h survival_hits)
-    // the cut creatures without a list of their own borrow their relative's (enemy_motion_lists 0xC6B60, a table in the
-    // program ROM image: set back by Runtime::survival_restore when the game ends or another starts)
     rt.survival_restore();
     // (and its attacks 0xC6F10, attack choice 0xC6D30 and death motion 0x762C0: Syndy's and Baba's words are 0 there,
     // where Disiprin's, Debu's and Neozom's are set like any standard creature's)
@@ -135,6 +121,21 @@ void SurvivalMode::startGame(Runtime& rt, int players)
                 rt.survivalPatches_.push_back({at, rt.mem.u32(at)});
                 rt.mem.set32(at, rt.mem.u32(table + 4 * uint32_t(c.donor)));
             }
+    // their floor shadows (user 2026-11-05: "the hammer lady's shadow is just a squished-down Y level of her"): part_draw's
+    // shadow pass (0x36240, flags2 bit 1) draws, under the shadow projection (stored matrix 3), the model of the part's
+    // role from the type's shadow table (0x14BA80: the low-polygon dark `_DD` / `*kage` copies), or, where the type has
+    // no table, the part's own textured model squashed onto the floor. Syndy's word is 0 (as the cut MrG's and the
+    // Hangedman's / Hermit's types), so she cast a flat copy of herself; every creature that shares her 17-role tree
+    // (Sam, Neil, Gilmore, ...) has the zombies' table 0x14A730 (ff_*_DD), which her donor's word gives her: the same
+    // shadow, by her own pose, as the others (docs/survival.md "Cut creatures")
+    for (const SurvivalCut& c : survivalCuts()) {
+        constexpr uint32_t kShadowModels = 0x14BA80;
+        const uint32_t at = kShadowModels + 4 * uint32_t(c.type), donor = kShadowModels + 4 * uint32_t(c.donor);
+        if (c.donor != 0 && rt.mem.u32(at) == 0 && rt.mem.u32(donor) != 0) {
+            rt.survivalPatches_.push_back({at, rt.mem.u32(at)});
+            rt.mem.set32(at, rt.mem.u32(donor));
+        }
+    }
     // their damage (user 2026-11-03: Syndy, the tall woman with the mallet, could not be hurt; Baba's body "glitched out"
     // when shot; docs/survival.md "Cut creatures"). The per-type part tables (part_hit, damage.cpp) for the two:
     // - part_damage_table (0x12F9F0, 0x100 bytes a type: the damage of a hit by part class and damage step): Syndy's
@@ -163,6 +164,61 @@ void SurvivalMode::startGame(Runtime& rt, int players)
             patch(at + 4, rt.mem.u32(at + 4) & 0xFFFFFF00u);
         }
     }
+}
+
+uint32_t SurvivalMode::next()
+{
+    rng_ = rng_ * 1103515245u + 12345u;
+    return (rng_ >> 8) & 0xFFFFFF;
+}
+
+void SurvivalMode::begin(int arenaIndex)
+{
+    const int keepArena = arenaIndex, keepSmg = smgWave, keepMax = maxAlive, keepWeapons = weaponsWave;
+    const bool keepCut = cutCreatures, keepBuyer = testBuyer, keepCycle = cycleTest;
+    const uint32_t keepSeed = seed;
+    *this = SurvivalMode();
+    arena = keepArena, smgWave = keepSmg, maxAlive = keepMax, cutCreatures = keepCut, seed = keepSeed, testBuyer = keepBuyer;
+    testIdle = survivalEnv("TEST_IDLE") ? 1 : 0;
+    weaponsWave = keepWeapons, cycleTest = keepCycle;
+    // testing (survrevive): HOTD_SURVIVAL_DRAIN=<seat>@<round>[+frames],.. (1-based seat)
+    for (const char* d = survivalEnv("DRAIN"); d && *d;) {
+        Drain x{0, 0, 300};
+        char* e = nullptr;
+        x.seat = int(std::strtol(d, &e, 10)) - 1;
+        if (e && *e == '@')
+            x.round = int(std::strtol(e + 1, &e, 10));
+        if (e && *e == '+')
+            x.frames = int(std::strtol(e + 1, &e, 10));
+        if (x.seat >= 0 && x.seat < 4 && x.round >= 1)
+            drains.push_back(x);
+        d = e && *e == ',' ? e + 1 : "";
+    }
+    rng_ = seed;
+    phase = arena >= 0 ? LeadIn : Off;
+}
+
+void SurvivalMode::startGame(Runtime& rt, int players)
+{
+    begin(arena);
+    if (!active())
+        return;
+    SurvivalArena a = survivalArenas()[size_t(arena)];
+    // developer (arenas, finding arenas): HOTD_SURVIVAL_START=c:e starts at chapter c's (1-based) event e instead (with
+    // HOTD_SURVIVAL_WAIT: any wait of any chapter; the types stay the arena's)
+    if (const char* s = survivalEnv("START")) {
+        int c = 0, e = 0;
+        if (std::sscanf(s, "%d:%d", &c, &e) == 2 && c >= 1 && c <= 4 && e >= 0)
+            a.chapter = c - 1, a.event = e;
+    }
+    rt.bossNoContinue = true;   // no continue: game over as soon as every player is out (as Boss Mode)
+    rt.seatsHeldOut = 0, rt.livesKeptSkip = 0;
+    players_ = std::max(1, players);
+    rt.weapons.begin(rt, Weapons::Survival);   // (the handgun's 6 until the shop gives more: game/weapons.h)
+    rt.survivalScoring = true;                 // Survival's points instead of the game's score (game.h survival_hits)
+    // the cut creatures without a list of their own borrow their relative's (enemy_motion_lists 0xC6B60, a table in the
+    // program ROM image: set back by Runtime::survival_restore when the game ends or another starts)
+    survivalCutTables(rt);
     // more bodies than the original's 14 creature slots (game.h extraBodySlots; docs/survival.md "Limits"): slots 16.. in
     // a table outside the original map (the skin buffers grow with it at the chapter's heap reset)
     if (!rt.mem.mapped(kBodyTable))
@@ -267,7 +323,24 @@ bool SurvivalMode::eventFrame(Runtime& rt)
         // the original sends the room's creatures in several sections), at most 16, none twice
         points = section;
         const float cx = rt.mem.f32(G::camera_pos), cz = rt.mem.f32(G::camera_pos + 8);
-        for (const Point& q : all_) {
+        // arenas (2026-11-05): an arena with its doors takes them instead (the captured places were where the original's
+        // creatures stood up close, or behind walls in the next room, or on another floor): each faces the camera, with
+        // the flags of the arena's own creatures
+        const SurvivalArena& ar = survivalArenas()[size_t(arena)];
+        const bool doors = !ar.doors.empty() && !survivalEnv("START") && !survivalEnv("WAIT");   // (finding arenas: the old rule)
+        if (doors) {
+            const uint32_t fl = section.empty() ? 0u : section.front().flags;
+            points.clear();
+            for (const auto& d : ar.doors) {
+                Point q{};
+                q.pos[0] = d[0], q.pos[1] = d[1], q.pos[2] = d[2];
+                // the game's heading: 0x10000 a turn, 0 = +z, a quarter turn = -x (the records' own: ENTB3's +0x2C)
+                q.ang[1] = int32_t(std::lround(-std::atan2(cx - d[0], cz - d[2]) / 6.2831853 * 65536.0)) & 0xFFFF;
+                q.flags = fl, q.kind = 0, q.type = section.empty() ? 0 : section.front().type;
+                points.push_back(q);
+            }
+        }
+        for (const Point& q : doors ? std::vector<Point>{} : all_) {
             const float dx = q.pos[0] - cx, dz = q.pos[2] - cz;
             bool dup = false;
             for (const Point& r : points)
@@ -283,7 +356,7 @@ bool SurvivalMode::eventFrame(Runtime& rt)
             if (d < kNear && d > 0.01f)
                 q.pos[0] = cx + dx / d * kNear, q.pos[2] = cz + dz / d * kNear;
         }
-        if (points.size() < 4)
+        if (points.size() < 4 && !doors)
             for (size_t i = 0, n = points.size(); i < n; ++i)
                 for (const float a : {0.52f, -0.52f}) {
                     Point q = points[i];
@@ -305,7 +378,7 @@ bool SurvivalMode::eventFrame(Runtime& rt)
         {
             std::string n = survivalArenas()[size_t(arena)].name;   // (upper case, as the other banners)
             for (char& c : n) c = char(std::toupper(uint8_t(c)));
-            say(n, 120);
+            say(n, 120, Plain);
         }
         if (rt.log)
             rt.log("survival: the arena at frame " + std::to_string(rt.frameCount) + " (lead-in " + std::to_string(leadFrames) +
@@ -316,6 +389,89 @@ bool SurvivalMode::eventFrame(Runtime& rt)
     }
     // frozen: the director, in the event task's slot (the game's task group, as the script's own spawns)
     countMine(rt);
+    // developer (arenas: judging an arena by numbers, scratch arenas.py): HOTD_SURVIVAL_DUMP=<file> writes, 30 frames
+    // into the first break (the camera settled, the view drawn), the camera's place and view matrix, the spawn points
+    // and the stage's walls / floors near the camera (the Ragdoll mod's, the view builds them with --render); then
+    // every 4 frames of the rounds each creature's place (its walk: checked against the walls)
+    if (static const char* dumpTo = survivalEnv("DUMP"); dumpTo && *dumpTo) {
+        static FILE* df = nullptr;
+        if (!df && phase == Break && breakTimer == kFirstBreak - 30 && (df = std::fopen(dumpTo, "w")) != nullptr) {
+            const float cx = rt.mem.f32(G::camera_pos), cy = rt.mem.f32(G::camera_pos + 4), cz = rt.mem.f32(G::camera_pos + 8);
+            std::fprintf(df, "cam %g %g %g\nview", cx, cy, cz);
+            for (const float v : rt.camera)
+                std::fprintf(df, " %g", v);
+            std::fprintf(df, "\n");
+            for (const Point& p : points)
+                std::fprintf(df, "pt %g %g %g %d %d %d\n", p.pos[0], p.pos[1], p.pos[2], p.ang[1], p.kind, p.type);
+            const RagdollWalls* w = rt.ragdollWorld ? rt.ragdollWorld() : nullptr;
+            for (size_t o = 0; w && o < w->objs.size(); ++o) {
+                const RagdollWalls::Obj& ob = w->objs[o];
+                if (ob.lo[0] > cx + 1500 || ob.hi[0] < cx - 1500 || ob.lo[2] > cz + 1500 || ob.hi[2] < cz - 1500)
+                    continue;
+                for (int f = 0; f < 2; ++f) {
+                    const std::vector<float>& t = f ? ob.floors : ob.tris;
+                    for (size_t i = 0; i + 12 <= t.size(); i += 12)
+                        std::fprintf(df, "%s %zu %g %g %g %g %g %g %g %g %g\n", f ? "fl" : "wl", o, t[i], t[i + 1], t[i + 2], t[i + 3], t[i + 4],
+                                     t[i + 5], t[i + 6], t[i + 7], t[i + 8]);
+                }
+            }
+            std::fflush(df);
+        }
+        if (df && phase == Wave && rt.frameCount % 4 == 0) {
+            for (const Mine& m : mine)
+                if (m.serial != 0 && rt.mem.u32(m.task + 8) == m.serial) {
+                    const port::a::Enemy& e = rt.mem.at<port::a::Enemy>(m.task);
+                    std::fprintf(df, "e %llu %X %u %g %g %g\n", (unsigned long long)rt.frameCount, m.task, m.serial, e.pos[0], e.pos[1], e.pos[2]);
+                }
+            if (rt.frameCount % 400 == 0)
+                std::fflush(df);
+        }
+    }
+    // survfix (user 2026-11-04): a creature that will never attack does not hold the round (game/engage.h: decided
+    // from its AI state; the scripted kinds, the queue at the waiting positions, the walkers still coming all count);
+    // it leaves as the game's attackers leave. HOTD_SURVIVAL_KEEP_IDLE=1 (testing): kept, as before
+    if (phase == Wave && !survivalEnv("KEEP_IDLE"))
+        for (const Mine& m : mine) {
+            if (m.serial == 0 || rt.mem.u32(m.task + 8) != m.serial)
+                continue;
+            const std::string why = engage.check(rt, m.task, m.serial);
+            if (why.empty())
+                continue;
+            EngageWatch::retire(rt, m.task);
+            engage.forget(m.task);
+            ++engage.retired, ++retiredN;
+            if (rt.log)
+                rt.log("survival: a type " + std::to_string(m.type) + " creature will never attack (" + why + "): sent away at frame " +
+                       std::to_string(rt.frameCount));
+        }
+    if (testIdle)
+        testIdleFrame(rt);
+    if (static const char* tr = survivalEnv("TRACE_ALIVE"); tr && phase == Wave && rt.frameCount % uint64_t(std::max(1, std::atoi(tr))) == 0) {
+        const float cx = rt.mem.f32(G::camera_pos), cz = rt.mem.f32(G::camera_pos + 8);
+        for (const Mine& m : mine) {
+            if (rt.mem.u32(m.task + 8) != m.serial || m.serial == 0)
+                continue;
+            const port::a::Enemy& e = rt.mem.at<port::a::Enemy>(m.task);
+            const float dx = e.pos[0] - cx, dz = e.pos[2] - cz;
+            std::printf("alive f%llu round %d task %X type %d%s age %llu %s state %d sub %d delay %d slot %d flags %08X dist %.0f view z %.0f life %d\n",
+                        (unsigned long long)rt.frameCount, wave, m.task, m.type, m.cut ? " cut" : "", (unsigned long long)(rt.frameCount - m.born),
+                        rt.routineName(e.routine).c_str(), e.state, e.substate, e.delay, e.attack_slot, e.flags, std::sqrt(dx * dx + dz * dz),
+                        e.view_pos[2], e.life);
+        }
+    }
+    // testing (HOTD_SURVIVAL_DRAIN): a seat's lives to 0 in a round, as a creature's last hit would
+    if (phase == Wave && !stats.empty())
+        for (const Drain& d : drains)
+            if (d.round == wave && d.seat < rt.seat_count() && rt.frameCount == stats.back().start + uint64_t(std::max(1, d.frames))) {
+                port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(d.seat));
+                if (pl.state != 5)
+                    continue;
+                pl.lives = 0;
+                rt.livesKeptSkip = uint8_t(rt.livesKeptSkip | (1u << d.seat));
+                if (rt.log)
+                    rt.log("survival: test: " + std::to_string(d.seat + 1) + "P's lives drained in round " + std::to_string(wave) + " at frame " +
+                           std::to_string(rt.frameCount));
+            }
     seats(rt);
     if (bannerFrames > 0 && --bannerFrames == 0)
         banner.clear();
@@ -330,6 +486,20 @@ bool SurvivalMode::eventFrame(Runtime& rt)
             startWave(rt);
         return true;
     }
+    // testing (the self-test): each seat switches to its next weapon (the switch's path) once the one in its hand has
+    // been reloaded (each weapon fires and reloads), at the latest after 900 frames
+    if (cycleTest && (rt.frameCount % 30) == 0)
+        for (int p = 0; p < rt.seat_count() && p < 4; ++p) {
+            const Weapons::Seat& w = rt.weapons.seat[p];
+            if (w.cur != cycleWeapon_[p]) {
+                cycleWeapon_[p] = w.cur, cycleAt_[p] = rt.frameCount, cycleReloads_[p] = w.reloads[w.cur];
+                port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
+                pl.rounds = uint8_t(std::min<int>(pl.rounds, 3));   // (a short magazine: its reload comes soon)
+            } else if (w.reload == 0 && (w.reloads[w.cur] > cycleReloads_[p] || rt.frameCount > cycleAt_[p] + 900)) {
+                rt.weapons.request[p] = 1;
+                cycleAt_[p] = rt.frameCount;
+            }
+        }
     // a round (Call of Duty Zombies: the creatures come one by one, a few at once, the gap shrinking each round; rounds
     // 1-3 gentle: 2, 3, 4 at once)
     const int cap = std::min(maxAlive, special == 1 ? 4 + wave : wave <= 3 ? 1 + wave : 2 + wave);
@@ -339,34 +509,85 @@ bool SurvivalMode::eventFrame(Runtime& rt)
     }
     if (toSpawn == 0 && alive == 0) {
         // the round is cleared: no free life (survival2); after a special round, Max Ammo as after the dogs' rounds
-        char b[64];
-        std::snprintf(b, sizeof b, "ROUND %d CLEARED", wave);
-        std::string s = b;
-        if (special != 0) {
-            for (int p = 0; p < rt.seat_count(); ++p) {
-                port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
-                if (pl.state != 5)
-                    continue;
-                if (seat[p].smg)
-                    seat[p].reserve = magazine(p) * kSmgReserveMags;
-                pl.rounds = uint8_t(magazine(p));
-                pl.empty = 0;
-                seat[p].reload = 0;
-            }
-            s += "  -  MAX AMMO";
+        std::string s = lang::fmt("ROUND {n} CLEARED", {{"n", std::to_string(wave)}});
+        if (special != 0) {   // (every weapon held: its magazine and reserve full)
+            for (int p = 0; p < rt.seat_count(); ++p)
+                if (rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5)
+                    rt.weapons.refill(rt, p, -1);
+            s += "  " + lang::tr("MAX AMMO");
         }
-        say(s, 150);
+        // the weapons are kept after a round (the user, 2026-11-04): what each seat holds now, checked at the next start
+        for (int p = 0; p < 4; ++p) {
+            seat[p].ownedAtClear = 0;
+            for (int w = 0; w < kWeapons; ++w)
+                seat[p].ownedAtClear |= rt.weapons.seat[p].own[w] ? 1u << w : 0u;
+        }
+        say(s, 150, Good);
         if (rt.audio)   // data/survival/wave_clear.wav when it is there (no stand-in)
             rt.audio->playExtra(survivalSoundDir(), kSurvivalSfx[3], -1, 1.0f, 1.0f);
-        if (!stats.empty())
+        if (!stats.empty()) {
             stats.back().end = rt.frameCount;
+            for (int p = 0; p < rt.seat_count(); ++p)
+                stats.back().earned += seat[p].earned, stats.back().banked += seat[p].points;
+        }
         phase = Break;
         breakTimer = kBreakFrames;
+        if (const char* pts = survivalEnv("POINTS"))   // testing (the shop's pictures): seat p has n x (4 - p) / 4 points
+            for (int p = 0; p < 4; ++p)
+                seat[p].points = std::max(0, std::atoi(pts)) * (4 - p) / 4;
         if (rt.log)
             rt.log("survival: round " + std::to_string(wave) + " cleared at frame " + std::to_string(rt.frameCount) + " (peak " +
                    std::to_string(peakAlive) + ")");
     }
     return true;
+}
+
+// testing (HOTD_SURVIVAL_TEST_IDLE=1, docs/survival.md; run without a shooter, lives kept): round 1 gets two more
+// creatures 250 units away, out of the camera's view: A is put back on its place each frame of its approach (enemy_main
+// state 1: it walks on the spot), a creature that will never attack; B waits 1500 frames first (its delay, record
+// +0x320 x 10: "it comes later") and then comes as any other. Every creature that reaches an attack (AI state 5 or
+// more: it would hit the player) is killed by the test (its hit points to 0, the game's own death). The round must end
+// without A (sent away) and only after B (killed when it attacks); with HOTD_SURVIVAL_KEEP_IDLE=1 it never ends
+void SurvivalMode::testIdleFrame(Runtime& rt)
+{
+    if (wave == 1 && phase == Wave && idleTask_[0] == 0 && spawned >= 1) {
+        const float* m = rt.camera;   // (the view matrix: the camera's forward in the world is its third column)
+        const float fx = m[2], fz = m[8], n = std::sqrt(fx * fx + fz * fz);
+        const float cx = rt.mem.f32(G::camera_pos), cz = rt.mem.f32(G::camera_pos + 8);
+        for (int k = 0; k < 2; ++k) {
+            const float side = k == 0 ? -60.0f : 60.0f;
+            float pos[3] = {cx + fx / n * 250.0f + fz / n * side, points.empty() ? 0.0f : points[0].pos[1], cz + fz / n * 250.0f - fx / n * side};
+            if (m[2] * pos[0] + m[5] * pos[1] + m[8] * pos[2] + m[11] > 0.0f)   // (in front: the other way)
+                pos[0] = cx - fx / n * 250.0f + fz / n * side, pos[2] = cz - fz / n * 250.0f - fx / n * side;
+            const int32_t ang[3] = {0, points.empty() ? 0 : points[0].ang[1], 0};
+            const int type = survivalArenas()[size_t(arena)].types[0];
+            const uint32_t t = rt.survival_spawn(0, 1, pos, ang, type, baseAction(type), baseLife(type), k == 0 ? 0u : 150u, 0);
+            idleTask_[k] = t, idleSerial_[k] = rt.mem.u32(t + 8);
+            mine.push_back({t, idleSerial_[k], rt.frameCount, type, false});
+            ++spawned;
+            if (rt.log)
+                rt.log(std::string("survival test: ") + (k == 0 ? "A (held: never attacks)" : "B (delayed: comes later)") + " at frame " +
+                       std::to_string(rt.frameCount));
+        }
+    }
+    if (idleTask_[0] && rt.mem.u32(idleTask_[0] + 8) == idleSerial_[0]) {   // (A: held where it stands in state 1)
+        port::a::Enemy& e = rt.mem.at<port::a::Enemy>(idleTask_[0]);
+        if (e.routine == A::F::enemy_main && e.state == 1) {
+            if (idleHeld_[0] == 0.0f && idleHeld_[1] == 0.0f)
+                idleHeld_[0] = e.pos[0], idleHeld_[1] = e.pos[2];
+            e.pos[0] = idleHeld_[0], e.pos[2] = idleHeld_[1];
+        }
+    }
+    for (const Mine& m : mine) {   // (the test's shooter: whoever reaches an attack dies)
+        if (m.serial == 0 || rt.mem.u32(m.task + 8) != m.serial)
+            continue;
+        port::a::Enemy& e = rt.mem.at<port::a::Enemy>(m.task);
+        if (e.routine == A::F::enemy_main && e.state >= 5 && e.life > 0) {
+            e.life = 0;
+            if (rt.log && m.task == idleTask_[1])
+                rt.log("survival test: B attacks at frame " + std::to_string(rt.frameCount) + ": killed");
+        }
+    }
 }
 
 void SurvivalMode::startWave(Runtime& rt)
@@ -391,16 +612,38 @@ void SurvivalMode::startWave(Runtime& rt)
     const uint16_t floor = uint16_t(std::min((wave - 1) * 2 / 3, 15));
     if (rt.mem.at<uint16_t>(kRank) < floor)
         rt.mem.at<uint16_t>(kRank) = floor;
-    char b[64];
-    std::snprintf(b, sizeof b, "ROUND %d%s", wave, special == 1 ? "  -  RUNNERS" : special == 2 ? "  -  BRUTES" : "");
-    std::string s = b;
-    if (smgWave >= 1 && wave >= smgWave)   // testing: the SMG free from that round
-        for (int p = 0; p < rt.seat_count(); ++p)
-            if (!seat[p].smg && rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5) {
-                giveSmg(rt, p);
-                s = b + std::string("  -  SMG");
-            }
+    std::string s = lang::fmt("ROUND {n}", {{"n", std::to_string(wave)}});
+    if (special != 0)
+        s += "  " + lang::tr(special == 1 ? "RUNNERS" : "BRUTES");
+    // the weapons held at the last clear are still held (the test's kept= check: bought ones may have been added)
+    for (int p = 0; p < 4; ++p) {
+        unsigned now = 0;
+        for (int w = 0; w < kWeapons; ++w)
+            now |= rt.weapons.seat[p].own[w] ? 1u << w : 0u;
+        if (wave > 1 && (seat[p].ownedAtClear & ~now) != 0) {
+            keptOk = false;
+            if (rt.log)
+                rt.log("survival: " + std::to_string(p + 1) + "P lost a weapon between the rounds");
+        }
+    }
+    // testing: the SMG free from round smgWave; every weapon free from round weaponsWave
+    for (int p = 0; p < rt.seat_count(); ++p) {
+        if (rt.mem.at<port::a::Player>(rt.player_rec(p)).state != 5)
+            continue;
+        if (smgWave >= 1 && wave >= smgWave && !rt.weapons.seat[p].own[kSmg]) {
+            rt.weapons.give(rt, p, kSmg);
+            rt.weapons.select(rt, p, kSmg);
+            s += "  SMG";
+        }
+        if (weaponsWave >= 1 && wave == weaponsWave)
+            for (int w = 1; w < kWeapons; ++w)
+                rt.weapons.give(rt, p, w);
+    }
     say(s, 120);
+    // survrevive: the seats that went out are back with the round's banner (half their points, the start lives)
+    for (int p = 0; p < rt.seat_count() && p < 4; ++p)
+        if (seat[p].out)
+            comeBack(rt, p);
     if (rt.audio)   // data/survival/wave_start.wav when it is there (no stand-in)
         rt.audio->playExtra(survivalSoundDir(), kSurvivalSfx[2], -1, 1.0f, 1.0f);
     if (rt.log)
@@ -408,12 +651,13 @@ void SurvivalMode::startWave(Runtime& rt)
                (special == 1 ? ", runners" : special == 2 ? ", brutes" : "") + ") at frame " + std::to_string(rt.frameCount));
 }
 
-// the creatures of a round (Call of Duty Zombies' curve, World at War / Black Ops: 6, 8, 13, 18, then 24 rising
-// slowly, from round 10 24 x 0.15 x round), a quarter more for each other player; at most 150
+// the creatures of a round (Call of Duty Zombies' curve, World at War / Black Ops, from round 10 24 x 0.15 x round),
+// a quarter more for each other player; at most 150. survfix2 (the balance runs): rounds 1-9 rise by 3 or 4 a round
+// (6, 9, 13, 17, 21, 24, 27, 30, 33: CoD's 18 -> 24 at round 5 and 32 -> 36 at round 10 were the curve's steps)
 int SurvivalMode::roundCount(int round, int players)
 {
-    static const int kEarly[5] = {0, 6, 8, 13, 18};
-    double n = round < 5 ? kEarly[std::max(1, round)] : round < 10 ? 24.0 + 2.0 * (round - 5) : 24.0 * 0.15 * round;
+    static const int kEarly[5] = {0, 6, 9, 13, 17};
+    double n = round < 5 ? kEarly[std::max(1, round)] : round < 10 ? 21.0 + 3.0 * (round - 5) : 24.0 * 0.15 * round;
     n *= 1.0 + 0.25 * double(std::clamp(players, 1, 4) - 1);
     return std::min(150, int(n + 0.5));
 }
@@ -475,17 +719,21 @@ void SurvivalMode::spawnOne(Runtime& rt)
         life = std::clamp(int(float(life) * m + 0.5f), 1, 30000);   // (+0x70 / +0x72 are 16-bit)
     }
     float pos[3] = {p.pos[0], p.pos[1], p.pos[2]};
-    pos[0] += float(rand(41) - 20);   // spread over the place (not one on another)
-    pos[2] += float(rand(41) - 20);
+    // spread over the place (not one on another); a door's +-8 (arenas: a doorway is narrow, +-20 put some in its frame)
+    const int spread = survivalArenas()[size_t(arena)].doors.empty() ? 20 : 8;
+    pos[0] += float(rand(2 * spread + 1) - spread);
+    pos[2] += float(rand(2 * spread + 1) - spread);
     uint32_t flags = (p.flags & ~(1u << 19)) | 1u;   // (no headless count)
     // the runners: the start sub-state 2 (kind000_enemy_spawn: the type's motion list entry 2, its dash, and
     // walk_variant 1, so it dashes again after each stop: enemy_ai's walkOn): none in rounds 1-3, then a growing share
-    // (at most 60 %); in the runners' round every one, with the AI at once
-    const bool runner = special == 1 || (wave >= 4 && rand(100) < std::min(8 * (wave - 3), 60));
-    if (special == 1 || (wave >= 4 && rand(100) < std::min(10 * (wave - 3), 70)))
+    // (at most 60 %); in the runners' round every one, with the AI at once. survfix2: 6 / 8 % a round (were 8 / 10:
+    // with the counts and the hit points, the lives lost tripled from round 6 to 7)
+    const bool runner = special == 1 || (wave >= 4 && rand(100) < std::min(6 * (wave - 3), 60));
+    if (special == 1 || (wave >= 4 && rand(100) < std::min(8 * (wave - 3), 70)))
         flags |= 1u << 22;   // AI at once (enemy_take_ai_at_once): no waiting before it comes
     const uint32_t t = rt.survival_spawn(0, flags, pos, p.ang, type, cut ? 0 : baseAction(type), life,
                                       wave >= 3 ? 0 : uint32_t(rand(3)), runner ? 2u : 0u);
+    mine.push_back({t, rt.mem.u32(t + 8), rt.frameCount, type, cut});
     --toSpawn;
     ++spawned;
     fastSpawned += runner ? 1 : 0;
@@ -511,7 +759,10 @@ void SurvivalMode::countMine(Runtime& rt)
     peakBodies = std::max(peakBodies, bodies);
     if (!stats.empty() && phase == Wave)
         stats.back().peak = std::max(stats.back().peak, alive);
-    kills = std::max(0, spawned - alive);   // (every creature now is Survival's: the ones no longer counted were killed)
+    if (rt.frameCount % 120 == 0)   // (the ones gone: their task's serial changed)
+        mine.erase(std::remove_if(mine.begin(), mine.end(), [&](const Mine& m) { return m.serial == 0 || rt.mem.u32(m.task + 8) != m.serial; }),
+                   mine.end());
+    kills = std::max(0, spawned - alive - retiredN);   // (every creature now is Survival's: the ones no longer counted were killed or sent away)
 }
 
 void SurvivalMode::tick(Runtime& rt)
@@ -526,6 +777,23 @@ void SurvivalMode::tick(Runtime& rt)
         }
         return;
     }
+    // survrevive (user 2026-11-05, 2-4 players): a seat out of lives (the game's state 4, the arcade's CONTINUE?) while
+    // another plays on is out until the next round, no continue. Checked after the frame (before it is drawn), so the
+    // seat that went to state 4 in it (player_in_game_frame / coop4_seat_frame) never shows CONTINUE? and its
+    // CONTINUE? routine (player_st4_out_of_lives) never runs. Every seat out at once: the game over as before
+    // (game_play: all out -> the continue's sub-modes -> bossNoContinue -> mode 5). 1 player: never (nobody else)
+    if (frozen && (phase == Wave || phase == Break) && rt.mem.at<int16_t>(G::game_mode) == 4)
+        for (int p = 0; p < rt.seat_count() && p < 4; ++p) {
+            if (seat[p].out || rt.mem.at<port::a::Player>(rt.player_rec(p)).state != 4)
+                continue;
+            bool other = false;   // (in play, or starting / joining / held by the camera: states 1, 2, 3, 5, 10)
+            for (int q = 0; q < rt.seat_count() && q < 4 && !other; ++q) {
+                const int32_t st = rt.mem.at<port::a::Player>(rt.player_rec(q)).state;
+                other = q != p && !seat[q].out && (st == 5 || st == 1 || st == 2 || st == 3 || st == 10);
+            }
+            if (other)
+                goOut(rt, p);
+        }
     if (rt.mem.at<int16_t>(G::game_mode) == 5 || rt.gameOverDone) {
         phase = Over;
         justFinished = rt.gameOverDone;
@@ -534,49 +802,45 @@ void SurvivalMode::tick(Runtime& rt)
         score = 0;
         for (int p = 0; p < rt.seat_count(); ++p)
             score += seat[p].earned;
-        char b[96];   // the results line over the game over scene (the table follows in the menus)
-        std::snprintf(b, sizeof b, "REACHED ROUND %d   POINTS %d   KILLS %d", wave, score, kills);
-        say(b, 100000);
+        // the results over the game over scene: the title block's two lines (titleLine / statusLine; the table follows
+        // in the menus). survfix2: no banner (its line ran across the GAME OVER logo and the map's labels)
+        banner.clear(), bannerFrames = 0;
+        // (survrevive: every seat was out at once: nobody comes back; the start buttons as in any game over)
+        for (Seat& s : seat)
+            s.out = false;
+        rt.seatsHeldOut = 0, rt.livesKeptSkip = 0;
         if (rt.log)
             rt.log("survival: " + summary(rt));
     }
 }
 
-std::vector<std::string> SurvivalMode::hudLines(const Runtime& rt) const
+std::string SurvivalMode::titleLine() const
 {
-    std::vector<std::string> out;
-    if (phase == Off || phase == LeadIn)
-        return out;
-    char b[128];
-    if (phase == Break && wave >= 1) {
-        std::snprintf(b, sizeof b, "ROUND %d IN %d   -   SHOOT A SIGN TO BUY", wave + 1, (breakTimer + 59) / 60);
-        out.push_back(b);
-    } else if (wave > 0) {
-        std::snprintf(b, sizeof b, "ROUND %d   LEFT %d", wave, toSpawn + alive);
-        out.push_back(b);
-    }
-    // a line per player in play: points, the gun's rounds (the SMG's reserve), reloading, the perks
-    for (int p = 0; p < rt.seat_count(); ++p) {
-        const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
-        if (pl.state != 5)
-            continue;
-        const Seat& s = seat[p];
-        std::string gun;
-        if (s.reload > 0)
-            gun = "RELOADING";
-        else if (s.smg)
-            gun = "SMG " + std::to_string(int(pl.rounds)) + "+" + std::to_string(s.reserve);
-        else
-            gun = std::to_string(int(pl.rounds)) + "/" + std::to_string(magazine(p));
-        std::snprintf(b, sizeof b, "%dP  %d PTS   %s%s%s", p + 1, s.points, gun.c_str(), s.quick ? "   QUICK" : "", s.bigMag ? "   BIG MAG" : "");
-        out.push_back(b);
-    }
-    return out;
+    if (phase == Off || phase == LeadIn || wave <= 0)
+        return {};
+    if (phase == Over)   // (the results)
+        return lang::fmt("REACHED ROUND {r}", {{"r", std::to_string(wave)}});
+    if (phase == Break)
+        return lang::fmt("ROUND {n} IN {s}", {{"n", std::to_string(wave + 1)}, {"s", std::to_string((breakTimer + 59) / 60)}});
+    return lang::fmt("ROUND {n}", {{"n", std::to_string(wave)}});
+}
+
+std::string SurvivalMode::statusLine() const
+{
+    if (phase == Off || phase == LeadIn || wave <= 0)
+        return {};
+    if (phase == Over)
+        return lang::fmt("POINTS {p}   KILLS {k}", {{"p", std::to_string(score)}, {"k", std::to_string(kills)}});
+    if (phase == Break)
+        return shopOpen() ? lang::tr("SHOOT AN ITEM TO BUY") : std::string();
+    if (phase == Wave)
+        return lang::fmt("LEFT {k}", {{"k", std::to_string(toSpawn + alive)}});
+    return {};
 }
 
 std::string SurvivalMode::summary(const Runtime& rt) const
 {
-    char b[384];
+    char b[512];
     int pts = 0, earned = 0, hitsN = 0, heads = 0, spent = 0, buysN[kItems] = {};
     for (int p = 0; p < 4; ++p) {
         pts += seat[p].points, earned += seat[p].earned, hitsN += seat[p].hits, heads += seat[p].heads, spent += seat[p].spent;
@@ -584,45 +848,62 @@ std::string SurvivalMode::summary(const Runtime& rt) const
             buysN[i] += seat[p].buys[i];
     }
     std::snprintf(b, sizeof b,
-                  "arena=%s round=%d score=%d points=%d spent=%d hits=%d headkills=%d buys=ammo%d,smg%d,life%d,quick%d,bigmag%d "
-                  "spawned=%d cut=%d runners=%d killed=%d alive=%d peak=%d bodies=%d frame=%llu",
+                  "arena=%s round=%d score=%d points=%d spent=%d hits=%d headkills=%d buys=ammo%d,smg%d,life%d,quick%d,bigmag%d,"
+                  "rifle%d,dual%d,shotgun%d,hand%d spawned=%d cut=%d runners=%d killed=%d alive=%d peak=%d bodies=%d frame=%llu kept=%s",
                   arena >= 0 ? survivalArenas()[size_t(arena)].key : "-", wave, earned, pts, spent, hitsN, heads, buysN[Ammo], buysN[Smg],
-                  buysN[Life], buysN[Quick], buysN[BigMag], spawned, cutSpawned, fastSpawned, kills, alive, peakAlive, peakBodies,
-                  (unsigned long long)rt.frameCount);
-    return b;
+                  buysN[Life], buysN[Quick], buysN[BigMag], buysN[Rifle], buysN[Dual], buysN[Shotgun], buysN[Hand], spawned, cutSpawned,
+                  fastSpawned, kills, alive, peakAlive, peakBodies, (unsigned long long)rt.frameCount, keptOk ? "ok" : "FAIL");
+    std::snprintf(b + std::strlen(b), sizeof b - std::strlen(b), " retired=%d blasts=%d/%d/%d hits=%d stage=%d items=%d blastkills=%d", retiredN, rt.blastsN, rt.blastsHit, rt.blastsMulti, rt.blastHits, rt.blastsWorld, rt.blastsItems, rt.blastKills);
+    if (outN > 0)   // survrevive: the seats that went out / came back (2-4 players)
+        std::snprintf(b + std::strlen(b), sizeof b - std::strlen(b), " out=%d back=%d revive=%s", outN, backN, reviveOk ? "ok" : "FAIL");
+    std::string ttk = " ttk";   // (the balance runs: per weapon kills / mean frames from the first hit to the death)
+    for (int w = 0; w < kWeapons; ++w) {
+        char t[48];
+        std::snprintf(t, sizeof t, "%s%s=%d/%.0f", w ? "," : "=", rt.weapons.def(w).key.c_str(), ttkKills[w],
+                      ttkKills[w] ? double(ttkFrames[w]) / ttkKills[w] : 0.0);
+        ttk += t;
+    }
+    return std::string(b) + " " + rt.weapons.summary() + ttk;
 }
 
 // ---- the points and the shop ----
 
-// the signs between the rounds (arcade screen units, y up): a row across the lower part of the picture
+// the signs between the rounds (arcade screen units, y up): three rows of three across the picture, each with an
+// in-game model turning over it (docs/weapons.md "The shop's models"): the guns the players' handgun without the hand
+// (kGunOnlyKey: the game has no rifle or shotgun model), the Hand the Magician's own hand (boss4_ter01), AMMO and
+// QUICK RELOAD the game's gold coin (kinka, the hidden props' bonus), LIFE the game's life item (item_life, the props'
+// drop), BIG MAG the gun. survfix2 (user 2026-11-04: the Hand's model covered its name): each sign a stack (the
+// model's box, the name, the price, the seats that can buy it: survival.h kModelBox ..), 72 units a row, columns at
+// x -135 / 0 / 135: the top row under the title block and players 3 / 4's points, the bottom row over players 1 / 2's
+// at 4:3; each model scaled to its box and lifted to its middle (measured on the shop's pictures)
 const SurvivalMode::Sign SurvivalMode::kSigns[kItems] = {
-    {"AMMO", 500, -200.0f, -110.0f},
-    {"SMG", 1000, -100.0f, -110.0f},
-    {"LIFE", 1500, 0.0f, -110.0f},
-    {"QUICK RELOAD", 2000, 100.0f, -110.0f},
-    {"BIG MAG", 2500, 200.0f, -110.0f},
+    // (measured: the gun 26 units high a unit of scale, its middle 5.5 over its origin; the life item 18.4 / +0.7; the
+    // coin 13 across, centred; the Hand 25 high, turned about its middle since survfix3: weapons.cpp turning)
+    {"AMMO", 500, 135.0f, 18.0f, -1, 0x3B5, 2.15f, 0.0f},
+    {"SMG", 0, -135.0f, 90.0f, kSmg, 0xF1000719, 1.08f, -5.9f},
+    {"LIFE", 1500, -135.0f, -54.0f, -1, 0x312, 1.5f, -1.0f},
+    {"QUICK RELOAD", 2000, 0.0f, -54.0f, -1, 0x3B5, 2.15f, 0.0f},
+    {"BIG MAG", 2500, 135.0f, -54.0f, -1, 0xF1000719, 1.08f, -5.9f},
+    {"RIFLE", 0, 0.0f, 90.0f, kRifle, 0xF1000719, 1.15f, -6.3f},
+    {"DOUBLE PISTOLS", 0, 135.0f, 90.0f, kDual, 0xF1000719, 1.08f, -5.9f},
+    {"SHOTGUN", 0, -135.0f, 18.0f, kShotgun, 0xF1000719, 1.2f, -6.6f},
+    {"MAGICIAN'S HAND", 0, 0.0f, 18.0f, kHand, 0x1C6C, 1.0f, 0.0f},
 };
+
+int SurvivalMode::price(int item) const
+{
+    if (item < 0 || item >= kItems)
+        return 0;
+    return kSigns[item].weapon >= 0 ? weaponDefs()[size_t(kSigns[item].weapon)].price : kSigns[item].price;
+}
 
 int SurvivalMode::signAt(float x, float y) const
 {
+    // the whole sign: its model's box, name, price and seats
     for (int i = 0; i < kItems; ++i)
-        if (std::abs(x - kSigns[i].x) <= kSignW * 0.5f && std::abs(y - kSigns[i].y) <= kSignH * 0.5f)
+        if (std::abs(x - kSigns[i].x) <= kSignW * 0.5f && y >= kSigns[i].y - kSignBottom && y <= kSigns[i].y + kModelUp + kModelBox * 0.5f)
             return i;
     return -1;
-}
-
-int SurvivalMode::magazine(int p) const
-{
-    const Seat& s = seat[p & 3];
-    const int m = s.smg ? kSmgRounds : kPistolRounds;
-    return s.bigMag ? m * kBigMag / 2 : m;   // (Big Mag: x 1.5: 9 / 45)
-}
-
-int SurvivalMode::reloadFrames(int p) const
-{
-    const Seat& s = seat[p & 3];
-    const int f = s.smg ? kSmgReload : kPistolReload;
-    return s.quick ? f / 2 : f;
 }
 
 bool SurvivalMode::canBuy(const Runtime& rt, int p, int item) const
@@ -630,29 +911,23 @@ bool SurvivalMode::canBuy(const Runtime& rt, int p, int item) const
     if (item < 0 || item >= kItems || !shopOpen())
         return false;
     const Seat& s = seat[p & 3];
+    const Weapons::Seat& w = rt.weapons.seat[p & 3];
     const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
-    if (pl.state != 5 || s.points < kSigns[item].price)
+    if (pl.state != 5 || s.points < price(item) || price(item) <= 0)
         return false;
+    if (kSigns[item].weapon >= 0)
+        return !w.own[kSigns[item].weapon];
     switch (item) {
-    case Ammo: return s.smg && s.reserve < magazine(p) * kSmgReserveMags;   // (the handgun never runs dry)
-    case Smg: return !s.smg;
+    case Ammo:   // (the reserves of the weapons held; the handgun never runs dry)
+        for (int k = 1; k < kWeapons; ++k)
+            if (w.own[k] && w.reserve[k] < rt.weapons.reserveFull(p, k))
+                return true;
+        return false;
     case Life: return pl.lives < kMaxLives;
-    case Quick: return !s.quick;
-    case BigMag: return !s.bigMag;
+    case Quick: return !w.quick;
+    case BigMag: return !w.bigMag;
     default: return false;
     }
-}
-
-void SurvivalMode::giveSmg(Runtime& rt, int p)
-{
-    Seat& s = seat[p & 3];
-    s.smg = true;
-    s.reload = 0;
-    rt.survivalRounds[p & 3] = magazine(p);
-    s.reserve = magazine(p) * kSmgReserveMags;
-    port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
-    pl.rounds = uint8_t(magazine(p));   // a full magazine at once
-    pl.empty = 0;
 }
 
 bool SurvivalMode::buy(Runtime& rt, int p, int item)
@@ -660,50 +935,75 @@ bool SurvivalMode::buy(Runtime& rt, int p, int item)
     if (!canBuy(rt, p, item))
         return false;
     Seat& s = seat[p & 3];
+    Weapons::Seat& w = rt.weapons.seat[p & 3];
     port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
-    s.points -= kSigns[item].price;
-    s.spent += kSigns[item].price;
+    s.points -= price(item);
+    s.spent += price(item);
     ++s.buys[item];
+    if (const int k = kSigns[item].weapon; k >= 0) {   // a weapon: in the hand at once, full
+        rt.weapons.give(rt, p, k);
+        rt.weapons.select(rt, p, k);
+    }
     switch (item) {
-    case Ammo: s.reserve = magazine(p) * kSmgReserveMags; break;
-    case Smg: giveSmg(rt, p); break;
+    case Ammo:
+        for (int k = 1; k < kWeapons; ++k)
+            if (w.own[k])
+                rt.weapons.refill(rt, p, k);
+        break;
     case Life: ++pl.lives; break;
-    case Quick: s.quick = true; break;
-    case BigMag:
-        s.bigMag = true;
-        rt.survivalRounds[p & 3] = magazine(p);
-        pl.rounds = uint8_t(magazine(p));
+    case Quick: w.quick = true; break;
+    case BigMag:   // (every magazine x 1.5: the one in the hand full at once)
+        w.bigMag = true;
+        rt.survivalRounds[p & 3] = rt.weapons.magazine(p, w.cur);
+        pl.rounds = uint8_t(rt.weapons.magazine(p, w.cur));
         pl.empty = 0;
-        if (s.smg)
-            s.reserve = std::max(s.reserve, magazine(p) * kSmgReserveMags);
+        for (int k = 1; k < kWeapons; ++k)
+            if (w.own[k])
+                w.reserve[k] = std::max(w.reserve[k], rt.weapons.reserveFull(p, k));
         break;
     default: break;
     }
-    char b[64];
-    std::snprintf(b, sizeof b, "%dP BOUGHT %s", p + 1, kSigns[item].name);
-    say(b, 90);
-    rt.sound_cue(0xA01200);   // (the reload's click: the game's own sound for a buy)
+    const std::string what = kSigns[item].weapon >= 0 ? weaponDefs()[size_t(kSigns[item].weapon)].name : kSigns[item].name;
+    say(lang::fmt("{p}P BOUGHT {what}", {{"p", std::to_string(p + 1)}, {"what", lang::tr(what)}}), 90, Tone(Seat1 + (p & 3)));
+    rt.sound_cue(0xA01351);   // (the life item's pick-up sound: the game's own for a buy)
     if (rt.log)
-        rt.log("survival: " + std::string(b) + " (" + std::to_string(s.points) + " left) at frame " + std::to_string(rt.frameCount));
+        rt.log("survival: " + std::to_string(p + 1) + "P bought " + what + " (" + std::to_string(s.points) + " left) at frame " +
+               std::to_string(rt.frameCount));
     return true;
 }
 
 // the test players' shopping (the self-test, the balance runs; what a sensible player does): the SMG first, ammo when
-// its reserve is under two magazines, a life when one was lost, then Quick Reload, Big Mag, lives up to the most
+// a reserve is under two magazines, a life when one was lost, Quick Reload, Big Mag, then the other weapons, lives
 int SurvivalMode::testBuy(const Runtime& rt, int p) const
 {
-    const Seat& s = seat[p & 3];
+    const Weapons::Seat& w = rt.weapons.seat[p & 3];
     const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
     if (canBuy(rt, p, Smg)) return Smg;
-    if (s.smg && s.reserve < magazine(p) * 2 && canBuy(rt, p, Ammo)) return Ammo;
+    // the balance runs (survfix2): HOTD_SURVIVAL_BUYER=saver: after the SMG every point saved for the Magician's Hand;
+    // =upgrades: the SMG, ammo when low, Quick Reload, Big Mag, then saved for the Hand
+    static const char* buyer = survivalEnv("BUYER");
+    if (buyer && seat[p & 3].buys[Hand] == 0) {
+        if (std::strcmp(buyer, "upgrades") == 0) {
+            if (w.own[kSmg] && w.reserve[kSmg] < rt.weapons.magazine(p, kSmg) * 2 && canBuy(rt, p, Ammo)) return Ammo;
+            if (canBuy(rt, p, Quick)) return Quick;
+            if (w.quick && canBuy(rt, p, BigMag)) return BigMag;
+            if (!w.quick || !w.bigMag) return -1;
+        }
+        return canBuy(rt, p, Hand) ? Hand : -1;
+    }
+    for (int k = 1; k < kWeapons; ++k)
+        if (w.own[k] && w.reserve[k] < rt.weapons.magazine(p, k) * 2 && canBuy(rt, p, Ammo)) return Ammo;
     if (pl.lives < kLives && canBuy(rt, p, Life)) return Life;
     if (canBuy(rt, p, Quick)) return Quick;
     if (canBuy(rt, p, BigMag)) return BigMag;
+    for (const int it : {Rifle, Dual, Shotgun, Hand})
+        if (canBuy(rt, p, it)) return it;
     if (canBuy(rt, p, Life)) return Life;
     return -1;
 }
 
-// each frame (frozen): a seat first in play gets at most kLives; the magazines; the SMG flag; the score = the points earned
+// each frame (frozen): a seat first in play gets at most kLives; the weapons flag; the score = the points earned; the
+// shop's models (the weapons' overlay draws them over the signs in the break)
 void SurvivalMode::seats(Runtime& rt)
 {
     bool any = false;
@@ -716,20 +1016,133 @@ void SurvivalMode::seats(Runtime& rt)
                 pl.lives = kLives;
             pl.lives_saved = pl.lives;
         }
-        rt.survivalRounds[p] = magazine(p);
-        if (pl.rounds > magazine(p))
-            pl.rounds = uint8_t(magazine(p));
+        if (pl.state == 5 && s.returning && p < 4) {
+            // survrevive: back in play (the join's first frame): the magazine it had in the hand (the join's full gun
+            // would be a free refill), then the test's check: the start lives, half the points, every weapon still held
+            s.returning = false;
+            Weapons::Seat& w = rt.weapons.seat[p];
+            pl.rounds = uint8_t(std::clamp(s.outRounds, 0, rt.weapons.magazine(p, w.cur)));
+            pl.empty = pl.rounds == 0 ? 1 : 0;
+            w.mag[w.cur] = pl.rounds;
+            unsigned owned = 0;
+            for (int k = 0; k < kWeapons; ++k)
+                owned |= w.own[k] ? 1u << k : 0u;
+            const bool ok = pl.lives == startLives(rt) && s.points == s.outPoints / 2 / kHitPoints * kHitPoints && (s.outOwned & ~owned) == 0;
+            reviveOk = reviveOk && ok;
+            if (rt.log)
+                rt.log("survival: " + std::to_string(p + 1) + "P is back at frame " + std::to_string(rt.frameCount) + ": lives " +
+                       std::to_string(pl.lives) + ", points " + std::to_string(s.points) + " (half of " + std::to_string(s.outPoints) +
+                       "), weapons " + std::to_string(owned) + " (had " + std::to_string(s.outOwned) + "), players in game " +
+                       std::to_string(rt.mem.at<int16_t>(G::players_in_game)) + " / " + std::to_string(rt.mem.at<int16_t>(G::players_in_game_b)) +
+                       ", " + (ok ? "ok" : "FAIL"));
+        }
         pl.score = s.earned;
-        any = any || s.smg;
+        if (pl.state == 5 && pl.lives < lastLives_[p] && phase == Wave && !stats.empty())
+            stats.back().hurt += lastLives_[p] - pl.lives;
+        lastLives_[p] = pl.state == 5 ? pl.lives : 0;
+        for (int w = 1; w < kWeapons && p < 4; ++w)
+            any = any || rt.weapons.seat[p].own[w];
     }
     smgOn = any;
+    rt.weapons.shopItems.clear();
+    if (shopOpen())
+        for (int i = 0; i < kItems; ++i)
+            rt.weapons.shopItems.push_back({kSigns[i].model, kSigns[i].x, kSigns[i].y + kModelUp + kSigns[i].lift, kSigns[i].scale});
+}
+
+// a seat's lives at its start: the Lives setting's start lives (0x51F5B1, what a join gives), at most kLives (seats())
+int SurvivalMode::startLives(const Runtime& rt)
+{
+    return std::min<int>(rt.mem.at<uint8_t>(0x51F5B1), kLives);
+}
+
+// survrevive: seat p (state 4: its last life lost) out until the next round. No CONTINUE? and no countdown: straight to
+// waiting (state 9, as the arcade's seat after its countdown ran out and its GAME OVER), but its start button held
+// (Game::seatsHeldOut: player_start_check / coop4_seat_frame) and no PRESS START (hud_start_prompt, the 4P HUD). Its
+// gun is off while it waits (no state 5: no shots, no aim, no shop), its points frozen (only state 5 seats hit)
+void SurvivalMode::goOut(Runtime& rt, int p)
+{
+    Seat& s = seat[p];
+    port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
+    s.out = true, s.returning = false;
+    s.outPoints = s.points, s.outRound = wave, s.outRounds = pl.rounds;
+    s.outOwned = 0;
+    for (int k = 0; k < kWeapons; ++k)
+        s.outOwned |= rt.weapons.seat[p].own[k] ? 1u << k : 0u;
+    ++outN;
+    rt.seatsHeldOut = uint8_t(rt.seatsHeldOut | (1u << p));
+    pl.continue_timer = 0;
+    if (p < 2) {
+        // players 1 / 2: their task to the waiting routine (player_state_set's table) and one player fewer in the
+        // attack tables, as player_continue_frame does when the countdown runs out (4P: game_play counts every frame)
+        if (!rt.coop4_on())
+            rt.mem.at<int16_t>(G::players_in_game_b) = int16_t(rt.mem.at<int16_t>(G::players_in_game_b) - 1);
+        const uint32_t task = rt.mem.u32(rt.player_rec(p) + 0xA4);
+        rt.hud_player_full_draw(task);   // (its frame, torches and bullets off, as player_st4_out_of_lives does)
+        rt.player_state_set(9, 1, task);
+    } else {
+        pl.state = 9;   // (seats 3 / 4: coop4_seat_frame reads the state)
+    }
+    if (rt.log)
+        rt.log("survival: " + std::to_string(p + 1) + "P is out in round " + std::to_string(wave) + " at frame " + std::to_string(rt.frameCount) +
+               " (points " + std::to_string(s.points) + ", no continue): back next round; players in game " +
+               std::to_string(rt.mem.at<int16_t>(G::players_in_game)) + " / " + std::to_string(rt.mem.at<int16_t>(G::players_in_game_b)));
+}
+
+// survrevive: seat p back at a round's start (startWave, with the round's banner): the Survival start lives (seats():
+// livesSet), half the points it had when it went out (down to the points' step, kHitPoints = 10), its weapons as they
+// were (Survival keeps them), the magazine in its hand as it was (seats(): returning). Players 1 / 2 join through the
+// game's own start (state 3: player_st3_join -> PlStartInit's join row: the counters, a full gun, the join's
+// invulnerability; held by the camera: state 10 with 3 next, as player_start_check), players 3 / 4 through
+// coop4_seat_start. Deterministic: only game state (no input, no random), the same on every PC
+void SurvivalMode::comeBack(Runtime& rt, int p)
+{
+    Seat& s = seat[p];
+    port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
+    s.out = false, s.returning = true, s.livesSet = false;
+    s.points = s.outPoints / 2 / kHitPoints * kHitPoints;
+    rt.seatsHeldOut = uint8_t(rt.seatsHeldOut & ~(1u << p));
+    rt.livesKeptSkip = uint8_t(rt.livesKeptSkip & ~(1u << p));
+    ++backN;
+    if (pl.state == 9) {
+        if (p < 2) {
+            const uint32_t task = rt.mem.u32(rt.player_rec(p) + 0xA4);
+            rt.mem.set32(0x51F430, 1);   // the join flag (player_waiting_frame; player_st3_join clears it)
+            if (rt.mem.at<uint8_t>(G::camera_status) & 1) {
+                rt.player_state_set(3, 1, task);
+            } else {
+                rt.mem.set32(rt.player_rec(p) + 0x80, 3);
+                rt.player_state_set(10, 1, task);
+            }
+            rt.sound_send3(0xA01354);   // (the start's gun-cock, as player_start_check)
+        } else {
+            rt.coop4_seat_start(p);
+        }
+    }
+    rt.weapons.notice[p] = lang::fmt("{p}P IS BACK", {{"p", std::to_string(p + 1)}});
+    rt.weapons.noticeUntil[p] = rt.frameCount + 180;
+    if (rt.log)
+        rt.log("survival: " + std::to_string(p + 1) + "P comes back in round " + std::to_string(wave) + " at frame " + std::to_string(rt.frameCount) +
+               " with " + std::to_string(s.points) + " points (half of " + std::to_string(s.outPoints) + ")");
 }
 
 void SurvivalMode::hits(Runtime& rt, uint32_t obj, uint32_t seatsHit, int killer, uint32_t headSeats)
 {
-    (void)obj;
     if (!frozen || phase == Over)
         return;
+    // (the balance runs: the time to kill, from the creature's first hit to its death, by the killer's weapon)
+    auto first = std::find_if(firstHits.begin(), firstHits.end(), [&](const FirstHit& f) { return f.obj == obj; });
+    if (first == firstHits.end()) {
+        firstHits.push_back({obj, rt.frameCount});
+        first = firstHits.end() - 1;
+    }
+    if (killer >= 0 && killer < 4) {
+        const int w = std::clamp(rt.weapons.seat[killer].cur, 0, 7);
+        ttkFrames[w] += (long long)(rt.frameCount - first->frame), ++ttkKills[w];
+        firstHits.erase(first);
+    }
+    if (firstHits.size() > 256)   // (the ones that left unkilled)
+        firstHits.erase(firstHits.begin(), firstHits.begin() + 128);
     for (int p = 0; p < 4; ++p) {
         if (((seatsHit >> p) & 1) == 0)
             continue;
@@ -747,71 +1160,25 @@ void SurvivalMode::hits(Runtime& rt, uint32_t obj, uint32_t seatsHit, int killer
         rt.mem.at<port::a::Player>(rt.player_rec(p)).score = seat[p].earned;
 }
 
-// the gun of seat p before the game reads it (Runtime::input_task_stand_in): only while the arena is held
+// the gun of seat p before the game reads it (Runtime::input_task_stand_in): only while the arena is held. The shop: a
+// shot at a sign (or its model) buys it, the shot not fired. The rest (the switch, the reload by hand, the held fire)
+// is the weapons' (Weapons::gunInput, right after)
 void SurvivalMode::gunInput(Runtime& rt, int p, bool& trigger, bool onScreen, bool held, float x, float y)
 {
+    (void)held;
     if (!frozen || phase == Over || p < 0 || p > 3)
         return;
     Seat& s = seat[p];
-    port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
-    if (pl.state != 5)
+    if (rt.mem.at<port::a::Player>(rt.player_rec(p)).state != 5)
         return;
-    rt.survivalRounds[p] = magazine(p);
-    // the shop: a shot at a sign buys it (the shot is not fired)
     if (shopOpen() && trigger && onScreen) {
         if (const int i = signAt(x, y); i >= 0) {
             trigger = false;
-            if (!buy(rt, p, i))
-                say(std::to_string(p + 1) + "P: " + kSigns[i].name + (s.points < kSigns[i].price ? " - NOT ENOUGH POINTS" : " - NOT NOW"), 60);
-            return;
-        }
-    }
-    // the reload in progress: the gun does nothing until it is done; then the magazine (the SMG's from its reserve)
-    if (s.reload > 0) {
-        trigger = false;
-        s.smgTimer = 0, s.smgBurst = 0;
-        if (--s.reload == 0) {
-            const int mag = magazine(p);
-            if (s.smg) {
-                const int take = std::min(mag - int(pl.rounds), s.reserve);
-                s.reserve -= std::max(0, take);
-                pl.rounds = uint8_t(int(pl.rounds) + std::max(0, take));
-            } else {
-                pl.rounds = uint8_t(mag);
+            if (!buy(rt, p, i)) {
+                const std::string what = kSigns[i].weapon >= 0 ? weaponDefs()[size_t(kSigns[i].weapon)].name : kSigns[i].name;
+                say(lang::fmt(s.points < price(i) ? "{p}P {what} NOT ENOUGH POINTS" : "{p}P {what} NOT NOW",
+                              {{"p", std::to_string(p + 1)}, {"what", lang::tr(what)}}), 60);
             }
-            pl.empty = pl.rounds == 0 ? 1 : 0;
-        }
-        return;
-    }
-    const bool shots = rt.mem.at<int16_t>(G::game_mode) == 4 && rt.mem.u32(G::shot_enable) != 0;
-    // a pull off the screen (or the reload button): the reload by hand, which takes reloadFrames (never by itself:
-    // the launcher's Auto Reload is off in Survival, main.cpp autoReloadSeats). The SMG with nothing left: the handgun
-    if (trigger && !onScreen && shots) {
-        trigger = false;   // (the game's own instant reload not run: player_shoot / the input's refill)
-        if (s.smg && s.reserve == 0 && pl.rounds == 0) {
-            s.smg = false;
-            say(std::to_string(p + 1) + "P: SMG EMPTY", 90);
-        }
-        if (int(pl.rounds) >= magazine(p))
-            return;
-        s.reload = reloadFrames(p);
-        reloadSeat = p;
-        rt.sound_cue(0xA01200);
-        return;
-    }
-    // the SMG: a held trigger on the screen fires every kSmgPeriod frames; a pull from an input that cannot tell held
-    // (pads, light guns): a burst of kSmgBurst
-    if (s.smg) {
-        if (trigger && onScreen) {
-            s.smgTimer = 0;
-            s.smgBurst = kSmgBurst - 1;
-        } else if (onScreen && (held || s.smgBurst > 0) && ++s.smgTimer >= kSmgPeriod) {
-            trigger = true;
-            s.smgTimer = 0;
-            if (!held && s.smgBurst > 0)
-                --s.smgBurst;
-        } else if (!onScreen) {
-            s.smgBurst = 0;
         }
     }
 }
@@ -846,7 +1213,7 @@ std::string survivalSoundDir()
     static const std::string dir = [] {   // (looked up once: the data folders are set at the start)
         namespace fs = std::filesystem;
         std::error_code ec;
-        for (const char* sub : {"survival", "horde"})   // (data/horde: the folder's name before the mode was renamed)
+        for (const char* sub : {"survival"})
             for (const std::string& d : lang::dataDirs())
                 if (fs::is_directory(fs::path(d) / "data" / sub, ec))
                     return (fs::path(d) / "data" / sub).string();
@@ -857,14 +1224,11 @@ std::string survivalSoundDir()
 
 const char* survivalEnv(const char* name)
 {
-    if (const char* v = std::getenv((std::string("HOTD_SURVIVAL_") + name).c_str()))
-        return v;
-    return std::getenv((std::string("HOTD_HORDE_") + name).c_str());
+    return std::getenv((std::string("HOTD_SURVIVAL_") + name).c_str());
 }
 
 // the sounds of Survival Mode (sound_cue's first look): the lead-in plays nothing (its last music start is kept for the
-// arena); with the SMG its shots and reload are its own sounds (data/survival/smg_fire.wav / smg_reload.wav, else
-// stand-ins: the handgun's shot (PC cue 30) faster and cut short, the reload (cue 28) lower). true: handled
+// arena). The weapons' own shots and reloads: Weapons::cue (game/weapons.h). true: handled
 bool Runtime::survival_cue(uint32_t cue)
 {
     if (survival.leadIn()) {
@@ -872,24 +1236,6 @@ bool Runtime::survival_cue(uint32_t cue)
             survivalMusic_ = cue;
         return true;
     }
-    if (!survival.smgOn)
-        return false;
-    const std::string& dir = survivalSoundDir();
-    if (cue == 0xA01208 || cue == 0xA01207) {   // player_shoot's shot (players 1 / 2): the SMG's when that seat has it
-        if (!survival.seat[cue == 0xA01208 ? 0 : 1].smg)
-            return false;
-        // relfix2 (user 2026-11-03): nothing to play (no file, no PC sound bank for the stand-in): the handgun's own
-        // shot instead (the board's or the PC's), never silence. HOTD_SURVIVAL_SMG_SILENT (testing): the SMG's shots
-        // unheard (a WAV of the same run without them: the difference is the SMG's sound alone)
-        static const bool silent = survivalEnv("SMG_SILENT") != nullptr;
-        const bool ok = silent || (audio && audio->playExtra(dir, kSurvivalSfx[0], 30, 1.4f, 0.4f, 0.9f));
-        if (audio && audio->traceCues)
-            std::printf("[sound %llu] 0x%06X -> SMG shot: %s\n", (unsigned long long)audio->frameNo, cue,
-                        silent ? "silent (test)" : ok ? audio->extraSource(kSurvivalSfx[0]).c_str() : "the handgun's");
-        return ok;
-    }
-    if (cue == 0xA01200 && survival.seat[survival.reloadSeat & 3].smg)   // the reload (the SMG's); none: the handgun's
-        return audio && audio->playExtra(dir, kSurvivalSfx[1], 28, 0.8f, 1.0f);
     return false;
 }
 

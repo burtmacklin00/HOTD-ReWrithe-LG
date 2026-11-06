@@ -8,6 +8,7 @@
 #include "game/player_colours.h"
 #include "game/sights.h"
 #include "util/png_read.h"
+#include "render/gamma.h"
 #include "render/gl.h"
 
 #include <algorithm>
@@ -27,10 +28,11 @@ namespace {
 
 const char* kVs = R"(#version 330 core
 uniform vec4 uRect;   // x, y, w, h in normalized device coordinates (y up)
+uniform vec4 uUV;     // wide2d: the texture's u at the quad's left / right, v at its bottom / top (0, 1, 1, 0: the picture)
 out vec2 vUV;
 void main() {
     vec2 c = vec2(gl_VertexID & 1, gl_VertexID >> 1);
-    vUV = vec2(c.x, 1.0 - c.y);
+    vUV = vec2(mix(uUV.x, uUV.y, c.x), mix(uUV.z, uUV.w, c.y));
     gl_Position = vec4(uRect.xy + c * uRect.zw, 0.0, 1.0);
 }
 )";
@@ -150,8 +152,10 @@ bool Hud::init(std::string& err)
     }
     uRect_ = gl::GetUniformLocation(program_, "uRect");
     uTint_ = gl::GetUniformLocation(program_, "uTint");
+    uUV_ = gl::GetUniformLocation(program_, "uUV");
     gl::UseProgram(program_);
     gl::Uniform1i(gl::GetUniformLocation(program_, "uTex"), 0);
+    gl::Uniform4f(uUV_, 0.0f, 1.0f, 1.0f, 0.0f);   // (wide2d: the whole picture; upload's wide modes set and restore it)
     gl::GenVertexArrays(1, &vao_);
     gl::GenTextures(1, &texture_);
     return true;
@@ -173,10 +177,30 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
 {
     port::Mem& mem = rt.mem;
     const int W = assets::Arcade2D::kWidth, H = assets::Arcade2D::kHeight;
-    const bool sides = anchorEdges && !rt.clear.active && std::any_of(rt.cellSide.begin(), rt.cellSide.end(), [](uint8_t s) { return s != 0; });
+    int wideW = 0;
+    const int wide = wideScreen(rt, ww, wh, wideW);   // wide2d (a 4:3-only screen: one picture, widened below)
+    const bool sides = anchorEdges && !rt.clear.active && wide == kWideNone &&
+                       std::any_of(rt.cellSide.begin(), rt.cellSide.end(), [](uint8_t s) { return s != 0; });
     const uint8_t* tiles = !(clean || noText || subHide_) ? mem.ptr(kTileRam) : composed ? tilesCopy_.data() : filteredTiles(rt);   // (composed: drawUnder filtered it)
     if (!composed)
         tiles = withoutP2Notice(rt, tiles);
+    if (wide == kWideCard || wide == kWidePicture) {
+        // wide2d (wideScreen): bottom to top as the layers' order (3, 2, 1, 0): layers 3 / 2 (the card, the picture)
+        // extended to wideW; a card's layer 1 (the film's scratches) stretched across it; the rest as it is
+        const bool card = wide == kWideCard;
+        const struct { unsigned layers; int mode; } parts[3] = {{0xCu, 2}, {card ? 0x2u : 0u, 1}, {card ? 0x1u : 0x3u, 0}};
+        bool any = false;
+        for (const auto& part : parts) {
+            if (!part.layers || !composeLayers(rt, tiles, high, part.layers, rgba_))
+                continue;
+            std::vector<uint8_t>* pic[1] = {&rgba_};
+            translucent2D(rt, tiles, high, pic, 1);
+            rainbow2D(rt, tiles, high, pic, 1);
+            upload(rgba_, W, H, ww, wh, 0.0f, false, part.mode, wideW);
+            any = true;
+        }
+        return any;
+    }
     if (!sides) {
         if (!composed && !assets::Arcade2D::compose(tiles, mem.ptr(kCharRam), mem.ptr(kPalShadow), high, rgba_))
             return false;
@@ -438,32 +462,211 @@ bool Hud::drawUnder(const Runtime& rt, int ww, int wh, const float clear[3])
     return true;
 }
 
-// one RGBA picture of the screen over the 3D view: the view fits the screen's height (GameView::fromArcade), centred
-void Hud::upload(const std::vector<uint8_t>& rgba, int W, int H, int ww, int wh, float dx, bool fit)
+// one RGBA picture of the screen over the 3D view: the view fits the screen's height (GameView::fromArcade), centred.
+// wide2d: wide 1 stretches it across wideW window pixels (centred); wide 2 keeps its scale and extends it to wideW by
+// repeating its left / right columns (the texture's clamp: a row whose edge pixel is see-through stays see-through);
+// wide 3 shows the middle wideW pixels of a picture wider than that (tileExtend)
+void Hud::upload(const std::vector<uint8_t>& rgba, int W, int H, int ww, int wh, float dx, bool fit, int wide, int wideW)
 {
     gl::BindTexture(gl::TEXTURE_2D, texture_);
     gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
     gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, W, H, 0, gl::RGBA, gl::UNSIGNED_BYTE, rgba.data());
+    const float s = fit ? std::min(float(ww) / float(W), float(wh) / float(H)) : float(wh) / float(H);
+    // GitHub #43 (2026-11-04: "bilinear filtering is applied to HUD elements"; MAME 0.286 vs 1.1): the 2D layer (the HUD,
+    // the title, the cards) is the tilemap's pixels, never filtered on the arcade (only the 3D's texels are): magnified
+    // twice or more its pixels stay sharp (nearest); smaller windows keep the smooth scale (nearest there makes
+    // uneven 1 / 2 pixel columns)
     gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR);
-    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR);
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, s >= 2.0f ? gl::NEAREST : gl::LINEAR);
     gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE);
     gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE);
-    const float s = fit ? std::min(float(ww) / float(W), float(wh) / float(H)) : float(wh) / float(H);
-    const float pw = float(W) * s, x0 = float(ww) / 2.0f - pw / 2.0f + dx;
+    float pw = float(W) * s, x0 = float(ww) / 2.0f - pw / 2.0f + dx;
     const float ph = float(H) * s, y0 = (float(wh) - ph) / 2.0f;   // (fit: letterboxed; else 0)
+    float u0 = 0.0f, u1 = 1.0f;
+    const bool widened = wide == 3 ? float(wideW) < pw - 0.5f : wide != 0 && float(wideW) > pw + 0.5f;
+    if (widened) {
+        if (wide == 3) {   // (a picture wider than wideW: its middle wideW)
+            const float e = float(wideW) / pw;
+            u0 = 0.5f - e / 2.0f, u1 = 0.5f + e / 2.0f;
+        } else if (wide == 2) {   // (the picture's scale kept: the texture coordinates run past its edges)
+            const float e = (float(wideW) - pw) / 2.0f / pw;
+            u0 = -e, u1 = 1.0f + e;
+        }
+        pw = float(wideW);
+        x0 = float(ww) / 2.0f - pw / 2.0f + dx;
+    }
     gl::Viewport(0, 0, ww, wh);
     gl::Disable(gl::DEPTH_TEST);
     gl::Enable(gl::BLEND);
     gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
     gl::UseProgram(program_);
     gl::Uniform4f(uRect_, -1.0f + 2.0f * x0 / float(ww), -1.0f + 2.0f * y0 / float(wh), 2.0f * pw / float(ww), 2.0f * ph / float(wh));
+    if (widened)
+        gl::Uniform4f(uUV_, u0, u1, 1.0f, 0.0f);
     gl::ActiveTexture(gl::TEXTURE0);
     gl::BindTexture(gl::TEXTURE_2D, texture_);
     gl::BindVertexArray(vao_);
     gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
     gl::BindVertexArray(0);
+    if (widened)
+        gl::Uniform4f(uUV_, 0.0f, 1.0f, 1.0f, 0.0f);
     gl::Disable(gl::BLEND);
     gl::Enable(gl::DEPTH_TEST);
+}
+
+// wide2d (user 2026-11-03: "the chapter intro / title cards, the ranking / results cards and other full-screen 2D
+// pictures" stay 4:3; they may be stretched to fill a wide window, up to 16:9 and 16:10, wider windows pillarboxed past
+// 16:9; a plain or tiling background is better extended than distorted, the words kept in shape; only the game's own
+// pixels). The screens (all made for the 496 x 384 screen alone; the 3D around them is not part of them):
+//   kWideCard: a chapter's title card (kind177_chapter_card: evt_clrgfst_flags 0x20): layer 2 the white card with the
+//     title and its pen strokes (extended: the white and the strokes running off its left edge go on), layer 1 the film
+//     scratches over it (kind177_chapter_card_frame's sprites 0x7D..0x7F: stretched, so the film covers the whole width)
+//   kWidePicture: a whole-screen picture on layer 2, extended: the GAME OVER card (sprite 0x106, white; the game over's
+//     sub-mode 5 and the ending's last card) and the game over's route map (0x243 / 0x244, black, under the 3D walker)
+//   kWideWall: the chapter clear's results (Runtime::clear, 3D: a wall of steel plates made exactly as wide as the 4:3
+//     screen, the stage's set beside it): the sides tiled with its own plates (tileExtend)
+// The PC models draw the same cells with the PC's pictures (drawPc2D): the same layers are widened.
+int Hud::wideScreen(const Runtime& rt, int ww, int wh, int& wideW) const
+{
+    wideW = 0;
+    if (!widescreen || !widen2D || pauseSelection >= 0)
+        return kWideNone;
+    wideW = std::min(areaW(ww, wh), int(std::lround(double(wh) * 16.0 / 9.0)));
+    if (wideW <= int(std::lround(double(wh) * 496.0 / 384.0)) + 1)
+        return kWideNone;
+    port::Mem& mem = rt.mem;
+    if (mem.mapped(G::evt_clrgfst_flags) && (mem.u32(G::evt_clrgfst_flags) & 0x20u) != 0)
+        return kWideCard;
+    if (rt.clear.active)
+        return kWideWall;
+    const int16_t mode = mem.at<int16_t>(G::game_mode);
+    if (mode == 4 || mode == 5) {
+        const uint32_t* l2 = &rt.pcCells[size_t(2 * Runtime::kPcRows) * 64];
+        for (int i = 0; i < Runtime::kPcRows * 64; ++i) {
+            const uint32_t v = l2[i];
+            if (v == (0x106u | 0x10000u) || v == (0x243u | 0x10000u) || v == (0x244u | 0x10000u))
+                return kWidePicture;
+        }
+    }
+    return kWideNone;
+}
+
+bool Hud::composeLayers(const Runtime& rt, const uint8_t* tiles, bool high, unsigned layers, std::vector<uint8_t>& out)
+{
+    layerTiles_.assign(tiles, tiles + 0x10000);
+    for (int l = 0; l < 4; ++l)
+        if (!(layers >> l & 1u))
+            layerTiles_[size_t(0xA008 + 2 * l + 1)] |= 0x80;   // (the layer's y scroll bit 15: off)
+    return assets::Arcade2D::compose(layerTiles_.data(), rt.mem.ptr(kCharRam), rt.mem.ptr(kPalShadow), high, out);
+}
+
+// wide2d: a tiling picture (the chapter clear's wall of steel plates on layers 2 / 3, a plate every 128 arcade pixels
+// across, with the hole the researchers' photo shows through and the photo's shadow on it) extended to wideW by
+// repeating its own tile. The periods across and down (multiples of 8 pixels, a cell: the smallest whose shifted
+// copy matches nearly as well as the best, where both pixels are drawn) are found in the picture itself; a side pixel
+// takes the picture's drawn pixel in the same phase (x + i x period, y + j x period down) farthest from its see-through
+// part (the photo's hole: its frame and shadow lie around it; a tie: the column nearest the side's edge), so the
+// plates go on clean. sidesOnly: the picture's own part left see-through (the arcade's wall is drawn over its sides before the 2D layer, over the stage's set beside the 4:3 screen, which is not
+// part of the screen). False: no tiling found (nothing drawn)
+namespace {
+int tilePeriod(const uint32_t* px, int W, int H, bool down)
+{
+    const int n = down ? H : W;
+    int best = 0;
+    std::vector<int> score(size_t(n / 2 + 1), 0);
+    for (int p = 8; p <= n / 2; p += 8) {
+        long same = 0, all = 0;
+        for (int y = 0; y + (down ? p : 0) < H; y += 2)
+            for (int x = 0; x + (down ? 0 : p) < W; x += 2) {
+                const uint32_t a = px[size_t(y) * W + size_t(x)], b = down ? px[size_t(y + p) * W + size_t(x)] : px[size_t(y) * W + size_t(x + p)];
+                if ((a >> 24) == 0 || (b >> 24) == 0)
+                    continue;
+                ++all;
+                same += a == b;
+            }
+        score[size_t(p)] = all > long(W) * H / 64 ? int(same * 1000 / all) : 0;
+        best = std::max(best, score[size_t(p)]);
+    }
+    if (best < 600)
+        return 0;
+    for (int p = 8; p <= n / 2; p += 8)
+        if (score[size_t(p)] * 100 >= best * 95)
+            return p;
+    return 0;
+}
+} // namespace
+
+bool Hud::tileExtend(const std::vector<uint8_t>& pic, int W, int H, int ww, int wh, int wideW, bool sidesOnly)
+{
+    if (pic.size() != size_t(W) * H * 4)
+        return false;
+    const uint32_t* const src = reinterpret_cast<const uint32_t*>(pic.data());
+    const int pw = tilePeriod(src, W, H, false), ph = tilePeriod(src, W, H, true);
+    if (!pw)
+        return false;
+    // the extension in the picture's own pixels: E columns a side (the window's wideW at the picture's scale)
+    const float s = float(wh) / float(H);
+    const int E = std::max(0, int(std::ceil((float(wideW) / s - float(W)) / 2.0f)));
+    if (E == 0)
+        return true;
+    const int WE = W + 2 * E;
+    wideExt_.assign(size_t(WE) * H * 4, 0);
+    uint32_t* out = reinterpret_cast<uint32_t*>(wideExt_.data());
+    // each pixel's distance (4-neighbour steps) from the nearest see-through one (two passes)
+    std::vector<uint16_t> dist(size_t(W) * H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            const size_t i = size_t(y) * W + size_t(x);
+            int d = (src[i] >> 24) == 0 ? 0 : 0xFFFF;
+            if (d && x > 0) d = std::min(d, dist[i - 1] + 1);
+            if (d && y > 0) d = std::min(d, dist[i - size_t(W)] + 1);
+            dist[i] = uint16_t(d);
+        }
+    for (int y = H - 1; y >= 0; --y)
+        for (int x = W - 1; x >= 0; --x) {
+            const size_t i = size_t(y) * W + size_t(x);
+            int d = dist[i];
+            if (x + 1 < W) d = std::min(d, dist[i + 1] + 1);
+            if (y + 1 < H) d = std::min(d, dist[i + size_t(W)] + 1);
+            dist[i] = uint16_t(d);
+        }
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < WE; ++x) {
+            const int sx = x - E;
+            if (sx >= 0 && sx < W) {
+                if (!sidesOnly)
+                    out[size_t(y) * WE + size_t(x)] = src[size_t(y) * W + size_t(sx)];
+                continue;
+            }
+            const int x0 = ((sx % pw) + pw) % pw, y0 = ph ? y % ph : y;
+            uint32_t cand[64];
+            int cd[64], n = 0;
+            const int blocks = (W - 1 - x0) / pw;   // (the columns nearest the side's own edge first)
+            for (int b = 0; b <= blocks; ++b) {
+                const int cx = x0 + (sx < 0 ? b : blocks - b) * pw;
+                for (int cy = ph ? y0 : y; cy < H && n < 64; cy += ph ? ph : H) {
+                    const size_t i = size_t(cy) * W + size_t(cx);
+                    if (dist[i] > 0)
+                        cand[n] = src[i], cd[n++] = dist[i];
+                }
+            }
+            // the colour the most candidates clear of the hole's edge (8 pixels: its frame) share (the shadow's pixels
+            // differ from one another), then the one farthest from the hole
+            uint32_t pick = 0;
+            int best = -1;
+            for (int i = 0; i < n; ++i) {
+                int same = 0;
+                for (int j = 0; j < n; ++j)
+                    same += cd[i] >= 8 && cd[j] >= 8 && cand[j] == cand[i];
+                const int score = same * 4096 + std::min(cd[i], 4095);
+                if (score > best)
+                    pick = cand[i], best = score;
+            }
+            out[size_t(y) * WE + size_t(x)] = pick;
+        }
+    // drawn at the picture's scale, its middle over the 4:3 screen, cut to wideW (the texture wider than that)
+    upload(wideExt_, WE, H, ww, wh, 0.0f, false, 3, wideW);
+    return true;
 }
 
 // a full-width band of window rows [y0, y1) (y down) in one colour
@@ -553,6 +756,19 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
     constexpr int kRows = Runtime::kPcRows;
     const int16_t mode = mem.at<int16_t>(G::game_mode);
     const bool inGame = mode == 4 || mode == 5;
+    // wide2d (wideScreen): a 4:3-only screen's layers 3 / 2 into wideBg_ (extended to wideW), a card's layer 1 (the
+    // film) into wideTop_ (stretched across it), the rest into rgba_ as usual; no corner canvases then. The PC's
+    // chapter clear wall (its own 640 x 480 picture, no whole-pixel tile): layers 3 / 2 stretched across wideW
+    // (wideTop_; the user: "can't you just stretch it?"), the photo and the text on the other layers stay 4:3
+    int wideW = 0;
+    const int wideKind = wideScreen(rt, ww, wh, wideW);
+    const bool wallPc = wideKind == kWideWall && rt.pcModels;
+    const bool wide = wideKind == kWideCard || wideKind == kWidePicture || wallPc;
+    bool anyBg = false, anyTop = false;
+    if (wide) {
+        wideBg_.assign(size_t(W) * H * 4, 0);
+        wideTop_.assign(size_t(W) * H * 4, 0);
+    }
     for (int l = 3; l >= 0 && !clean; --l) {   // (Clean View / Trailer Mode: no sprites)
         if ((l & 1) && (!mem.mapped(kTileRam) || mem.u32(l < 2 ? 0x100C000 : 0x100D000) == 0))
             continue;
@@ -598,11 +814,12 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
                 if (!id)
                     continue;
                 // display2: a corner's sprite goes to its side canvas, moved to the window's edge below
-                const int side = anchorEdges && !rt.clear.active ? rt.cellSide[ci] : 0;
+                const int side = anchorEdges && !rt.clear.active && !wide ? rt.cellSide[ci] : 0;
                 if (side && sideRgba_[side - 1].size() != size_t(W) * H * 4)
                     sideRgba_[side - 1].assign(size_t(W) * H * 4, 0);
-                std::vector<uint8_t>& canvas = side ? sideRgba_[side - 1] : rgba_;
-                (side ? sideAny[side - 1] : any) = true;
+                const int wl = !wide ? 0 : wallPc ? (l >= 2 ? 2 : 0) : l >= 2 ? 1 : l == 1 && wideKind == kWideCard ? 2 : 0;   // (wide2d)
+                std::vector<uint8_t>& canvas = side ? sideRgba_[side - 1] : wl == 1 ? wideBg_ : wl == 2 ? wideTop_ : rgba_;
+                (side ? sideAny[side - 1] : wl == 1 ? anyBg : wl == 2 ? anyTop : any) = true;
                 const int px = sx * 10 / 8, py = sy * 10 / 8;
                 if (rbOn && (rt.cellHud[ci] == 2 || (rt.cellHud[ci] == 1 && rbHud)))   // rainbow2
                     rbTint(rt.cellHud[ci], sx, sy);
@@ -854,6 +1071,10 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
         any = true;
     }
     pcSprites_.setBloodTexelTint(nullptr);   // (rainbow2)
+    if (anyBg)   // (wide2d)
+        upload(wideBg_, W, H, ww, wh, 0.0f, false, 2, wideW);
+    if (anyTop)
+        upload(wideTop_, W, H, ww, wh, 0.0f, false, 1, wideW);
     if (any)
         upload(rgba_, W, H, ww, wh);
     const float x0 = leftEdge(W, H, ww, wh);
@@ -1097,40 +1318,6 @@ void Hud::drawBossClock(const Runtime& rt, int ww, int wh)
         x += widthOf(c);
     }
     upload(rgba_, W, H, ww, wh);
-}
-
-// Survival Mode (ours, game/survival.h): the wave line at the top centre (the wave, the creatures left, the SMG's rounds
-// per player in play) and the moment's banner (WAVE n, SMG UNLOCKED, WAVE CLEARED, GAME OVER) in the middle
-void Hud::drawSurvival(const Runtime& rt, int ww, int wh, int scale)
-{
-    const SurvivalMode& h = rt.survival;
-    std::vector<std::string> top = h.hudLines(rt);
-    // the shop (survival2): the signs between the rounds where the arcade screen's place for them lies (the 496 x 384
-    // screen fitted to the window's height, centred; arcade units y up), a shot at one buys it. Yellow: a player in play
-    // can buy it now; grey: not
-    if (h.shopOpen()) {
-        const float k = float(wh) / 384.0f;
-        for (int i = 0; i < SurvivalMode::kItems; ++i) {
-            const SurvivalMode::Sign& s = SurvivalMode::kSigns[i];
-            bool can = false;
-            for (int p = 0; p < rt.seat_count(); ++p)
-                can = can || h.canBuy(rt, p, i);
-            if (can != signLit_[i]) {
-                signLit_[i] = can;
-                survivalSign_[i].setStyle(170, can ? 255 : 130, can ? 220 : 130, can ? 90 : 130);
-            }
-            survivalSign_[i].setText({s.name, std::to_string(s.price)}, std::max(1, scale - 1));
-            survivalSign_[i].drawAt(ww, wh, float(ww) * 0.5f + s.x * k, float(wh) * 0.5f - s.y * k);
-        }
-    }
-    if (!top.empty()) {
-        survival_.setText(top, std::max(1, scale - 1));
-        survival_.drawAnchored(ww, wh, ww * 0.5f, wh * 0.11f, 0.5f, 0.0f);
-    }
-    if (!h.banner.empty()) {
-        survivalBanner_.setText({h.banner}, h.banner.size() > 20 ? scale : scale + 1);
-        survivalBanner_.drawAt(ww, wh, ww * 0.5f, wh * 0.38f);
-    }
 }
 
 // lang: the subtitle table (G::voice_subtitles, 96 bytes an event: line 1 at +1, line 2 at +0x31) read from the
@@ -1498,31 +1685,513 @@ void Hud::drawLivesCount(const Runtime& rt, int ww, int wh)
         if (pl.state != 5 || pl.lives <= 5)
             continue;
         const bool left = p == 0;
-        const uint32_t pieces[2][2] = {{0x1ACu, uint32_t(left ? 10 : 0x2F)},
-                                       {0x181u + uint32_t(std::min<int32_t>(pl.lives, 9)), uint32_t(left ? 12 : 0x31)}};
-        seatRgba_.assign(size_t(W) * H * 4, 0);
-        bool any = false;
-        if (pc) {
-            for (const auto& c : pieces)
-                if (const int id = kArcadeToPcSprite[c[0]]) {
-                    pcSprites_.draw(seatRgba_, id, int(c[1]) * 10, 0x2A * 10);
-                    any = true;
-                }
-        } else {
+        // qa2 (GitHub #25: "the X is a little bigger than I expected": the name entry's X over two rows, grey, taller
+        // and wider than the digit): the digit where it was; the X shrunk to a multiplier sign beside it (about 75 % of
+        // the digit's height, bottom-aligned with it, at most 80 % of its width) in the digit's own white, as HOTD 3 / 4
+        // show "x N"
+        const int unit = pc ? 10 : 8;
+        auto piece = [&](uint32_t spr, int cx, std::vector<uint8_t>& out) {
+            out.assign(size_t(W) * H * 4, 0);
+            if (pc) {
+                const int id = kArcadeToPcSprite[spr];
+                if (!id)
+                    return false;
+                pcSprites_.draw(out, id, cx * unit, 0x2A * unit);
+                return true;
+            }
             static PrivLayer l;
             l.reset();
-            for (const auto& c : pieces)
-                any = l.put(mem, c[0], int(c[1]), 0x2A) || any;
-            if (any)
-                any = assets::Arcade2D::compose(l.tiles.data(), l.chars.data(), l.pal.data(), true, seatRgba_);
-        }
-        if (!any)
+            return l.put(mem, spr, cx, 0x2A) && assets::Arcade2D::compose(l.tiles.data(), l.chars.data(), l.pal.data(), true, out);
+        };
+        auto box = [&](const std::vector<uint8_t>& img, int b[4]) {   // (x0, y0, x1, y1 exclusive of the opaque pixels)
+            b[0] = W, b[1] = H, b[2] = 0, b[3] = 0;
+            for (int y = 0; y < H; ++y)
+                for (int x = 0; x < W; ++x)
+                    if (img[(size_t(y) * W + x) * 4 + 3] >= 128)
+                        b[0] = std::min(b[0], x), b[1] = std::min(b[1], y), b[2] = std::max(b[2], x + 1), b[3] = std::max(b[3], y + 1);
+            return b[2] > b[0] && b[3] > b[1];
+        };
+        static std::vector<uint8_t> xImg;
+        int db[4], xb[4];
+        if (!piece(0x181u + uint32_t(std::min<int32_t>(pl.lives, 9)), left ? 12 : 0x31, seatRgba_) || !box(seatRgba_, db))
             continue;
+        if (piece(0x1ACu, left ? 10 : 0x2F, xImg) && box(xImg, xb)) {
+            // the digit's white (its brightest pixel), the X's brightness relative to its own brightest
+            uint8_t tint[3] = {255, 255, 255};
+            int best = -1, xMax = 1;
+            for (int y = db[1]; y < db[3]; ++y)
+                for (int x = db[0]; x < db[2]; ++x) {
+                    const uint8_t* q = &seatRgba_[(size_t(y) * W + x) * 4];
+                    if (q[3] >= 128 && q[0] + q[1] + q[2] > best)
+                        best = q[0] + q[1] + q[2], tint[0] = q[0], tint[1] = q[1], tint[2] = q[2];
+                }
+            for (int y = xb[1]; y < xb[3]; ++y)
+                for (int x = xb[0]; x < xb[2]; ++x) {
+                    const uint8_t* q = &xImg[(size_t(y) * W + x) * 4];
+                    if (q[3] >= 128) xMax = std::max(xMax, int(std::max({q[0], q[1], q[2]})));
+                }
+            const int dh = db[3] - db[1], dw = db[2] - db[0], sw = xb[2] - xb[0], sh = xb[3] - xb[1];
+            int th = std::max(4, dh * 3 / 4), tw = std::max(4, sw * th / std::max(sh, 1));
+            tw = std::min(tw, std::max(4, dw * 8 / 10));
+            const int gap = std::max(1, unit / 8), tx0 = db[0] - gap - tw, ty0 = db[3] - th;
+            for (int y = 0; y < th; ++y)
+                for (int x = 0; x < tw; ++x) {
+                    // (the source pixels under this one: light ones (a third of the X's brightest or more) and opaque ones;
+                    // a third light or more: the digit's white, else opaque: the dark edge, black. As crisp as the digit)
+                    const int sx0 = xb[0] + x * sw / tw, sx1 = std::max(sx0 + 1, xb[0] + (x + 1) * sw / tw);
+                    const int sy0 = xb[1] + y * sh / th, sy1 = std::max(sy0 + 1, xb[1] + (y + 1) * sh / th);
+                    int n = 0, lit = 0, solid = 0;
+                    for (int sy = sy0; sy < sy1; ++sy)
+                        for (int sx = sx0; sx < sx1; ++sx, ++n) {
+                            const uint8_t* q = &xImg[(size_t(sy) * W + sx) * 4];
+                            if (q[3] < 128) continue;
+                            ++solid;
+                            lit += int(std::max({q[0], q[1], q[2]})) * 3 >= xMax ? 1 : 0;
+                        }
+                    const int X = tx0 + x, Y = ty0 + y;
+                    if (solid * 3 < n || X < 0 || Y < 0 || X >= W || Y >= H)
+                        continue;
+                    uint8_t* d = &seatRgba_[(size_t(Y) * W + X) * 4];
+                    const int v = lit * 3 >= n ? 255 : 0;
+                    for (int c = 0; c < 3; ++c)
+                        d[c] = uint8_t(int(tint[c]) * v / 255);
+                    d[3] = 255;
+                }
+        }
         // widescreen with the corners at the window's edges (display2): beside the side's torch
         const float x0 = anchorEdges && !rt.clear.active ? leftEdge(W, H, ww, wh) : 0.0f;
         upload(seatRgba_, W, H, ww, wh, left ? -x0 : x0);
     }
 }
+
+// ---- Survival's and the weapons' HUD (survfix, user 2026-11-04: the weapons version's sprite letters were "horrible
+// and unreadable"; "the same font as the debug score"; docs/weapons.md "The HUD") ----
+//
+// Every line in the font of the game's own score line (Gameplay > Score Display: hud_lives_draw's SCORE:%05d through
+// text_printf, the debug font sprite_init puts in character slot 0: the arcade's font ROM 0x2EF3870, palette
+// 0x168A0, 8 x 8 cells, white with a dark edge), with PC models too (HOTD_SURVIVAL_PC_FONT=1: the PC's sprites 0x19D +
+// character - 0x20, as the PC draws its texts and our Score Display line there). Laid out on the arcade's 64 x 48 cell grid as the game's own HUD: players
+// 1 / 2 in their bottom corners from cell 2 / to cell 0x3D (the score line's row 0x24 and the rows above it, the
+// bullets at 0x26, the torches at 0x2A as the game draws them), players 3 / 4 under their bands at the top corners,
+// the round at the top centre, the moment's banner in the middle. Each glyph with a one-pixel shadow (the canvas' pixel
+// down and right) over the font's own dark edge: readable over the sky and the floor alike. Integer scales only (1 or
+// 2 cells): the window's 2D scaling keeps the pixels square at 640 x 480 and 4K, 4:3 and 16:9
+
+namespace {
+constexpr uint32_t kScoreFontRom = 0x2EF3870, kScoreFontPal = 0x168A0;
+
+// the score line's font: per character its picture (arcade: 8 x 8, the pens through palette 0's brightness; PC: the
+// sprite as the PC draws it), made once per model set
+struct ScoreFont {
+    bool tried[2] = {};
+    SeatImg glyph[2][128];
+    const SeatImg* get(port::Mem& mem, bool pc, const assets::PcSprites& pcs, char ch)
+    {
+        const int k = pc ? 1 : 0;
+        if (!tried[k]) {
+            tried[k] = true;
+            if (pc) {
+                for (int c = 0x21; c < 0x7F; ++c) {
+                    const int id = c - 0x20 + 0x19D;
+                    if (pcs.width(id) == 0)
+                        continue;
+                    glyph[1][c].px = pcs.image(id);
+                    glyph[1][c].w = pcs.width(id), glyph[1][c].h = pcs.height(id);
+                }
+            } else {
+                const uint32_t src = mem.mapped(kScoreFontRom) ? kScoreFontRom : mem.mapped(kCharRam) ? kCharRam : 0;
+                if (src && mem.mapped(kScoreFontPal)) {
+                    uint8_t lum[16];
+                    for (uint32_t c = 0; c < 16; ++c) {   // (palette 0: 15-bit BGR, the MAME gamma of sprites_arcade.cpp)
+                        const uint16_t col = mem.at<uint16_t>(kScoreFontPal + c * 2);
+                        int m = 0;
+                        for (int sh : {0, 5, 10}) {
+                            const int v = int(((col >> sh) & 31) * 255 / 31) - 64;
+                            m = std::max(m, v > 0 ? v * 255 / 191 : 0);
+                        }
+                        lum[c] = uint8_t(m);
+                    }
+                    // (the tile layout of sprites_arcade.cpp: a row = two little-endian words, pixel x = the nibble
+                    // (word x / 4) >> (12 - 4 (x & 3)); pen 0 is clear)
+                    for (uint32_t c = 0x21; c < 0x7F; ++c) {
+                        SeatImg& g = glyph[0][c];
+                        g.w = g.h = 8;
+                        g.px.assign(8 * 8 * 4, 0);
+                        bool any = false;
+                        for (uint32_t y = 0; y < 8; ++y) {
+                            const uint32_t row = src + c * 32 + y * 4;
+                            const uint16_t w[2] = {mem.at<uint16_t>(row), mem.at<uint16_t>(row + 2)};
+                            for (uint32_t x = 0; x < 8; ++x) {
+                                const uint8_t p = uint8_t((w[x >> 2] >> (12 - 4 * (x & 3))) & 15);
+                                if (!p)
+                                    continue;
+                                uint8_t* d = &g.px[(y * 8 + x) * 4];
+                                d[0] = d[1] = d[2] = lum[p], d[3] = 255;
+                                any = true;
+                            }
+                        }
+                        if (!any)
+                            g = SeatImg();
+                    }
+                }
+            }
+        }
+        const uint8_t c = uint8_t(ch);
+        return c < 128 && !glyph[k][c].px.empty() ? &glyph[k][c] : nullptr;
+    }
+};
+ScoreFont gScoreFont;
+
+// the text can be drawn in that font (ASCII); a translation with other letters goes to the overlay's text instead
+bool scoreFontText(const std::string& s)
+{
+    for (const char c : s)
+        if (uint8_t(c) >= 0x80) return false;
+    return true;
+}
+
+// qa2 (QA: the shop's names and grey prices were thin over the bright sky): while set, each glyph gets a dark edge all
+// round (one canvas pixel, the 8 neighbours) under its shadow, as the arcade's own outlined captions
+bool gGlyphOutline = false;
+
+// a glyph pasted at integer scale s: its shadow (black, s pixels down and right), then the glyph times the colour
+void pasteGlyph(std::vector<uint8_t>& dst, int W, int H, const SeatImg& g, int x0, int y0, int s, const uint8_t rgb[3])
+{
+    if (gGlyphOutline)
+        for (int v = 0; v < g.h; ++v)
+            for (int u = 0; u < g.w; ++u) {
+                if (g.px[(size_t(v) * g.w + u) * 4 + 3] < 128)
+                    continue;
+                for (int j = -1; j <= s; ++j)
+                    for (int i = -1; i <= s; ++i) {
+                        const int X = x0 + u * s + i, Y = y0 + v * s + j;
+                        if (X < 0 || Y < 0 || X >= W || Y >= H)
+                            continue;
+                        uint8_t* d = &dst[(size_t(Y) * W + X) * 4];
+                        if (d[3] == 0)
+                            d[0] = d[1] = d[2] = 0, d[3] = 230;
+                    }
+            }
+    for (int pass = 0; pass < 2; ++pass) {
+        const int ox = pass == 0 ? s : 0;
+        for (int v = 0; v < g.h; ++v)
+            for (int u = 0; u < g.w; ++u) {
+                const uint8_t* q = &g.px[(size_t(v) * g.w + u) * 4];
+                if (q[3] < 128)
+                    continue;
+                for (int j = 0; j < s; ++j)
+                    for (int i = 0; i < s; ++i) {
+                        const int X = x0 + u * s + i + ox, Y = y0 + v * s + j + ox;
+                        if (X < 0 || Y < 0 || X >= W || Y >= H)
+                            continue;
+                        uint8_t* d = &dst[(size_t(Y) * W + X) * 4];
+                        if (pass == 0) {
+                            if (d[3] == 0)   // (the shadow never covers another glyph's pixels)
+                                d[0] = d[1] = d[2] = 0, d[3] = 200;
+                        } else {
+                            for (int c = 0; c < 3; ++c)
+                                d[c] = uint8_t(int(q[c]) * int(rgb[c]) / 255);
+                            d[3] = 255;
+                        }
+                    }
+            }
+    }
+}
+} // namespace
+
+// a line in the score line's font at canvas pixel (x, y) (its top; align 0 left, 1 centre, 2 right), s pixels a font
+// pixel (cells of 8 s: the arcade's; PC: its sprites' own widths + 1, a space 8 s), in colour rgb. Its width (pixels);
+// measure: nothing drawn
+float Hud::scoreText(const Runtime& rt, std::vector<uint8_t>& dst, int W, int H, const std::string& s, float x, float y, int sc,
+                     int align, const uint8_t rgb[3], bool measure)
+{
+    // (the arcade's font with PC models too: the PC's text sprites are 1.6 times the cell and ran into each other over
+    // the shop; HOTD_SURVIVAL_PC_FONT=1: the PC's, to compare)
+    static const bool pcFont = std::getenv("HOTD_SURVIVAL_PC_FONT") != nullptr;
+    const bool pc = pcFont && rt.pcModels && pcSprites_.loaded();
+    std::vector<std::pair<const SeatImg*, int>> line;
+    int width = 0;
+    for (const char c : s) {
+        const SeatImg* g = gScoreFont.get(rt.mem, pc, pcSprites_, c);
+        line.push_back({g, width});
+        width += pc ? (g ? (g->w + 1) * sc : 8 * sc) : 8 * sc;
+    }
+    if (pc && width > 0)
+        width -= sc;
+    if (measure)
+        return float(width);
+    const int x0 = int(std::lround(align == 1 ? x - float(width) / 2.0f : align == 2 ? x - float(width) : x));
+    for (const auto& [g, off] : line)
+        if (g)
+            pasteGlyph(dst, W, H, *g, x0 + off, int(std::lround(y)), sc, rgb);
+    textFitNote(s, float(x0), y, float(width), 8.0f * float(sc), W, H);   // checks1 (--text-fit): past the canvas's edge
+    return float(width);
+}
+
+// Survival Mode (game/survival.h) and the weapons (game/weapons.h): the round line at the top centre, the moment's
+// banner, the shop's signs (their models are 3D: the weapons' overlay) and per player the weapon with its magazine /
+// reserve, Survival's points, "x N" beside the one bullet past 6 rounds, a moment's notice (a new weapon, one gone)
+void Hud::drawSurvival(const Runtime& rt, int ww, int wh, int scale)
+{
+    const SurvivalMode& h = rt.survival;
+    const Weapons& wp = rt.weapons;
+    const bool pc = rt.pcModels && pcSprites_.loaded();
+    if (rt.pcModels && !pc)
+        return;
+    const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
+    const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
+    const float u = pc ? 1.25f : 1.0f;   // canvas pixels an arcade screen pixel
+    const float cell = 8.0f * u;         // a cell of the arcade's 64 x 48 grid
+    auto toX = [&](float ax) { return (ax + 248.0f) * u; };
+    auto toY = [&](float ay) { return (192.0f - ay) * u; };
+    // the colours: the score line's white, the HUD's gold (the points, the round), red (the warnings, as RELOAD!),
+    // grey (what cannot be bought)
+    static const uint8_t kWhite[3] = {255, 255, 255}, kGold[3] = {255, 214, 90}, kRed[3] = {255, 70, 50},
+                         kGrey[3] = {165, 165, 165}, kSeat[4][3] = {{255, 110, 90}, {120, 170, 255}, {110, 230, 110}, {255, 230, 90}};
+    std::vector<std::string> fallback;
+    std::vector<uint8_t> mid(size_t(W) * H * 4, 0);
+    bool midAny = false;
+    const int big = pc && std::getenv("HOTD_SURVIVAL_PC_FONT") ? 1 : 2;   // (the PC's letters are 1.6 times the arcade's cell)
+    auto text = [&](std::vector<uint8_t>& dst, const std::string& s, float x, float y, int sc, int align, const uint8_t* rgb) {
+        if (s.empty())
+            return 0.0f;
+        if (!scoreFontText(s)) {
+            fallback.push_back(s);
+            return 0.0f;
+        }
+        midAny = midAny || &dst == &mid;
+        return scoreText(rt, dst, W, H, s, x, y, sc, align, rgb, false);
+    };
+    // (game over sub-modes 2 / 3: the arcade's route map until qa2; now Survival's own results over an empty picture,
+    // game/flow.cpp. The title block shows over the fallen players' scene and the GAME OVER card)
+    const bool routeMap = h.phase == SurvivalMode::Over && rt.mem.at<int16_t>(G::game_mode) == 5 &&
+                          (rt.mem.u32(G::game_submode) == 2 || rt.mem.u32(G::game_submode) == 3);
+    if (h.active() && routeMap) {
+        // qa2 (QA: Survival's game over showed the story's route map): the results card in the score line's font, as
+        // the arcade's results lay out (a title, rows of a label and its number, the number gold): the title two cells
+        // high at row 6, the arena, the round reached / kills / points, per player (2+ players) their points and kills in
+        // the seat's colour, then a new high score's rank (the name entry follows in the menus)
+        const float lx = toX(-136.0f), rx = toX(136.0f);
+        float y = 6.0f * cell;
+        text(mid, lang::tr("SURVIVAL RESULTS"), toX(0), y, big, 1, kGold);
+        y += 3.0f * cell;
+        if (h.arena >= 0 && h.arena < int(survivalArenas().size())) {   // (in capitals: the font's small letters read badly)
+            std::string an = lang::tr(survivalArenas()[size_t(h.arena)].name);
+            for (char& c : an)
+                c = char(std::toupper(uint8_t(c)));
+            text(mid, an, toX(0), y, 1, 1, kWhite);
+        }
+        y += 3.0f * cell;
+        auto row = [&](const std::string& label, const std::string& value, const uint8_t* lc, const uint8_t* vc, int sc) {
+            text(mid, label, lx, y + float(sc - 1) * cell * 0.5f, 1, 0, lc);
+            text(mid, value, rx, y, sc, 2, vc);
+            y += (sc == 1 ? 1.75f : 2.75f) * cell;
+        };
+        row(lang::tr("ROUND REACHED"), std::to_string(h.wave), kWhite, kGold, big);
+        row(lang::tr("KILLS"), std::to_string(h.kills), kWhite, kGold, big);
+        row(lang::tr("POINTS"), std::to_string(h.score), kWhite, kGold, big);
+        int inGame = 0;
+        for (int p = 0; p < 4 && p < rt.seat_count(); ++p)
+            inGame += h.seat[p].earned > 0 || h.seat[p].kills > 0 ? 1 : 0;
+        if (inGame > 1) {
+            y += 0.75f * cell;
+            for (int p = 0; p < 4 && p < rt.seat_count(); ++p) {
+                if (h.seat[p].earned <= 0 && h.seat[p].kills <= 0)
+                    continue;
+                char b[64];
+                std::snprintf(b, sizeof b, "%s %5d   %s %4d", lang::tr("PTS").c_str(), h.seat[p].earned, lang::tr("KILLS").c_str(), h.seat[p].kills);
+                row(std::to_string(p + 1) + "P", b, kSeat[p], kSeat[p], 1);
+            }
+        }
+        if (survivalRank >= 0 && rt.frameCount % 60 < 45) {
+            static const char* const kOrd[] = {"1ST", "2ND", "3RD", "4TH", "5TH", "6TH", "7TH", "8TH", "9TH", "10TH"};
+            y += 1.0f * cell;
+            text(mid, lang::fmt("NEW HIGH SCORE! {r} PLACE", {{"r", kOrd[std::min(survivalRank, 9)]}}), toX(0), y, 1, 1, kRed);
+        }
+    }
+    // (survfix3, user 2026-11-05: "remove very experimental / proof of concept from survival": the start notice that
+    // stood here under the title block, 6 s, is gone, as its menu tag and help line)
+    if (h.active() && !routeMap) {
+        // survfix2 (user 2026-11-04: with four players the round line fell between the RELOAD prompts and the shop's
+        // title sat mid-screen with its instruction alone at the bottom): ONE title block for 1-4 players, rounds and
+        // shop alike, at the top centre: the round two cells high from row 1 (in the break the next round and its
+        // countdown), the status one cell high under it (the creatures left; in the shop SHOOT AN ITEM TO BUY, or the
+        // moment's buy / NOT ENOUGH POINTS). Rows 1-4 between players 3 / 4's bands: their bullets (row 1) end at cell
+        // 12 / 0x33, their torches start at row 5; the widest title (ROUND 10 IN 5, 13 cells of two) fits in between
+        const float tY = 1.0f * cell, sY = tY + 2.0f * big * cell * 0.5f + 0.5f * cell;
+        text(mid, h.titleLine(), toX(0), tY, big, 1, kGold);
+        const uint8_t* tone[] = {kRed, kGold, kWhite, kSeat[0], kSeat[1], kSeat[2], kSeat[3]};
+        const uint8_t* bc = tone[std::clamp(int(h.bannerTone), 0, 6)];
+        const bool shopMsg = h.shopOpen() && !h.banner.empty();
+        // qa2 (QA: "LEFT n" one cell high was hard to read at 640 x 480): in a round with 1-2 players the creatures left
+        // two cells high as the round (3-4 players: their bands' torches from row 5 beside it, one cell)
+        const bool bigLeft = h.phase == SurvivalMode::Wave && !shopMsg && rt.seat_count() <= 2;
+        text(mid, shopMsg ? h.banner : h.statusLine(), toX(0), bigLeft ? sY - 0.25f * cell : sY, bigLeft ? big : 1, 1,
+             shopMsg ? bc : h.phase == SurvivalMode::Over ? kGold : kWhite);   // (the results gold: the GAME OVER card is white)
+        if (h.shopOpen()) {
+            // the signs (survival.h kSigns: the model's box, the name, the price, the seats that can buy it): the name
+            // white, the price gold as the points (grey: nobody can buy it). With two players or more, under the price
+            // the seats that can buy it, each in its colour (a seat that cannot: not shown); one player: the grey says it
+            const int n = rt.seat_count();
+            // qa1: the seat tags only with two players or more in the game (a 1P game has two seats: its sign said "1P")
+            int inGame = 0;
+            for (int p = 0; p < n && p < 4; ++p)
+                inGame += rt.mem.at<Player>(rt.player_rec(p)).state == 5 ? 1 : 0;
+            gGlyphOutline = true;   // (qa2: the signs over the sky: a dark edge all round)
+            for (int i = 0; i < SurvivalMode::kItems; ++i) {
+                const SurvivalMode::Sign& s = SurvivalMode::kSigns[i];
+                bool can[4] = {}, any = false;
+                for (int p = 0; p < n && p < 4; ++p)
+                    any = (can[p] = h.canBuy(rt, p, i)) || any;
+                const std::string name = s.weapon >= 0 ? weaponDefs()[size_t(s.weapon)].name : s.name;
+                text(mid, lang::tr(name), toX(s.x), toY(s.y), 1, 1, any ? kWhite : kGrey);
+                text(mid, std::to_string(h.price(i)), toX(s.x), toY(s.y - SurvivalMode::kPriceDown), big, 1, any ? kGold : kGrey);
+                if (inGame > 1 && any) {
+                    std::string tags[4];
+                    float w = 0;
+                    for (int p = 0; p < n && p < 4; ++p)
+                        if (can[p]) {
+                            tags[p] = std::to_string(p + 1) + "P";
+                            w += (w > 0 ? cell : 0.0f) + scoreText(rt, mid, W, H, tags[p], 0, 0, 1, 0, kWhite, true);
+                        }
+                    float x = toX(s.x) - w * 0.5f;
+                    for (int p = 0; p < n && p < 4; ++p)
+                        if (!tags[p].empty())
+                            x += text(mid, tags[p], x, toY(s.y - SurvivalMode::kSeatsDown), 1, 0, kSeat[p]) + cell;
+                }
+            }
+            gGlyphOutline = false;
+        } else if (!h.banner.empty()) {
+            // the moment's banner (a round's start / clear, the arena's name, the results): two cells high in rows
+            // 0x12-0x13, the gap between players 3 / 4's RELOAD prompts (rows 0xA-0x11) and players 1 / 2's (0x14 on),
+            // the same place for 1-4 players; a long one one cell high, in the middle of that gap
+            const bool small = scoreText(rt, mid, W, H, h.banner, 0, 0, big, 0, kWhite, true) > 470.0f * u;
+            text(mid, h.banner, toX(0), (small ? 0x12 + 0.5f : 0x12) * cell, small ? 1 : big, 1, bc);
+        }
+    }
+    if (midAny)
+        upload(mid, W, H, ww, wh);
+    // the seats' lines: players 1 / 2 above their bullets (bottom corners), 3 / 4 under their bands (top corners);
+    // over the shop the points and "X N". Rows: the notice, the weapon, the points, then the game's bullets (0x26)
+    const bool shop = h.shopOpen();
+    if (wp.live && rt.mem.at<uint8_t>(G::scene_state) == 2) {
+        const float x0 = anchorEdges ? leftEdge(W, H, ww, wh) : 0.0f;
+        // the line height: a cell and a half (the game's score line and bullets sit two rows apart). The points in the score line's
+        // own row 0x24 (Gameplay > Score Display: its SCORE line is there: a line higher)
+        const float lh = 1.5f * cell;
+        const float base = 0x24 * cell - (rt.mem.u32(0x51F42C) == 7 ? lh : 0.0f);
+        for (int p = 0; p < 4 && p < rt.seat_count(); ++p) {
+            const Player& pl = rt.mem.at<Player>(rt.player_rec(p));
+            if (pl.state != 5) {
+                // survrevive (user 2026-11-05: Survival with 2-4 players, a player out of lives comes back in the next
+                // round): no CONTINUE?, BACK NEXT ROUND in the seat's colour on its weapon line and its points (frozen)
+                // on their row, as in play (the shop's tighter rows not used: nothing to buy)
+                if (h.active() && h.seat[p].out) {
+                    const bool left = p == 0 || p == 2, top = p >= 2;
+                    std::vector<uint8_t> img(size_t(W) * H * 4, 0);
+                    const float edge = left ? 2.0f * cell : 0x3D * cell;
+                    const int align = left ? 0 : 2;
+                    const float topY = 7.9f * cell;
+                    text(img, lang::tr("BACK NEXT ROUND"), edge, top ? topY : base - lh, 1, align, kSeat[p]);
+                    char b[32];
+                    std::snprintf(b, sizeof b, "%s:%05d", lang::tr("PTS").c_str(), std::min(h.seat[p].points, 99999));
+                    text(img, b, edge, top ? topY + 1.1f * cell : base, 1, align, kGold);
+                    upload(img, W, H, ww, wh, left ? -x0 : x0);
+                }
+                continue;
+            }
+            const Weapons::Seat& s = wp.seat[p];
+            const bool left = p == 0 || p == 2, top = p >= 2;
+            std::vector<uint8_t> img(size_t(W) * H * 4, 0);
+            const float edge = left ? 2.0f * cell : 0x3D * cell;   // (cell 2 / the right edge's 0x3D, as the bullets)
+            const int align = left ? 0 : 2;
+            // survfix2: players 3 / 4's lines from row 7.9, right under their band (its 3P / 4P ends in row 7.5), the points
+            // 1.1 cells lower: both clear of their RELOAD prompt (its frame from row 10.3; at rows 8 / 9.5 the points
+            // sat on its frame). In the shop the points on the weapon's row (the signs' top row starts under it). Their
+            // notice takes the weapon's line while it shows (under the points it covered the RELOAD prompt)
+            const float topY = 7.9f * cell;
+            bool noticeOn = rt.frameCount < wp.noticeUntil[p] && !wp.notice[p].empty() && !shop;
+            // qa1: a new weapon's notice is its name, the weapon line's own name right under it ("DOUBLE PISTOLS" over
+            // "DOUBLE PISTOLS 16/80"): no second line; the weapon line's name in the seat's colour meanwhile
+            const bool newWeapon = noticeOn && wp.notice[p] == wp.def(s.cur).name;
+            if (newWeapon)
+                noticeOn = false;
+            const float yPoints = top ? topY + (shop ? 0.0f : 1.1f * cell) : base, yWeapon = top ? topY : base - lh,
+                        yNotice = top ? topY : base - 2.0f * lh;
+            if (!shop && !(top && noticeOn)) {
+                // the weapon's name and its magazine / reserve (the handgun: its name alone, it never runs dry); the
+                // magazine red when a quarter or less is left, RELOADING (blinking as the game's RELOAD!) meanwhile
+                const std::string name = lang::tr(wp.def(s.cur).name);
+                std::string ammo;
+                const int magN = wp.magazine(p, s.cur);
+                const bool low = pl.rounds * 4 <= magN;
+                if (s.reload > 0)
+                    ammo = rt.frameCount % 60 < 45 ? lang::tr("RELOADING") : "";
+                // qa2 (QA: "16/80" here and "X16" on the bullet row showed the magazine twice): players 1 / 2 the
+                // reserve alone (the magazine is the bullet row's, as the arcade's: its bullets, past 6 "X N"); players
+                // 3 / 4 (no count on their bullet row) the magazine / reserve
+                else if (s.cur != kPistol && !top)
+                    ammo = lang::tr("RESERVE") + " " + std::to_string(s.reserve[s.cur]);
+                else if (s.cur != kPistol)
+                    ammo = std::to_string(int(pl.rounds)) + "/" + std::to_string(s.reserve[s.cur]);
+                const float nw = scoreText(rt, img, W, H, name, 0, 0, 1, 0, kWhite, true);
+                const float aw = scoreText(rt, img, W, H, ammo, 0, 0, 1, 0, kWhite, true);
+                const uint8_t* ac = s.reload > 0 || (low && top) || (!top && s.reserve[s.cur] == 0) ? kRed : kWhite;
+                const uint8_t* nc = newWeapon ? kSeat[p] : kWhite;
+                if (left) {
+                    text(img, name, edge, yWeapon, 1, 0, nc);
+                    text(img, ammo, edge + nw + cell, yWeapon, 1, 0, ac);
+                } else {
+                    text(img, ammo, edge, yWeapon, 1, 2, ac);
+                    text(img, name, edge - aw - (ammo.empty() ? 0.0f : cell), yWeapon, 1, 2, nc);
+                }
+            }
+            if (!shop || h.active()) {
+                // Survival: the points to spend (the score line's form, PTS:00000; in the shop too)
+                if (h.active()) {
+                    char b[32];
+                    std::snprintf(b, sizeof b, "%s:%05d", lang::tr("PTS").c_str(), std::min(h.seat[p].points, 99999));
+                    text(img, b, edge, yPoints, 1, align, kGold);
+                }
+                if (noticeOn)
+                    text(img, lang::tr(wp.notice[p]), edge, yNotice, 1, align, kSeat[p]);
+            }
+            // past 6 rounds: "x N" beside the one bullet (cells 4.. / ..0x39, the bullet row 0x26; players 1 / 2)
+            if (pl.rounds > 6 && !top)   // (qa2: red when a quarter or less is left, as the weapon line's count was)
+                text(img, "X" + std::to_string(int(pl.rounds)), left ? 4.0f * cell : 0x3A * cell, 0x27 * cell, 1, align,
+                     pl.rounds * 4 <= wp.magazine(p, s.cur) ? kRed : kWhite);
+            upload(img, W, H, ww, wh, left ? -x0 : x0);
+        }
+    }
+    if (!fallback.empty()) {   // (a translation the font has no letters for)
+        survival_.setText(fallback, std::max(1, scale - 1));
+        survival_.drawAnchored(ww, wh, ww * 0.5f, wh * 0.11f, 0.5f, 0.0f);
+    }
+}
+
+// rel130 (user 2026-11-05: The Typing of the Dead 0 labelled "Experimental / Proof of Concept"): its start notice, as
+// Survival's was (qa2 .. survfix3): two short lines in the score line's font, red and white, under the title block
+// (rows 6.5 / 7.75); a translation the font has no letters for: the English lines
+void Hud::drawTotdNote(const Runtime& rt, int ww, int wh)
+{
+    const bool pc = rt.pcModels && pcSprites_.loaded();
+    if (rt.pcModels && !pc)
+        return;
+    const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
+    const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
+    const float u = pc ? 1.25f : 1.0f, cell = 8.0f * u, x = 248.0f * u;
+    static const uint8_t kWhite[3] = {255, 255, 255}, kRed[3] = {255, 70, 50};
+    std::vector<uint8_t> mid(size_t(W) * H * 4, 0);
+    const char* const lines[2] = {"EXPERIMENTAL", "PROOF OF CONCEPT"};
+    for (int i = 0; i < 2; ++i) {
+        std::string s = lang::tr(lines[i]);
+        if (!scoreFontText(s))
+            s = lines[i];
+        scoreText(rt, mid, W, H, s, x, (6.5f + 1.25f * float(i)) * cell, 1, 1, i ? kWhite : kRed, false);
+    }
+    upload(mid, W, H, ww, wh);
+}
+
 
 void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
 {
@@ -1635,8 +2304,11 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
             // none, as players 1 / 2's there (the PC's hud_start_prompt is empty in a game; drawPc2D)
             // relplay (user 2026-10-30: P3 / P4's PRESS START BUTTON over the chapter's intro card): not where the window
             // layer shows, as players 1 / 2's (their prompt is under the card)
-            const int sx0 = left ? 2 : 0x24, sy0 = 0x27 + dy;
-            if (startOn && !pc && !windowed(sx0, sy0) && !windowed(sx0 + 8, sy0) && !windowed(sx0 + 16, sy0))
+            // survfix2: in Survival on the band's own row (0x2A: where its torches would be, as player 2's prompt sits
+            // on its band's row): at row 2 it ran into Survival's title block at the top centre (4:3)
+            const int sx0 = left ? 2 : 0x24, sy0 = (rt.survival.active() ? 0x2A : 0x27) + dy;
+            // (survrevive: none for a Survival seat out until the next round: its BACK NEXT ROUND line, drawSurvival)
+            if (startOn && !pc && !rt.noStartPrompt && !((rt.seatsHeldOut >> seat) & 1) && !windowed(sx0, sy0) && !windowed(sx0 + 8, sy0) && !windowed(sx0 + 16, sy0))
                 pieces.push_back({sx0, sy0, 0x40, 0});
         } else if (const uint8_t sc = mem.at<uint8_t>(G::scene_state); sc == 4 && !inClear) {
             // a cut-scene (scene_state 4, as player_in_game_frame): HOLD YOUR FIRE! (0x107) at the seat's corner, blinking,
@@ -1857,9 +2529,9 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
 }
 
 // widescreen: the window outside the 4:3 screen (496 x 384, or the PC's 640 x 480, fitted to the height) cleared black
-void Hud::blackSides(int ww, int wh, float grey, int sides)
+void Hud::blackSides(int ww, int wh, float grey, int sides, int keep)
 {
-    const int gw = int(std::lround(double(wh) * 496.0 / 384.0));
+    const int gw = keep > 0 ? keep : int(std::lround(double(wh) * 496.0 / 384.0));
     if (gw >= ww)
         return;
     const int bar = (ww - gw) / 2;
@@ -1910,7 +2582,27 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     // ch2video: widescreen: while the chapter card shows (kind177_chapter_card: evt_clrgfst_flags bit 0x20) the window
     // outside the 4:3 screen stays black, as in 4:3. The card covers the 496 x 384 screen only; Chapter 2's world is
     // already lit behind it (Chapter 1's is still black then), so its sides showed the 3D. UNVERIFIED (teaser)
-    if (widescreen && rt.mem.mapped(G::evt_clrgfst_flags) && (rt.mem.u32(G::evt_clrgfst_flags) & 0x20u) != 0)
+    // wide2d (Widen 2D Screens: Stretch; wideScreen): the 4:3-only screens widened up to wideW (16:9 at most), side
+    // bars only past that: a card / picture's 2D is drawn wide below (drawArcadePass, drawPc2D), the clear's wall here
+    int wideW = 0;
+    const int wide = wideScreen(rt, ww, wh, wideW);
+    if (wide == kWideCard || wide == kWidePicture)
+        blackSides(ww, wh, 0.0f, 3, wideW);
+    else if (wide == kWideWall) {
+        // the arcade's wall: layers 2 / 3's priority cells (over the 3D, a hole where the researchers' photo shows): its
+        // sides drawn here, over the stage's set beside the 4:3 screen (the 2D layer itself comes after, as it is). The
+        // PC models' wall is the PC's own 640 x 480 picture with the photo in it (no hole) and plates ~165 pixels apart
+        // (scaled, no whole-pixel tile): stretched to wideW instead (drawPc2D)
+        if (rt.pcModels)
+            blackSides(ww, wh, 0.0f, 3, wideW);
+        else if (rt.mem.mapped(kTileRam) && rt.mem.mapped(kCharRam) &&
+            composeLayers(rt, rt.mem.ptr(kTileRam), true, 0xCu, wideBg_) &&
+            tileExtend(wideBg_, assets::Arcade2D::kWidth, assets::Arcade2D::kHeight, ww, wh, wideW, true))
+            blackSides(ww, wh, 0.0f, 3, wideW);
+        else
+            blackSides(ww, wh);   // (no tile found / PC models: as Original 4:3)
+    }
+    else if (widescreen && rt.mem.mapped(G::evt_clrgfst_flags) && (rt.mem.u32(G::evt_clrgfst_flags) & 0x20u) != 0)
         blackSides(ww, wh);
     // sweep (2026-10-28): the chapter clear's results (Runtime::clear: the wall of plates and the researchers, 3D, made
     // for the 4:3 screen): in widescreen the set's other pieces showed beside it (Chapter 1: a railing at the left edge)
@@ -1966,7 +2658,7 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
             uint8_t rgb[3];
             for (int k = 0; k < 3; ++k) {
                 const int v = int((c >> (5 * k)) & 31) * 255 / 31;
-                rgb[k] = uint8_t(std::max((v - 64) * 255 / 191, 0));
+                rgb[k] = uint8_t(m2Curve(v, blackLevel()));   // (bugs4 #23: Black Level; 64 as before)
             }
             const int h = std::min(rows * 11 + 9, wh / 2);
             fillRect(rgb, ww, wh, 0, h);
@@ -1984,7 +2676,7 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     else if (rt.pcModels && pcSprites_.loaded()) {
         if (pcUnderFrame_ != (long long)rt.frameCount) {   // (not when drawUnder drew it under the 3D)
             drawPc2D(rt, ww, wh);
-            if (const int sides = widescreen ? endingCard(rt, assets::PcSprites::kWidth, assets::PcSprites::kHeight) : 0)
+            if (const int sides = widescreen && wide != kWidePicture ? endingCard(rt, assets::PcSprites::kWidth, assets::PcSprites::kHeight) : 0)
                 blackSides(ww, wh, 0.0f, sides);   // credits43: the ending's 4:3 cards (the 2D is inside the 4:3 screen)
         }
     }
@@ -1994,7 +2686,7 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     }
     else {
         drawArcade2D(rt, ww, wh);
-        if (const int sides = widescreen ? endingCard(rt, assets::Arcade2D::kWidth, assets::Arcade2D::kHeight) : 0)
+        if (const int sides = widescreen && wide != kWidePicture ? endingCard(rt, assets::Arcade2D::kWidth, assets::Arcade2D::kHeight) : 0)
             blackSides(ww, wh, 0.0f, sides);
     }
     if (!paused && !clean && rt.coop4_on())   // the 4P mode: players 3 / 4's HUD at the top corners
@@ -2009,8 +2701,11 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
         drawLivesCount(rt, ww, wh);
     if (!paused && !clean && rt.boss.shown)   // Boss Mode: the fight's clock (0x418CC8)
         drawBossClock(rt, ww, wh);
-    if (!paused && !clean && rt.survival.active())   // Survival Mode: the wave line and the banner (game/survival.h)
+    // Survival Mode (game/survival.h): the round line, the banner, the shop; the weapons: the seats' lines
+    if (!paused && !clean && (rt.survival.active() || rt.weapons.live))
         drawSurvival(rt, ww, wh, scale);
+    if (!paused && !clean && totdNote)   // rel130: The Typing of the Dead 0's start notice
+        drawTotdNote(rt, ww, wh);
     // the chapter clear (kind 176): its lines appear as the original's sprites do (420, 360, 300, 240 frames left)
     if (rt.clear.active && rt.pcModels && !pcSprites_.loaded() && !paused && !clean) {   // the placeholder only: the sprites show it
         const int t = rt.clear.held ? -1 : rt.clear.timer;

@@ -1,0 +1,32 @@
+# boss: sentences for the bosses on Normal (one finished sentence = one attack on the weak point). Lower case,
+# a comma or a full stop at most, about 25-40 letters. Original text.
+please water the plants every morning.
+the train leaves at half past seven.
+my neighbour plays the piano on sundays.
+a good breakfast makes a better day.
+the library is closed for the holiday.
+we packed apples and a flask of tea.
+the old clock in the hall has stopped.
+turn off the oven before you leave.
+tomorrow will be cloudy with some rain.
+he left his keys on the kitchen table.
+never run with scissors in your hand.
+the shop on the corner sells fresh bread.
+she wrote a letter and forgot to post it.
+there is a strange noise in the basement.
+our team practices twice a week.
+the candles flickered as the door opened.
+a cup of coffee and a quiet morning.
+the museum is free for children.
+put your shoes by the door, please.
+the river runs past the old mill.
+we need a bigger boat for all this luggage.
+the cat watched the rain from the window.
+who left the garden gate open last night?
+a little practice every day goes far.
+the bus was late, so we walked to work.
+the stairs creak when you climb them.
+please return your books by friday.
+the picnic was ruined by the storm.
+the lights went out during dinner.
+somebody ate the last slice of cake.

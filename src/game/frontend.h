@@ -251,6 +251,8 @@ public:
     void pickSeat(int p);                              // seat p (1-3) Human <-> CPU
     void pickStart();                                  // Start: the choice kept (playersSet), then `go`
     void mainMenuGroup(int g) { mainGroup_ = g; }   // menu2: the main menu's group shown next (0 top, 1 More Modes, 2 Extras)
+    int mainMenuGroupNow() const { return mainGroup_; }   // (bugs3: the HOTD_KEYS screenshots' log, GitHub #44's check)
+    std::string mainMenuHead();                            // (the same: the main menu's first item as shown)
     std::function<void(int item)> onMainMenu;   // 0 Arcade, 1 PC Mode, 2 Boss Mode, 3 Ranking, 4 Options, 5 Quit
     // ReWrithe: the items that can be chosen (the others grey; user 2026-10-17: PC Mode / Boss Mode locked for now)
     bool mainMenuEnabled[6] = {true, false, false, true, true, true};
@@ -266,12 +268,6 @@ public:
     std::function<std::string()> survivalArenaValue;
     std::function<void()> onSurvivalArena;
     std::function<void()> startSurvival;
-    // Horde Mode (game/horde.h; More Modes): "Horde" opens Chapter Select with hordeChapters set (its title says Horde;
-    // onChapter reads it), "Horde Size: <name>" (a click: the next size). Null: the items are left out. The main menu
-    // clears hordeChapters (the plain Chapter Select is the arcade's)
-    bool hordeChapters = false;
-    std::function<std::string()> hordeSizeValue;
-    std::function<void()> onHordeSize;
 
     // screen 17 (ours): the Gallery (game/gallery.h; the main menu's "Gallery", grey while openGallery is unset): the
     // hall without the logo (0xD1), "Gallery" at the top, the categories down the left (white 24, the shown one yellow;
@@ -765,10 +761,9 @@ private:
         std::function<void()> act;   // null: grey
         bool heading = false;    // menu2: a group's name (not a button)
         bool debug = false;      // the SKIDMARX items (Cheat, Edit Char Stats, Creature Test) under Quit
-        std::string tag;         // polish: a small red line with the label (Survival's "Very Experimental / Proof of Concept")
+        std::string tag;         // polish: a small red line with the label (TotD 0's "Experimental / Proof of Concept"; Survival's until survfix3)
         std::string name() const { return label >= 0 ? Frontend::label(label) : text; }
     };
-    static constexpr const char* kSurvivalTag = "Very Experimental / Proof of Concept";   // (polish, user 2026-11-03)
     std::vector<MainItem> mainMenuItems();   // the main menu's items for mainGroup_ (and the debug items)
     // Options (screen 2): its rows' values and steps (which: kOpt*; dir +1 the next value, -1 the one before)
     enum : int { kOptDifficulty, kOptLives, kOptContinues, kOptAutoReload, kOptBlood, kOptSfx, kOptMusic, kOptRows,

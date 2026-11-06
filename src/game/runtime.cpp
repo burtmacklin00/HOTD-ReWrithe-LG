@@ -198,7 +198,8 @@ void Runtime::run(uint32_t routine, uint32_t arg)
     case kTaskUnlink: task_unlink(arg); return;
     case 0x5D90: input_task_stand_in(arg); return;
     case 0x50B0:   // player_in_game_frame (the port, L3); --lives-kept (testing) keeps one life
-        if (livesKept && mem.at<port::a::Player>(G::players, uint32_t(int32_t(mem.at<int8_t>(arg + 0x20)))).lives <= 0) {
+        if (livesKept && !((livesKeptSkip >> (mem.at<int8_t>(arg + 0x20) & 7)) & 1) &&
+            mem.at<port::a::Player>(G::players, uint32_t(int32_t(mem.at<int8_t>(arg + 0x20)))).lives <= 0) {
             missing("player out of lives (kept at 1: --lives-kept)");
             mem.at<port::a::Player>(G::players, uint32_t(int32_t(mem.at<int8_t>(arg + 0x20)))).lives = 1;
         }
@@ -217,7 +218,8 @@ void Runtime::run(uint32_t routine, uint32_t arg)
         player_in_game_frame(arg);
         return;
     case port::coop4::kSeatRoutine:   // 4P (docs/coop4.md): seat 3 / 4's frame; --lives-kept as above
-        if (port::a::Player& pl = mem.at<port::a::Player>(player_rec(mem.at<int8_t>(arg + 0x20))); livesKept && pl.state == 5 && pl.lives <= 0)
+        if (port::a::Player& pl = mem.at<port::a::Player>(player_rec(mem.at<int8_t>(arg + 0x20)));
+            livesKept && !((livesKeptSkip >> (mem.at<int8_t>(arg + 0x20) & 7)) & 1) && pl.state == 5 && pl.lives <= 0)
             pl.lives = 1;
         {
             const int p = mem.at<int8_t>(arg + 0x20);
@@ -779,8 +781,11 @@ void Runtime::frame()
             frame_one();
         survival.tick(*this);
     }
-    if (horde.on())   // Horde Mode (game/horde.h): its peaks (the log, the test line)
-        horde.tick(*this);
+    if (weapons.on()) {   // the weapons (game/weapons.h): Survival's once the arena is held, the other modes' in play
+        weapons.live = weapons.mode == Weapons::Survival ? survival.frozen && survival.phase != SurvivalMode::Over
+                                                         : mem.at<int16_t>(G::game_mode) == 4;
+        weapons.afterFrame(*this);
+    }
 }
 
 void Runtime::frame_one()

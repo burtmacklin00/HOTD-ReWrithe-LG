@@ -14,6 +14,7 @@ namespace hotd {
 namespace {
 
 int gGamma = kGammaDefault;
+int gBlack = kBlackDefault;   // (bugs4, #23: Black Level)
 
 // the finished frame copied into uSrc (the same size): drawn back through the curve. An sRGB copy (a VR eye's
 // SRGB8_ALPHA8 image, its values display-referred as the flat game's: vr_openxr.cpp) is decoded by the sampler: encoded
@@ -99,6 +100,10 @@ bool build(Pass& p)
 int gamma100() { return gGamma; }
 
 void setGamma100(int g) { gGamma = std::clamp(g, kGammaMin, kGammaMax); }
+
+int blackLevel() { return gBlack; }
+
+void setBlackLevel(int b) { gBlack = std::clamp(b, kBlackMin, kBlackMax); }
 
 int gammaParse(const char* s)
 {

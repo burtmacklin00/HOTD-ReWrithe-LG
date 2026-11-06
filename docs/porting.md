@@ -6,7 +6,7 @@ one day. Windows behaviour is unchanged (all checks give the same numbers).
 ## Where it stands
 
 - **Release-ready Linux package, CI without a release (worker "linux2", second round, 2026-11-03):** main (with
-  OpenXR, Typing of the Dead 0, Survival / Horde, 13 languages, cosmetic mods) built in the **Steam Runtime 3 "sniper"
+  OpenXR, Typing of the Dead 0, Survival, 13 languages, cosmetic mods) built in the **Steam Runtime 3 "sniper"
   SDK** (podman in WSL; Debian 11, glibc 2.31, gcc-14 + its static libstdc++, SDL 3.2.10 from source,
   `HOTD_EXPERIMENTAL_MODES=OFF`, `HOTD_SURVIVAL_MODE=ON`). One fix: `game/cosmods.h` lacked `<cstdint>` (GCC). With the built SDL 3.2.10:
   `--input-test` 2277 checks, 0 failed (Wayland); Chapter 1 16350 (arcade and PC models); Chapter 4's ending 34967.
@@ -207,27 +207,35 @@ package's `hotd.sh` loaded its own SDL and played Chapter 1 to 16695.
 
 ## Experimental modes
 
-The user (2026-11-03): **The Typing of the Dead 0 and Horde Mode stay out of the public releases until they are
-polished. Survival Mode ships, labelled "Very Experimental / Proof of Concept"** (its More Modes item carries that line,
-its help line starts with it, and a one-line notice shows for 6 s when a Survival game starts). Two CMake options:
+The user (2026-11-03): **the unreleased modes stay out of the public releases until they are polished.** Survival Mode ships
+(v1.2.0 labelled it "Very Experimental / Proof of Concept"; removed since, user 2026-11-05). **The Typing of the Dead 0
+ships since v1.3.0** (user 2026-11-05, rel130), labelled "Experimental / Proof of Concept": its More Modes item's tag
+line, its help line, a notice at a game's start (`Hud::drawTotdNote`). Three CMake options:
 
 - **`HOTD_EXPERIMENTAL_MODES`** (default **ON**: every development build, `build\Release` and the private portable):
-  The Typing of the Dead 0 and Horde Mode (and Survival with them).
-- **`HOTD_SURVIVAL_MODE`** (default **ON**): Survival Mode in a build with the experimental modes OFF (the release
-  packages). OFF as well: Survival is left out as the other two are.
+  the unreleased modes (and The Typing of the Dead 0, Survival and all Survival arenas with them).
+- **`HOTD_TOTD_MODE`** (default **ON**): The Typing of the Dead 0 in a build with the experimental modes OFF (the
+  release packages). OFF as well: it is left out.
+- **`HOTD_SURVIVAL_MODE`** (default **ON**): Survival Mode (Chapter 1's courtyard only) in a build with the experimental
+  modes OFF. OFF as well: Survival is left out.
 
-| | ON (development) | OFF + `HOTD_SURVIVAL_MODE=ON` (every release package) |
+| | ON (development) | OFF + `HOTD_TOTD_MODE=ON` + `HOTD_SURVIVAL_MODE=ON` (every release package) |
 |---|---|---|
-| More Modes | Typing of the Dead 0, Survival, Survival Arena, Horde, Horde Size | Chapter Select, Co-op, Sonic Mode, Survival (labelled), Survival Arena |
-| High Scores | the Typing of the Dead 0 tables, Survival, Horde | Survival |
-| Command line | `--totd*`, `--typing`, `--survival*`, `--horde*` (Survival's old names too) | `--survival*` works; `--totd*`, `--typing`, `--horde*` refused: "`<option>`: The Typing of the Dead 0 and Horde Mode are not in this version ..." on stdout, exit 2 |
+| More Modes | The Typing of the Dead 0, Survival, Survival Arena (all arenas), the unreleased modes | Chapter Select, Co-op, Sonic Mode, The Typing of the Dead 0 (labelled), Survival, Survival Arena (the courtyard) |
+| High Scores | the Typing of the Dead 0 tables, Survival, the unreleased modes' | the Typing of the Dead 0 tables, Survival |
+| Command line | `--totd*`, `--typing`, `--survival*`, the unreleased modes' | `--totd*`, `--typing`, `--survival*` |
 
-Everything else is the same (the modes' code is still compiled, only unreachable: `kExperimentalModes` /
-`kSurvivalMode` in `src/main.cpp` leave their menu callbacks null, their tables out and refuse their options). Built
-OFF (Survival ON) by: `tools\make_portable_hotd.ps1 -Release` (its own `build-release`), `.github/workflows/release.yml`
-(Windows, Linux, macOS; the tests check that `--totd` is refused), `tools/make_linux_package.sh` (stops on a build
-folder configured ON unless `--experimental`), `tools\make_quest_apk.ps1` (`-Experimental` for a testing APK). The
-release checklist: [release/build_release.md](release/build_release.md) section 0.
+The unreleased modes' code is not compiled at all with the experimental modes OFF (user 2026-11-05): it lives in
+`src/unreleased/` and every use of it is inside `#if HOTD_UNRELEASED` (CMake: ON only with the experimental modes ON
+and that folder present); their options are unknown options there. Their language lines are each file's
+`# [unreleased]` .. `# [/unreleased]` section; `tools\export_public.ps1` leaves out the folder, those blocks and
+sections (the public source builds without them). Built OFF (TotD 0 and Survival ON) by:
+`tools\make_portable_hotd.ps1 -Release` (its own `build-release`; it checks that nothing of `src/unreleased` is
+compiled and `--totd-test` is accepted), `.github/workflows/release.yml` (Windows, Linux, macOS),
+`tools/make_linux_package.sh` (stops on a build folder configured ON unless `--experimental`),
+`tools\make_quest_apk.ps1` (`-Experimental` for a testing APK). The packages strip the `[unreleased]` language
+sections; `data\typing` ships. The release checklist:
+[release/build_release.md](release/build_release.md) section 0.
 
 ## What needs your approval (downloads / installs)
 

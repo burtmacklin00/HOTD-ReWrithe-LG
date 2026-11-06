@@ -49,7 +49,9 @@ void Runtime::sound_cue(uint32_t cue)
 {
     if (boss_next_on())   // Boss Mode's undrawn walk-up: THOTD.EXE's sound_cue 0x412000 plays nothing while pc_boss_next
         return;
-    if (survival.active() && survival_cue(cue))   // Survival Mode: its silent lead-in, the SMG's own sound (survival.cpp)
+    if (survival.active() && survival_cue(cue))   // Survival Mode: its silent lead-in (survival.cpp)
+        return;
+    if (weapons.on() && weapons.cue(*this, cue))   // the weapons' own shots and reloads (game/weapons.h)
         return;
     if (!audio || !audio->boardOn()) {
         if (cueLog)
@@ -163,6 +165,31 @@ void Runtime::mode5_game_over()
                 mem.at<uint16_t>(0x100A000 + i) = mem.at<uint16_t>(0x51E8F4 + i);
     };
     // proofs-5: the sub-modes are the port's (src/port/game_over.cpp, capture-proven)
+    // qa2 (Survival Mode only, game/survival.h): no route map (the arcade's story route meant nothing there) but
+    // Survival's own results (Hud::drawSurvival) over an empty picture for 5 s: sub-mode 2 as the map's start without
+    // the map (the fade finished, the slots marked, the heap reset, the timer), 3 the empty frames, then the GAME OVER
+    const uint32_t sub = mem.u32(G::game_submode);
+    if (survival.active() && (sub == 2 || sub == 3)) {
+        if (sub == 2) {
+            if (mem.at<uint16_t>(0x51F702) != 0)
+                palette_fade_finish();
+            sprite_slots_mark();
+            heap_reset();
+            mem.set32(0x5433E4, 300);
+            mem.set32(G::game_submode, 3);
+        } else {
+            Tgp::Out none;
+            copro(0x08, nullptr, 0, none);   // (as game_over_map: the matrix stack reset, an empty frame)
+            geo_frame_begin();
+            geo_view_setup();
+            const uint32_t t = mem.u32(0x5433E4);
+            mem.set32(0x5433E4, t > 0 ? t - 1 : 0);
+            if (t <= 1)
+                mem.set32(G::game_submode, 4);
+        }
+        scroll_regs();
+        return;
+    }
     switch (mem.u32(G::game_submode)) {
     case 0: game_over_start(); break;       // 0x97200
     case 1: game_over_scene(); break;       // 0x97340

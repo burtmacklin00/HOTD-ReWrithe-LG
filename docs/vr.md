@@ -100,7 +100,7 @@ takes the model source's model and the area's texture set), drawn by the game's 
 
 There is no stand-alone gun model in either game (the 7,477 arcade object names and the PC CREAT files were searched:
 gun / pistol / jyu / kenju / buki / weapon / magazin; the gun exists only inside 0x719, and the code's gun-only copy
-`kGunOnlyKey` is 0x719 without its skin polygons, arcade only). Horde Mode's SMG has no model in the game: the
+`kGunOnlyKey` is 0x719 without its skin polygons, arcade only). The SMG has no model in the game: the
 handgun is drawn then too. The previous worker's placeholder boxes (pistol, SMG, hands) and the OBJ loader
 (`src/vr/vr_models.*`) were removed.
 
@@ -113,6 +113,30 @@ Both are in game units, so their size is the game's own (the gun ~23 cm at 10 un
 the world with the depth cleared (on top of walls, never cut by them). `vr.ini` moves them per controller:
 `gun_offset` / `gun_rotate` (metres along the aim pose's axes / pitch yaw roll degrees), `left_hand_offset` /
 `left_hand_rotate`.
+
+## Dual pistols
+
+Player request 2026-11-04: a gun in each hand. `vr.ini dual_pistols = on` (or `--vr-dual`); off by default (one gun).
+
+- **The left gun** is the same gun hand `0x719` **mirrored** (model x -> -x: a left hand holding the handgun; there
+  is no left hand with a gun in the game). The renderer turns the normals by the same matrix (`uRot * aNrm`), so the
+  faces, their culling and the light stay right. It sits on the left aim pose as the right one sits on the right
+  (`gunAnchorLeft`), moved by `gun_offset` / `gun_rotate` mirrored (x, yaw and roll the other way). The empty left
+  hand `0x717` is not drawn then.
+- **Each gun aims and fires for itself**: its own ray (from its muzzle, into the right eye's depth), laser, the game's
+  sight at its hit, trigger (the same hysteresis), rumble on its own controller (`haptic(0 / 1)`), its own "pointed
+  down" reload gesture. Either grip / B / Y, or a pull of either gun off the screen, reloads.
+- **Into the game** (main.cpp `vrGunInput`): it stays one player with one magazine (the game's own; Survival's Double
+  Pistols: its 16), the shots are player 1's. A pull of one gun is player 1's shot at that gun's aim (the shot flash
+  there too). Both pulled in the same tick: the right gun's shot and the left gun's own ray beside it, as the Double
+  Pistols' second gun (`port/game.h SecondGun`: after the seat's shot, `weapon_extra_shots` tests the left aim's ray,
+  hits the nearest, its own shot flash; one round for the pair, as the Double Pistols take). Both pulled but one off
+  the screen: the reload first, the other gun's pull in the next tick. Between shots player 1's aim is the right gun's.
+- **Every mode**: the arcade game, PC Mode, Boss Mode... as two guns for player 1. **Survival**: the weapon
+  decides: the Double Pistols in player 1's hands are always two VR guns (their fixed second ray is then not added:
+  each gun aims for itself, `Weapons::setShot`), every other weapon one gun.
+- Preview: both guns point at the cursor's point (from their own hands); keypad 0 / . pull the left / right trigger.
+- OpenXR: nothing new: both hands' aim poses, triggers and haptics were already bound for every profile.
 
 ## Preview (desktop simulation)
 
@@ -127,6 +151,8 @@ the world with the depth cleared (on top of walls, never cut by them). `vr.ini` 
 | keypad 1 / 3 | lean left / right |
 | keypad 5 | recentre |
 | `--vr-head yaw,pitch,roll` | hold the head there (degrees; tests) |
+| keypad 0 / . | dual pistols: the left / right gun's trigger |
+| `--vr-dual` | dual pistols on (as vr.ini `dual_pistols = on`) |
 
 ## Tests
 
@@ -139,6 +165,14 @@ the world with the depth cleared (on top of walls, never cut by them). `vr.ini` 
   eye's depth, back through the game camera to arcade units. Pass: mean error under 2 arcade units and at most 2 % of
   the trips over 6. Trips where something stands between the hand and the point (the gun's view blocked) are counted
   apart (the gun then hits that, which is right).
+- `--vr-preview-test --vr-dual` (dual pistols): both guns follow the game's aim from their own hands, both round trips
+  are checked, and the VR guns are player 1's input (main.cpp `vrDualTestInput`): each `--autofire` pull goes in
+  turn to the right trigger, the left one, both (the preview's scripted triggers, one VR frame held). Counted per gun:
+  pulls, shots (a round gone), hits (`stat_hits`; the left ray beside a right shot: `SecondGun::hits`). Pass: the
+  one-gun criteria, and each gun alone and both together shot, both guns hit, the left round trips' mean under 2.
+  2200 frames: right 10 shots / 8 hits alone, left 10 / 8, both 11 shots with 9 + 8 hits; left mean error 0.28.
+  With Survival's Double Pistols (`HOTD_WEAPONS_FORCE=3 --vr-preview-test --survival-test 2
+  --survival-weapons-wave 1`): two VR guns by themselves, 27 hits each.
 - The normal game is unchanged: the WORKER_RULES regression runs and two `--render` pictures are byte-compared with
   the build before the VR work.
 
@@ -219,7 +253,7 @@ Pointing the gun steeply down also reloads (`reload_down`), and a shot off the s
   `menu_panel = on`) every flat screen is shown on a big screen in VR, the right controller's ray as the mouse
   (Scene::panelFrame, docs/quest.md); the pause menu takes the VR gun's aim and trigger.
 - Reading the eye's depth for the aim needs desktop OpenGL (ANGLE: the fixed `aim_distance` is used).
-- Players 2-4 keep their own inputs (mouse / pad / light gun); only player 1 is the VR gun.
+- Players 2-4 keep their own inputs (mouse / pad / light gun); only player 1 is the VR gun (dual pistols: both VR guns).
 - OpenXR, untested without a headset: the hands' fit on each controller, the colours (sRGB), the pacing with the
   window's VSync, the GL binding on each runtime (some ask for a newer OpenGL than the game's 3.3 core context: logged),
   Linux (the Xlib binding is written but not built). The aim uses the last frame's controller pose (one frame late).

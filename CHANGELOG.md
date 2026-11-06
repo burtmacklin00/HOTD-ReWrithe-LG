@@ -4,6 +4,63 @@ All notable changes for players. The format follows [Keep a Changelog](https://k
 follow [Semantic Versioning](https://semver.org/). The game shows this version's section once after an update and in
 Options > System > What's New.
 
+## [1.3.0] - 2026-11-06
+
+### Added
+- **The Typing of the Dead 0** (More Modes), **Experimental / Proof of Concept**: The House of the Dead played by
+  typing, after SEGA's The Typing of the Dead (2000). Type the word over a creature to shoot it (the first letter locks
+  on, each letter is a shot); bats and thrown axes / knives get a letter or two that break into your word; bosses take
+  sentences on their weak points between their attacks; quick keys for items, crates and rescues; a grade per kill and
+  results per chapter; its own top 10s (one per Sonic Mode preset). Keyboard only, offline only, a placeholder look.
+  Tuning in `data\typing\typing.ini` (README). Expect rough edges.
+- Survival Mode weapons: the rifle, double pistols, the shotgun and the Magician's Hand (a fireball that explodes at the
+  first creature, item, wall or ground on its aim and damages everything around it) next to the SMG, bought in the shop
+  between rounds; the shop's items float over their signs as the game's own models.
+- Options > Video > VRR (G-Sync / FreeSync), variable refresh rate, default Off (#20): each game frame shown once at the
+  game's own rate, Vsync and Smooth Motion off, Borderless exactly the display's size (window capture in screen
+  recorders may then show nothing: capture the display).
+- Options > Video > Black Level (#23): the arcade picture's black point (64, MAME's, the default; down to 0) brings the
+  detail in dark areas back instead of greying it.
+- Options > Video > Widen 2D Screens: the title, the chapter cards and the other full-screen pictures stretched up to
+  16:9 or kept at the original 4:3.
+- VR: Dual Pistols, a gun in each hand with its own aim, laser, trigger and rumble.
+
+### Changed
+- Controllers (#36): every pad input has its own whole sensitivity (stick, gyro, touchpad, mouse; no shared
+  multipliers any more), and the menu cursor has its own touchpad / gyro sliders. Older settings are converted.
+- Survival Mode:
+  - its HUD is drawn in the arcade's own score font: one title block at the top for 1-4 players (the round, the
+    creatures left in big letters, the shop's messages), the points and the weapon per player, ammo shown once;
+  - its own results card at the game over (round, kills, points per player, a new high score's place) instead of the
+    story's route map;
+  - with 2-4 players a player who loses all lives is out until the next round (no CONTINUE?) and comes back with the
+    starting lives and half of their points; the game is over only when everyone is out;
+  - only Chapter 1's courtyard is offered, with the creatures coming from the original's own places;
+  - a balance pass: a smoother round curve, adjusted weapon damage, the Magician's Hand at 8000 points;
+  - no longer labelled "Very Experimental / Proof of Concept": no tag line in More Modes, no notice when a game starts.
+- The 2D layer (HUD, title, cards) is drawn sharp at 768 lines and more (#43), not blurred by filtering.
+- The lives "x N" beside the torch (more than 5 lives) is smaller and tidier (#25).
+
+### Fixed
+- No crash at exit while the next chapter's world was still loading.
+- CPU teammates (and The Typing of the Dead 0) now recognise every creature, thrown thing and item in the packaged
+  game too: the names they sort objects by are built into the program (the packages had no way to find them).
+- The Magician's Hand now explodes where its fireball meets something (it flew on and burst out of reach when the shot
+  missed a creature: no damage); every creature within the blast takes damage, less toward its edge.
+- Setup: the install searches folders as deep as the files check does (files 5-6 folders down passed the check but
+  were not installed).
+- Gallery: Neopetit's arcade look has its texture again.
+- "Play from here" with a PC game whose menu pictures cannot be read now makes The House of the Dead ReWrithe.exe too (#13).
+- The main menu's live background follows Smooth Motion too (#27), and frame pacing with V-Sync is even (no repeated
+  picture every ~0.4 s on a 60 Hz display).
+- More Modes and Extras open with the SKIDMARX cheat on (#44).
+- The touchpad / gyro cursor keeps the controller's button prompts (#40).
+- Online, 4 players on two PCs: Edge Reload works for each PC's second player too.
+- Entering a game with Mouse Sensitivity not 100 % always starts with the mouse's relative mode off (#31 follow-up).
+- The Language page's rows fit in every language.
+- Correction to the 1.2.0 notes: Attract Gore brings back both dead researchers in the sewer (two bodies, each with
+  its blood pool), not one.
+
 ## [1.2.0] - 2026-11-03
 
 ### Added

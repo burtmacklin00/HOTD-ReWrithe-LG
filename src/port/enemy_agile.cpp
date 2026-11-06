@@ -2025,6 +2025,10 @@ template <class P> void Game<P>::kind70_spawn8_wall_attack(uint32_t obj)
         step();
         [[fallthrough]];
     case 2: {
+        // (ours, totd8: The Typing of the Dead 0's attack window, game.h: the leap from the wall waits for its grace;
+        // null in the arcade. Up to totd7 it leapt on its own timing and hit before its word's grace ran out)
+        if (gAttackHold && gAttackHold(obj))
+            return;
         pick_target_player_any(obj);
         if (of<uint8_t>(obj, 0x2E8) == 0xFF)
             return;

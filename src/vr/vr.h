@@ -74,6 +74,11 @@ struct Settings {
     bool reloadDown = true;         // pointing the gun steeply down reloads (as a shot off the screen)
     float reloadPitch = 55.0f;      // degrees below the horizon for reloadDown / the off-screen state
     bool leftHand = true;           // draw the left hand (when tracked)
+    // dual pistols (player request 2026-11-04; docs/vr.md "Dual pistols"): a gun in each hand, each controller aims and
+    // fires for itself (its own laser, crosshair, trigger, rumble), one magazine for the pair; the left gun is the
+    // game's gun hand 0x719 mirrored. Off (the default): one gun, the left hand empty. Survival's Double Pistols
+    // weapon is always two guns in VR
+    bool dualPistols = false;
     // the game's hand models on the controllers (vr_scene.cpp's anchors) moved / turned from their default place:
     // metres along the pose's axes (x right, y up, -z ahead), degrees pitch / yaw / roll (vr.ini gun_offset,
     // gun_rotate, left_hand_offset, left_hand_rotate: "x y z")
@@ -143,6 +148,10 @@ public:
     // roll (degrees, right-handed: +yaw turns left) and leaned by (x, y, z) metres
     virtual void setCursor(int, float, float) {}
     virtual void scriptHead(const float[3], const float[3]) {}
+    // dual pistols: the left hand holds a gun too (the preview points it at the cursor's point as the right one)
+    virtual void setDual(bool) {}
+    // tests: hand `hand`'s trigger held at `value` (0..1) until changed (the preview; a headset reads its own)
+    virtual void scriptTrigger(int, float) {}
     int display = 2;   // the desktop picture: 0 the left eye, 1 the right eye, 2 both side by side
 };
 

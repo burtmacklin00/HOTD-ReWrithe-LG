@@ -2,6 +2,8 @@
 // (rand, add_score, difficulty_get), A and PC (PA / PM). Read from the disassembly of both (docs/decompilation.md
 // "part_hit exact level").
 #include "port/game.h"
+#include <cstdio>
+#include <cstdlib>
 
 namespace hotd::port {
 
@@ -12,6 +14,7 @@ bool gAttractGore = true;
 bool (*gAttackHold)(uint32_t obj) = nullptr;
 bool (*gHitHold)(int player) = nullptr;
 bool (*gPreyHold)(uint32_t obj) = nullptr;
+bool (*gBossHold)(uint32_t obj) = nullptr;
 
 
 // 0x34A50 / PC 0x471828: x = x * 0x41C64E6D + 0x3039 (rand_state), returns bits 16-31
@@ -62,6 +65,8 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
         mem.at<int16_t>(part_tally_at(3)) = 0;
         mem.at<uint8_t>(coop4::kEyeSeats) = 0;
     }
+    if (weaponHooks)   // weapons (ours, game/weapons.h): the Magician's Hand's explosion near it
+        weapon_blast_hit(obj);
     uint32_t list = mem.at<BodyPart>(root).children.a;
     for (uint32_t i = 0; i < uint32_t(mem.at<BodyPart>(root).child_count); ++i, list += 4)
         part_hit(mem.u32(list));
@@ -79,6 +84,8 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
         t = int16_t(std::min(0x7FFF, t + extra));
         mem.at<int16_t>(G::hit_damage) = int16_t(std::min(0x7FFF, int(mem.at<int16_t>(G::hit_damage)) + extra));
     }
+    if (weaponHooks)   // weapons: each seat's weapon's damage
+        weapon_damage();
     Obj& b = mem.at<Obj>(mem.u32(G::body_current));
     const int32_t life = b.param;
     // PC: every killer chosen here is also the last killer
@@ -158,6 +165,15 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
         const uint32_t head = eye == 0xFF ? 0 : four ? mem.at<uint8_t>(coop4::kEyeSeats) : eye == 2 ? 3u : 1u << (eye & 1);
         if (seats != 0 || head != 0)
             survival_hits(obj, seats | head, life - int32_t(mem.at<int16_t>(G::hit_damage)) > 0 ? -1 : int(mem.at<Obj>(obj).killer), head);
+    }
+    if (weaponHooks && life > 0 && mem.at<int16_t>(G::hit_damage) > 0 && life - int32_t(mem.at<int16_t>(G::hit_damage)) <= 0) {
+        if (blastObj == obj) {   // (tests: a creature the Hand's explosion hit in this frame)
+            ++blastKills;
+            static const bool trace = std::getenv("HOTD_BLAST_TRACE") != nullptr;
+            if (trace)
+                std::printf("   blast kill: obj %X\n", obj);
+        }
+        weapon_kill(obj, mem.at<Obj>(obj).killer);   // weapons: the drops (a killed creature may drop a pickup)
     }
     body_free_cut_parts(root);
 }

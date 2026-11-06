@@ -26,7 +26,7 @@ reviews (Nintendo Insider, Rely on Horror, Light Gun Fanatics, Nintendo Everythi
 - Bottom right: **ACCEPT** with an Enter key icon over red claw slashes. Bottom centre: publisher logos and (c) SEGA.
 - Highlight / hover effect and sounds: (uncertain; not visible in a still).
 - New Campaign opens a set-up screen: difficulty (Easy, Normal, Hard, Arcade), scoring (Classic / Modern), 1 or 2
-  players, Story or Horde mode (reviews).
+  players, the story or another mode (reviews).
 
 **Options** (screenshot of the Quality tab)
 - A wide dark torn panel across the screen, the red glow at its bottom; the background a dark red-tinted room.
@@ -62,7 +62,7 @@ lays them out as the PC did (frontend.cpp), Remake as below (frontend_remake.cpp
 | Reset to defaults | Not added (no per-page defaults in our settings yet) |
 | Prompts bottom right | Right (E / RB), Left (Q / LB), Back (Esc / B; on the top menu Quit), Accept (Enter / A); a pad's buttons in rings once a pad is used; Back / Left / Right are clickable. remake2: a right-aligned column (18-unit margin, 26 a row), same-size key caps (30 x 18) with a crisp border and soft shadow, the arcade's claw mark 0x2A small behind; one row along the bottom when a settings panel leaves no room (3:2, 4:3) |
 | (none) | The bony hand for the mouse (hidden while the keyboard / a pad moves the focus; galfix 2026-10-26: 90 % of the sprite, smooth, a soft shadow, both menu styles; see-through over the Gallery's model); our help line for the item in focus at the bottom |
-| Language tab, Horde, Statistics | Not in ours |
+| Language tab, other modes, Statistics | Not in ours |
 
 **Keys**: Up / Down (held: repeat) move the focus; Enter / Space / A accept; Esc / B back (each page's Back; the top
 menu: Quit, which asks "Are you sure?" with Yes / No strips); Left / Right change the focused row's value (Options'

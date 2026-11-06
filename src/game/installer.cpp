@@ -126,7 +126,8 @@ std::string relTo(const fs::path& p, const fs::path& root)
     return s;
 }
 
-// the files of `where` (a file, or a folder up to 4 levels deep), as the files check lists them
+// the files of `where` (a file, or a folder up to 6 levels deep), as the files check lists them (files_check.cpp's
+// listFiles: it was 4 here, so files 5-6 levels down passed the check and were then not installed)
 std::vector<fs::path> listFiles(const fs::path& where)
 {
     std::vector<fs::path> files;
@@ -134,7 +135,7 @@ std::vector<fs::path> listFiles(const fs::path& where)
     if (fs::is_regular_file(where, ec)) { files.push_back(where); return files; }
     fs::recursive_directory_iterator it(where, fs::directory_options::skip_permission_denied, ec), end;
     for (; !ec && it != end; it.increment(ec)) {
-        if (it.depth() > 4) { it.disable_recursion_pending(); continue; }
+        if (it.depth() > 6) { it.disable_recursion_pending(); continue; }
         if (it->is_regular_file(ec)) files.push_back(it->path());
     }
     return files;

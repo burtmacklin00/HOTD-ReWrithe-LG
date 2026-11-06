@@ -9,6 +9,9 @@
 
 namespace hotd::game {
 
+struct EmbeddedName { uint32_t addr; const char* name; };
+extern const EmbeddedName kEmbeddedNames[];   // (generated: build/generated/names_tsv.cpp)
+
 namespace {
 
 std::vector<uint8_t> readFile(const std::string& path)
@@ -75,6 +78,11 @@ bool Host::load(const std::string& regionsDir, const std::string& snapshot, cons
                 runtime_->names[uint32_t(std::stoul(arcade, nullptr, 16))] = name;
         }
     }
+    // totd8: the names compiled in (CMakeLists.txt) when the file is not there: a package has no tools\ folder, and
+    // Typing of the Dead 0 / the CPU teammates sort objects by these names
+    if (runtime_->names.empty())
+        for (const EmbeddedName* e = kEmbeddedNames; e->name; ++e)
+            runtime_->names[e->addr] = e->name;
     return true;
 }
 

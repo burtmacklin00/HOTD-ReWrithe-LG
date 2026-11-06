@@ -8,8 +8,9 @@ namespace hotd::game {
 
 bool MenuCursor::event(const SDL_Event& e, const MenuCursorConfig& c, float canvasW)
 {
-    const float speed = float(std::clamp(c.speed, 1, 10)) / 5.0f;
-    const float gyroSpeed = float(std::clamp(c.gyroSpeed, 1, 10)) / 5.0f;   // (GitHub #36: the gyro's own)
+    // (GitHub #36, sens36: each its own %, 100 % = the old speed 5; the range as LaunchConfig::kCursorSens*)
+    const float speed = float(std::clamp(c.touchSens, 10, 300)) / 100.0f;
+    const float gyroSpeed = float(std::clamp(c.gyroSens, 10, 300)) / 100.0f;
     switch (e.type) {
     case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
     case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
@@ -31,12 +32,14 @@ bool MenuCursor::event(const SDL_Event& e, const MenuCursorConfig& c, float canv
         d.lx = e.gtouchpad.x, d.ly = e.gtouchpad.y;
         const float len = std::hypot(mx, my), gain = canvasW * 0.6f * speed * (1.0f + std::min(len, 0.05f) * 40.0f);
         dx_ += mx * gain, dy_ += my * gain * 0.6f;   // (the pad is about 1.6 times as wide as tall)
+        lastPad = e.gtouchpad.which;
         ++touches;
         return true;
     }
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         if (c.touchpad && e.gbutton.button == SDL_GAMEPAD_BUTTON_TOUCHPAD) {
             click_ = true;
+            lastPad = e.gbutton.which;
             ++clicks;
             return true;
         }
@@ -56,11 +59,12 @@ bool MenuCursor::event(const SDL_Event& e, const MenuCursorConfig& c, float canv
         d.gyroTs = ts;
         if (c.gyro <= 0 || (c.gyro == 1 && !d.hold) || dt <= 0)
             return false;
-        // tilt to point: about 40 degrees turn crosses the screen at speed 5; a little dead zone against drift
+        // tilt to point: about 40 degrees turn crosses the screen at 100 %; a little dead zone against drift
         const float yaw = e.gsensor.data[1], pitch = e.gsensor.data[0];
         const float k = canvasW / 0.7f * gyroSpeed * dt;
         if (std::fabs(yaw) > 0.02f) dx_ -= yaw * k;
         if (std::fabs(pitch) > 0.02f) dy_ -= pitch * k;
+        lastPad = e.gsensor.which;
         ++gyroMoves;
         return false;
     }

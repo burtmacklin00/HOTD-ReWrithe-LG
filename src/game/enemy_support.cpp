@@ -33,8 +33,15 @@ void Runtime::player_hit(int player, int shake, int side)
 
 // 0x6640 projectile_hit_player: the port's (src/port/player_support.cpp, proofs-4, capture-proven), then the log line;
 // researcher_reached_camera 0x708E0 / researcher_rescue_bonus 0x70960 are the port's as well
+// totd5 (The Typing of the Dead 0, game/typing.cpp; null outside its ticks): true = the projectile running now (the
+// current task: a thrown axe / barrel, a fireball, a Murrer's leap) was typed: it reaches the screen without a hit
+// (0: as one off the screen; the kits then end it)
+bool (*gTotdProjectileHold)() = nullptr;
+
 uint32_t Runtime::projectile_hit_player(uint32_t point, int shake, int side)
 {
+    if (gTotdProjectileHold && gTotdProjectileHold())
+        return 0;
     uint32_t inv[4];
     for (int p = 0; p < seat_count(); ++p)
         inv[p] = mem.u32(invuln_at(p));

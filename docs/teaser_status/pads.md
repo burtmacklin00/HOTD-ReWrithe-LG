@@ -285,3 +285,23 @@ handled by gravity), whether the 5 % margin is enough / too much, the new stick 
   files (padv 2 / 3) and the saved file (padv=3, no sideways keys).
 
 Needs the real pad: whether Medium is generous enough on the lap and never fires while aiming (Low / High otherwise).
+
+## Per-input sensitivity (GitHub #36 follow-up, worker sens36, 2026-11-04)
+
+Reporter after v1.2.0: the per-input sliders were still multiplied by the style's Sensitivity, Fine Aim Speed and the
+player's Aim Sensitivity ("players can accidentally double the sensitivity"). Now each input's speed is its own and
+nothing shared multiplies it (`PadStyle::stickSens / fineSens / gyroSens / touchSens`, %, 10-500, step 10, 100 % =
+the old default feel; Controller page rows Stick / Fine Stick / Gyro / Trackpad Sensitivity, a bar each, per style:
+Classic stick + fine stick + trackpad, Motion gyro + trackpad, Motion + stick gyro + fine stick + trackpad, Touchpad
+trackpad). Removed: Sensitivity, Fine Aim Speed, Aim Sensitivity (Controller page) and Controls > Aim Sensitivity:
+Player 1-4. Vertical / invert / curve / dead zone / smoothing and the precise aim (L3 held) stay.
+The menu cursor (no stick cursor: the sticks move the selection): Controls > Touchpad Cursor Sensitivity / Gyro Cursor
+Sensitivity (10-300 %, 100 % = the old Cursor Speed 5; launcher.ini `touchcursorsens=` / `gyrocursorsens=`).
+launcher.ini `padv=4`, `pad1.<style>.aimstick= / aimfine= / aimgyro= / aimtouch=`. An older file (padv < 4, no new
+keys) converts once with `legacyPadSpeeds` (the old formulas: kStickTop, kGyroSens, Fine x 10 %, x Aim / Stick / Gyro /
+Trackpad Sensitivity), rounded to 1 %, clamped to 500 %. The old pad keys are not written again (an older build reads
+its defaults); `cursorspeed= / gyrocursorspeed=` still are (the nearest 1-10). Presets set each style's own inputs with
+the old preset's speeds, so an old Precise / Fast converts to the same preset.
+Tests (fix frames 90-413): per (style, input) the other three at 250 % move it exactly as at 100 %, its own 200 % twice
+as far (Classic stick / fine / trackpad, Motion + stick fine / gyro / trackpad); the menu cursor's two likewise; an
+older launcher.ini converted (values and the converted profile's stick / gyro motion against the old formula).

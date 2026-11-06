@@ -1,6 +1,7 @@
 #include "render/renderer.h"
 
 #include "assets/mods.h"
+#include "render/gamma.h"
 
 #include <algorithm>
 #include <atomic>
@@ -345,7 +346,8 @@ uniform float uAmbient;
 uniform int uFilter;
 uniform int uTransp;             // RenderOptions::transparency: 0 Smooth, 1 Clean Edges, 2 Dithered (arcade)
 uniform vec3 uCamPos;
-uniform int uM2Gamma;            // MAME's output curve: max((v - 64) * 255 / 191, 0)
+uniform int uM2Gamma;            // MAME's output curve: max((v - 64) * 255 / 191, 0); 2: the 64 is uM2Black (bugs4, #23)
+uniform float uM2Black;          // (Video > Black Level, 0 .. 63; at 64 uM2Gamma is 1: the curve exactly as before)
 uniform int uM2Known;            // Model 2 lighting setup known (light vector + parameter table)
 uniform vec3 uM2Light;
 uniform float uM2Diffuse[32];
@@ -678,6 +680,7 @@ void main() {
                        (re.y & 0x8000u) != 0u ? clamp(oColor.rgb + (c.rgb - ref) * k, 0.0, 1.0) : clamp(c.rgb * k, 0.0, 1.0);
             if (uGreyRepl == 1) rgb = greyLook(rgb);
             if (uM2Gamma == 1) rgb = max((floor(rgb * 255.0 + 0.5) - 64.0) / 191.0, 0.0);
+            else if (uM2Gamma == 2) rgb = max((floor(rgb * 255.0 + 0.5) - uM2Black) / (255.0 - uM2Black), 0.0);
             oColor = vec4(rgb * uFade, 1.0);
             if (uIdMode == 1) oColor = vec4(float(uTieItem & 255) / 255.0, float((uTieItem >> 8) & 255) / 255.0, 0.0, 1.0);
             return;
@@ -697,6 +700,7 @@ void main() {
             oColor.rgb = sep;
         }
         if (uM2Gamma == 1) oColor.rgb = max((floor(oColor.rgb * 255.0 + 0.5) - 64.0) / 191.0, 0.0);
+        else if (uM2Gamma == 2) oColor.rgb = max((floor(oColor.rgb * 255.0 + 0.5) - uM2Black) / (255.0 - uM2Black), 0.0);
         // cosmods: Rainbow Blood's creature wounds, on the colour as shown (after the monitor curve: before it the reds
         // are paler, (140, 40, 30) on screen is (168, 94, 86) here)
         // (rainbow2: only a fallback now, for the pixels the blood rows did not colour in all three channels)
@@ -1106,6 +1110,7 @@ bool Renderer::init(std::string& err)
     uCamPos_ = gl::GetUniformLocation(program_, "uCamPos");
     uM2Known_ = gl::GetUniformLocation(program_, "uM2Known");
     uM2Gamma_ = gl::GetUniformLocation(program_, "uM2Gamma");
+    uM2Black_ = gl::GetUniformLocation(program_, "uM2Black");
     uCull_ = gl::GetUniformLocation(program_, "uCull");
     uMip_ = gl::GetUniformLocation(program_, "uMip");
     uPcCullSign_ = gl::GetUniformLocation(program_, "uPcCullSign");
@@ -1594,7 +1599,11 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     gl::Uniform1f(uAmbient_, opt.ambient);
     gl::Uniform3f(uCamPos_, e[0], e[1], e[2]);
     gl::Uniform3f(uCamFwd_, f[0], f[1], f[2]);
-    gl::Uniform1i(uM2Gamma_, opt.gamma ? 1 : 0);
+    {   // bugs4 (#23): Video > Black Level: MAME's curve (1) at the default 64, its black point lowered (2) below it
+        const int black = blackLevel();
+        gl::Uniform1i(uM2Gamma_, opt.gamma ? (black == kBlackDefault ? 1 : 2) : 0);
+        gl::Uniform1f(uM2Black_, float(black));
+    }
     gl::Uniform1i(uCull_, opt.cull ? 1 : 0);
     gl::Uniform1i(uMip_, opt.mipmap ? 1 : 0);
     gl::Uniform1i(uGrey_, opt.grey ? 1 : 0);

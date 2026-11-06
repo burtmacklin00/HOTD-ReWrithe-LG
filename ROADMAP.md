@@ -361,17 +361,6 @@ sequences). The name: "Typing of the Dead" is Sega's; a published mod may need a
   (`room_6bb_zsof`), the two unused subtitle lines; the unused music once the sound board is emulated.
 - Arcade data only (the PC files lack the meshes); nothing restored is shipped, it is built from the player's dump.
 
-## Future: Horde Mode (user idea, 2026-10-21; next week or a later update, not now)
-
-Like the Remake's Horde mode, as a toggle similar to Sonic Mode (Off / On, maybe intensity presets), usable in Arcade,
-Chapter Select, PC Mode and co-op: many more enemies per wave / scene than the original. Ideas to look into:
-- How the spawn system works (the event scripts' spawn records, attack slots, the kinds' limits) and how far the
-  object / enemy tables can grow without breaking the 1:1 logic (Horde Mode is a mode: the arcade default stays exact).
-- **Bring in the cut creatures** (MrG, Lubin, Disiprin, Syndy, Debu, Baba, Neozom, Hiru; textures found in the arcade
-  ROM, docs/cut_content.md): give them motions / behaviour borrowed from similar used kinds so they can appear in hordes.
-- Scoring / its own top 10 (like Sonic Mode's), balance for 1-4 players, performance on low-end PCs.
-Ordered with Typing of the Dead 0 after the release work.
-
 ## Future: translations / language packs (user request 2026-10-21: someone wants Korean)
 
 **Built 2026-10-26 (worker "lang"):** steps below except the 2D sprite pictures (RELOAD ...: per-language pack folders

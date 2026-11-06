@@ -340,7 +340,9 @@ template <class P> void Game<P>::kind132_ebitb_vomit_frame(uint32_t obj)
     }
     const int32_t delay = of<int32_t>(obj, 0x50) - 1;
     of<int32_t>(obj, 0x50) = delay;
-    if (delay < 0 && of<uint16_t>(obj, 0xD0) == 0x9E) {
+    // (ours, totd8: The Typing of the Dead 0's attack window, game.h: the spit / stream waits for its grace; null in
+    // the arcade. Up to totd7 it came on its own timing and hit before its word's grace ran out)
+    if (delay < 0 && of<uint16_t>(obj, 0xD0) == 0x9E && !(gAttackHold && gAttackHold(obj))) {
         of<int32_t>(obj, 0x50) = int32_t(rand()) % 60 + 0x78;
         uint32_t m;
         if (int32_t(rand()) % 2 == 1 && mem.at<uint8_t>(0x54343B) == 0) {
@@ -369,7 +371,9 @@ template <class P> void Game<P>::kind132_ebitb_vomit_frame(uint32_t obj)
         if (vs == 5) {
             player_hit(of<int8_t>(obj, 0x2E8), 1, 4);
         } else {
-            if (!((of<uint32_t>(obj, 0x58) >> 28) & 1))
+            // (ours, totd8: the rise's spit (MO 0x9B frame 27) inside its grace: no hit, The Typing of the Dead 0 only)
+            if (!((of<uint32_t>(obj, 0x58) >> 28) & 1) &&
+                !(gAttackHold && vs != 3 && gAttackHold(obj)))
                 player_hit(of<int8_t>(obj, 0x2E8), 1, 10);
             sound_cue(0xA01254);
         }

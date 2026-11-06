@@ -4,6 +4,7 @@
 // the cursor shows (the ray from the eye through the cursor, as far as the eye's depth says), so a desktop player aims
 // as with the mouse while the gun, the laser and the 3D crosshair do what a tracked controller would.
 //   Keypad 4 / 6: turn the head left / right; 8 / 2: up / down; 7 / 9: roll; 1 / 3: lean left / right; 5: recentre.
+//   Dual pistols: both guns point at the cursor's point; keypad 0 / . pull the left / right gun's trigger.
 #include "vr/vr.h"
 #include "vr/vr_math.h"
 
@@ -54,6 +55,8 @@ public:
             case SDL_SCANCODE_KP_9: keys_[5] = down; return true;
             case SDL_SCANCODE_KP_1: keys_[6] = down; return true;
             case SDL_SCANCODE_KP_3: keys_[7] = down; return true;
+            case SDL_SCANCODE_KP_0: trigger_[0] = down ? 1.0f : 0.0f; return true;        // dual pistols: the left
+            case SDL_SCANCODE_KP_PERIOD: trigger_[1] = down ? 1.0f : 0.0f; return true;   // / right gun's trigger
             case SDL_SCANCODE_KP_5:
                 if (down) std::fill(ypr_, ypr_ + 3, 0.0f), std::fill(lean_, lean_ + 3, 0.0f);
                 return true;
@@ -87,6 +90,8 @@ public:
         scripted_ = true;
     }
     void cursorDistance(float m) override { cursorDist_ = std::clamp(m, 0.3f, 200.0f); }
+    void setDual(bool on) override { dual_ = on; }
+    void scriptTrigger(int hand, float v) override { trigger_[std::clamp(hand, 0, 1)] = std::clamp(v, 0.0f, 1.0f); }
 
     bool desktopCursorRay(float o[3], float d[3]) override
     {
@@ -152,7 +157,8 @@ public:
         const float yawOnly[4] = {0, std::sin(ypr_[0] / 2), 0, std::cos(ypr_[0] / 2)};
         float yr[9];
         quatToMatrix(yawOnly, yr);
-        const float hand[2][3] = {{-0.20f, -0.32f, -0.30f}, {0.17f, -0.25f, -0.32f}};
+        // (dual pistols: the left hand holds its gun as the right one, mirrored, and points it at the cursor's point too)
+        const float hand[2][3] = {{dual_ ? -0.17f : -0.20f, dual_ ? -0.25f : -0.32f, dual_ ? -0.32f : -0.30f}, {0.17f, -0.25f, -0.32f}};
         for (int h = 0; h < 2; ++h) {
             Controller& c = fs.hand[h];
             c.active = true;
@@ -160,7 +166,8 @@ public:
             for (int k = 0; k < 3; ++k)
                 p[k] = fs.head.pos[k] + yr[k * 3] * hand[h][0] + yr[k * 3 + 1] * hand[h][1] + yr[k * 3 + 2] * hand[h][2];
             float fwd[3] = {-yr[2], -yr[5] - 0.35f, -yr[8]};   // (the idle left hand: ahead, a little down)
-            if (h == 1) {
+            c.trigger = trigger_[h];
+            if (h == 1 || dual_) {
                 float o[3], d[3];
                 last_ = fs;   // (the cursor ray from this frame's eyes)
                 if (desktopCursorRay(o, d)) {
@@ -229,6 +236,8 @@ private:
     float ypr_[3] = {0, 0, 0}, lean_[3] = {0, 0, 0};
     bool keys_[8] = {};
     bool scripted_ = false;
+    bool dual_ = false;
+    float trigger_[2] = {0, 0};
     uint64_t lastNs_ = 0;
     int cursorEye_ = 1;
     float cursor_[2] = {0.5f, 0.5f};

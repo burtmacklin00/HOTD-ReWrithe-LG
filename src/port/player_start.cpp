@@ -70,7 +70,8 @@ template <class P> uint32_t Game<P>::player_start_check(uint32_t task, int state
         const uint32_t blk = kPlayerBlocks + uint32_t(p) * 0xCC;
         // PC Mode (THOTD.EXE player_waiting_frame 0x436B60 / player_continue_frame 0x435018): can_continue 0x45B8F0
         // (the shared credits from the Continues option) instead of free play; the start takes one (0x448934)
-        const uint32_t can = pm_on() ? (pm_can_continue() ? 1u : 0u) : player_can_start(p);
+        // (Survival, survrevive: a seat out until the next round cannot start, no blink: seatsHeldOut)
+        const uint32_t can = (seatsHeldOut >> (p & 7)) & 1 ? 0u : pm_on() ? (pm_can_continue() ? 1u : 0u) : player_can_start(p);
         uint32_t started = 0;
         if (can != 0 && player_start_pressed(p) != 0 && mem.at<int16_t>(G::game_mode) != 5 &&
             ((mem.at<uint8_t>(kCameraStatus) >> 1) & 1)) {

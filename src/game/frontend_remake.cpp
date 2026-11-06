@@ -285,8 +285,8 @@ void Frontend::remakeBegin(int screen, const std::string& key)
 // helps and Escape item as the Classic style's)
 void Frontend::remakeMainMenu()
 {
-    const int grp = debugItems_ ? 0 : mainGroup_;
-    remakeBegin(1, "main" + std::to_string(grp) + (debugItems_ ? "d" : ""));
+    const int grp = mainGroup_;   // (GitHub #44: More Modes / Extras open with SKIDMARX on too)
+    remakeBegin(1, "main" + std::to_string(grp) + (debugItems_ && grp == 0 ? "d" : ""));
     idleReset_ = true;   // 0x421119: the idle timer starts with the screen
     rebuild_ = [this]() { remakeMainMenu(); };
     root_->user = 0;
@@ -313,7 +313,7 @@ void Frontend::remakeMainMenu()
         addChild(root_, w);
         setRect(w, cw_ / 2 - sw / 2, top + k * step, sw, sh);   // (one column on the panel's centre)
         w->text = it.name();
-        w->value = it.tag;   // (polish: Survival's small red line under its name)
+        w->value = it.tag;   // (polish: an item's small red line under its name: TotD 0's)
         w->help = it.help;
         w->seed = 101 + k * 7 + grp * 53;
         w->draw = &Frontend::drawRStrip;
@@ -943,7 +943,7 @@ void Frontend::remakePrompts(Widget* root, bool tabsKeys, std::function<void()> 
         ps.push_back({"Right", "E", "RB", step(1), 0});
         ps.push_back({"Left", "Q", "LB", step(-1), 0});
     }
-    const bool top = screen_ == 1 && !debugItems_ && mainGroup_ == 0;
+    const bool top = screen_ == 1 && mainGroup_ == 0;   // (Escape is Quit there, SKIDMARX or not)
     // (the main menu: Escape is its last item's, Quit / Back; the pages: this prompt is Escape's widget)
     if (gunPrompts) {   // Light Gun Edition: the gun's buttons (reload = Back / Quit, the trigger = Accept)
         ps.push_back({top ? "Quit" : "Back", "Reload", "Reload", back, screen_ == 1 || screen_ == 21 ? 0 : 1});
@@ -2542,7 +2542,7 @@ void Frontend::drawRStrip(Widget& w)
            lit || chosen ? 0 : w.user == 1 ? 2 : 1);
     float th = big ? std::min(26.0f, float(hh) * 0.62f) : std::min(15.0f, float(hh) * 0.6f);
     // polish (user 2026-11-03: the More Modes labels ran past their strips): a label too long for the paper (inside its
-    // torn edges) smaller; a tag (Survival's "Very Experimental / Proof of Concept") a small red line under it
+    // torn edges) smaller; a tag (none at present) a small red line under it
     const float room = float(ww) - 30.0f;
     float tagH = 0.0f;
     if (!big) {

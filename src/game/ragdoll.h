@@ -48,6 +48,7 @@ struct RagdollWalls {
     };
     std::vector<Obj> objs;
     std::vector<int> active;
+    size_t statics = 0;            // objs [0, statics) the world's, the rest this frame's moving props (doors ...)
 };
 
 } // namespace hotd::game

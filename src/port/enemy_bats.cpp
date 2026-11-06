@@ -326,6 +326,12 @@ template <class P> void Game<P>::bat_st3_circle(uint32_t obj)
         of<int32_t>(obj, 0x2EC) = c;
         if (!(c < 0))
             return;
+        // (ours, totd8: The Typing of the Dead 0's attack window, game.h: the dive waits as the others' do; null in
+        // the arcade. Up to totd7 these bats dove on their own timing and hit before their key's grace ran out)
+        if (gAttackHold && gAttackHold(obj)) {
+            of<int32_t>(obj, 0x2EC) = 0;
+            return;
+        }
     } else {
         if ((of<uint16_t>(obj, 0x58) >> 12) & 1)
             return;

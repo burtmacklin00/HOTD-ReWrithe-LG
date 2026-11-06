@@ -546,17 +546,123 @@ bool readWav8(const std::string& path, std::vector<uint8_t>& out, uint32_t& rate
     }
     return false;
 }
+
+// totd8 (user 2026-11-05: "make it sound arcadey or PC depending on the audio. Compress it like how the game would"):
+// a WAV (PCM 8 / 16 / 24-bit, IEEE float 32, any channels) as float mono -1..1 at its own rate; false: not one
+bool readWavF(const std::string& path, std::vector<float>& out, uint32_t& rate)
+{
+    std::ifstream f(path, std::ios::binary);
+    if (!f)
+        return false;
+    std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    auto u16 = [&](size_t o) { return uint32_t(d[o] | d[o + 1] << 8); };
+    auto u32 = [&](size_t o) { return uint32_t(d[o] | d[o + 1] << 8 | d[o + 2] << 16 | uint32_t(d[o + 3]) << 24); };
+    if (d.size() < 12 || std::memcmp(d.data(), "RIFF", 4) != 0 || std::memcmp(d.data() + 8, "WAVE", 4) != 0)
+        return false;
+    uint32_t fmt = 0, channels = 0, bits = 0;
+    rate = 0;
+    for (size_t o = 12; o + 8 <= d.size();) {
+        const uint32_t len = u32(o + 4);
+        const size_t body = o + 8;
+        if (body + len > d.size())
+            break;
+        if (std::memcmp(d.data() + o, "fmt ", 4) == 0 && len >= 16) {
+            fmt = u16(body), channels = u16(body + 2), rate = u32(body + 4), bits = u16(body + 14);
+            if (fmt == 0xFFFE && len >= 26)   // (WAVE_FORMAT_EXTENSIBLE: its sub-format's first word)
+                fmt = u16(body + 24);
+        } else if (std::memcmp(d.data() + o, "data", 4) == 0 && channels >= 1 && rate > 0 &&
+                   ((fmt == 1 && (bits == 8 || bits == 16 || bits == 24)) || (fmt == 3 && bits == 32))) {
+            const size_t bytes = bits / 8, frame = channels * bytes, n = len / frame;
+            out.resize(n);
+            for (size_t i = 0; i < n; ++i) {
+                float sum = 0;
+                for (uint32_t c = 0; c < channels; ++c) {
+                    const size_t at = body + i * frame + c * bytes;
+                    if (fmt == 3) {
+                        float v;
+                        std::memcpy(&v, &d[at], 4);
+                        sum += v;
+                    } else if (bits == 8)
+                        sum += (float(d[at]) - 128.0f) / 128.0f;
+                    else if (bits == 16)
+                        sum += float(int16_t(u16(at))) / 32768.0f;
+                    else
+                        sum += float(int32_t((u16(at) << 8 | uint32_t(d[at + 2]) << 24)) >> 8) / 8388608.0f;
+                }
+                out[i] = sum / float(channels);
+            }
+            return n > 0;
+        }
+        o = body + len + (len & 1);
+    }
+    return false;
+}
+
+// totd8: `in` (float mono at `from` Hz) as the game's own samples are on the sound in use: resampled to `to` Hz (a
+// windowed-sinc low-pass at 0.45 of the new rate, as a sample editor of the time converted; no dither), the peak
+// brought to `peak` of full scale, then 8-bit unsigned (0x80 silence) rounded to the nearest step. The mixer plays it
+// as any 8-bit sample: linear interpolation between the steps (the SCSP's too)
+std::vector<uint8_t> degrade8(const std::vector<float>& in, uint32_t from, uint32_t to, float peak)
+{
+    constexpr double kPi = 3.14159265358979323846;
+    std::vector<float> r;
+    if (from == to || in.empty())
+        r = in;
+    else {
+        const double ratio = double(from) / double(to), cut = 0.45 * std::min(1.0, 1.0 / ratio);   // (in input cycles)
+        const int half = int(std::ceil(16.0 * std::max(1.0, ratio)));
+        const size_t n = size_t(double(in.size()) / ratio);
+        r.resize(n);
+        for (size_t i = 0; i < n; ++i) {
+            const double c = double(i) * ratio;
+            const int c0 = int(std::floor(c));
+            double acc = 0, wsum = 0;
+            for (int k = c0 - half + 1; k <= c0 + half; ++k) {
+                if (k < 0 || k >= int(in.size())) continue;
+                const double x = double(k) - c;
+                const double sinc = std::abs(x) < 1e-9 ? 2.0 * cut : std::sin(2.0 * kPi * cut * x) / (kPi * x);
+                const double w = 0.42 + 0.5 * std::cos(kPi * x / half) + 0.08 * std::cos(2.0 * kPi * x / half);   // Blackman
+                acc += double(in[size_t(k)]) * sinc * w;
+                wsum += sinc * w;
+            }
+            r[i] = float(wsum != 0 ? acc / wsum : 0.0);   // (DC gain 1)
+        }
+    }
+    float top = 1e-6f;
+    for (float v : r)
+        top = std::max(top, std::abs(v));
+    const float g = peak > 0.0f ? std::clamp(peak, 0.0f, 1.0f) / top : 1.0f;
+    std::vector<uint8_t> out(r.size());
+    for (size_t i = 0; i < r.size(); ++i)
+        out[i] = uint8_t(std::clamp(int(std::lround(128.0f + r[i] * g * 127.0f)), 0, 255));
+    return out;
+}
 } // namespace
 
-bool Audio::playExtra(const std::string& dir, const std::string& name, int cue, float pitch, float clip, float volume)
+bool Audio::playExtra(const std::string& dir, const std::string& name, int cue, float pitch, float clip, float volume, float normalize)
 {
-    auto it = extras_.find(name);
+    const float asked = volume;
+    // totd8 (user 2026-11-05: "make it sound arcadey or PC depending on the audio. Compress it like how the game
+    // would"): a typing sound's own WAV (normalize > 0) is cut down to the samples of the sound playing it: the arcade
+    // board's effects (8-bit, 22050 Hz: the gun shot's slot, docs/typing.md) or the 1998 PC's (8-bit, 11025 Hz,
+    // mono: its sound set-up). One copy per board, made on first use; the file on disk is left as it is
+    static const bool raw = std::getenv("HOTD_TOTD_RAWWAV") != nullptr;   // (testing: the WAV as before, 8-bit at its rate)
+    const bool degrade = normalize > 0.0f && !raw;
+    const std::string key = degrade ? name + (boardOn_ ? "#arcade" : "#pc") : name;
+    auto it = extras_.find(key);
     if (it == extras_.end()) {
         Extra e;
         uint32_t rate = 0;
         SampleInfo s{};
         s.bits = 8, s.unk = -1, s.source = 3;
-        if (readWav8(dir + "/" + name + ".wav", e.data, rate)) {
+        std::vector<float> wav;
+        if (degrade && readWavF(dir + "/" + name + ".wav", wav, rate)) {
+            const uint32_t to = boardOn_ ? 22050u : 11025u;
+            e.data = degrade8(wav, rate, to, normalize);
+            e.file = true;
+            s.rate = to;
+            note("typing: " + dir + "/" + name + ".wav as " + (boardOn_ ? "the arcade board's" : "the PC's") + " 8-bit " + std::to_string(to) + " Hz");
+        } else if (readWav8(dir + "/" + name + ".wav", e.data, rate)) {
             e.file = true;
             s.rate = rate;
             note("survival: " + dir + "/" + name + ".wav");
@@ -570,23 +676,50 @@ bool Audio::playExtra(const std::string& dir, const std::string& name, int cue, 
                 s.rate = uint32_t(double(from.rate ? from.rate : 11025) * std::clamp(pitch, 0.25f, 4.0f));
                 volume *= from.volume / 255.0f;
             }
+        } else if (cue >= 0 && cue < int(cues_.size()) && cues_[size_t(cue)].type == 4) {
+            // totd5: a file cue's one-shot (O_*.RBH, e.g. the life chime O_LIFEUP) as the stand-in, at its slot's rate
+            const int k = cues_[size_t(cue)].value & 0xFFFF;
+            if (const auto* d = loadOneShot(cues_[size_t(cue)].name); d && !d->empty() && k >= 0 && k < int(samples_.size())) {
+                const uint32_t n = std::max<uint32_t>(1, uint32_t(double(d->size()) * std::clamp(clip, 0.05f, 1.0f)));
+                e.data.assign(d->begin(), d->begin() + n);
+                const uint32_t r = samples_[size_t(k)].rate ? samples_[size_t(k)].rate : 22050;
+                s.rate = uint32_t(double(r) * std::clamp(pitch, 0.25f, 4.0f));
+            }
+        }
+        // totd5 (user 2026-11-04: "I could barely hear the typing sounds"): normalize > 0: the sound's peak brought to
+        // `normalize` of full scale (8-bit around 128) and the asked volume as it is (not the bank's own), so a quiet bank
+        // sample is as clear as the next
+        if (normalize > 0.0f && !e.data.empty()) {
+            int peak = 1;
+            for (uint8_t b : e.data)
+                peak = std::max(peak, std::abs(int(b) - 128));
+            const float g = std::clamp(normalize, 0.0f, 1.0f) * 127.0f / float(peak);
+            for (uint8_t& b : e.data)
+                b = uint8_t(std::clamp(int(std::lround(128.0f + (float(b) - 128.0f) * g)), 0, 255));
+            volume = asked;
         }
         if (!e.data.empty()) {
             s.length = uint32_t(e.data.size());
-            s.volume = uint16_t(std::clamp(volume, 0.0f, 1.0f) * 255.0f);
+            s.volume = uint16_t(std::clamp(volume, 0.0f, normalize > 0.0f ? 4.0f : 1.0f) * 255.0f);
             e.sample = int(samples_.size());
             samples_.push_back(s);
         }
-        it = extras_.emplace(name, std::move(e)).first;
+        it = extras_.emplace(key, std::move(e)).first;
     }
     if (it->second.sample < 0)
         return false;
-    return play(it->second.sample, it->second.data.data(), uint32_t(it->second.data.size()));
+    std::lock_guard<std::recursive_mutex> g(lock_);
+    nextDirect_ = normalize > 0.0f;   // (totd7: the typing sounds after the limiter, never squeezed by the music)
+    const bool ok = play(it->second.sample, it->second.data.data(), uint32_t(it->second.data.size()));
+    nextDirect_ = false;
+    return ok;
 }
 
 std::string Audio::extraSource(const std::string& name) const
 {
-    const auto it = extras_.find(name);
+    auto it = extras_.find(name + (boardOn_ ? "#arcade" : "#pc"));
+    if (it == extras_.end())
+        it = extras_.find(name);
     return it == extras_.end() || it->second.sample < 0 ? std::string() : it->second.file ? "file" : "stand-in";
 }
 
@@ -728,6 +861,7 @@ bool Audio::play(int sample, const uint8_t* data, uint32_t size)
     v->sample = sample;
     v->held = false;   // a sound started while the game is paused (the pause menu's own cues) plays
     v->quiet = quietEffects_ && !v->loop;   // (a cut-scene's skip: its voices and one-shots unheard; loops play on)
+    v->direct = nextDirect_;
     return v->length > 0 && s.volume > 0;
 }
 
@@ -1133,9 +1267,17 @@ void Audio::mix(float* out, int frames)
 {
     std::fill(out, out + frames * 2, 0.0f);
     std::lock_guard<std::recursive_mutex> g(lock_);
+    // totd7: the direct voices (TotD 0's typing sounds) into their own buffer, added after the limiter and the board
+    if (directBuf_.size() < size_t(frames) * 2)
+        directBuf_.resize(size_t(frames) * 2);
+    std::fill(directBuf_.begin(), directBuf_.begin() + frames * 2, 0.0f);
+    bool anyDirect = false;
+    float* const out_ = out;
     auto mixVoice = [&](Voice& v) {
         if (!v.data || v.held)   // held by the pause: kept where it is
             return;
+        float* const out = v.direct ? directBuf_.data() : out_;
+        anyDirect = anyDirect || v.direct;
         const float gain = v.quiet ? 0.0f : v.volume * sfxVolume_ * kSfxGain * kPcLevel;
         const float ramp = 1.0f / kFade;
         for (int i = 0; i < frames; ++i) {
@@ -1208,6 +1350,15 @@ void Audio::mix(float* out, int frames)
         boardPeak_ = peak;
     }
 #endif
+    // totd7 (user 2026-11-05: "the typing sounds are still not loud enough"): the direct voices on top, after the
+    // limiter (totd5's went into it with the music and were squeezed whenever the track was loud); where they sound,
+    // a soft knee above 0.9 keeps the sum from clipping (elsewhere the mix is untouched)
+    if (anyDirect)
+        for (int i = 0; i < frames * 2; ++i)
+            if (const float d = directBuf_[size_t(i)]; d != 0.0f) {
+                const float s = out[i] + d, a = std::fabs(s);
+                out[i] = a > 0.9f ? std::copysign(0.9f + 0.1f * std::tanh((a - 0.9f) / 0.1f), s) : s;
+            }
 }
 
 // the pause (THOTD.EXE 0x41ACA8 / 0x41ACF0, game/pause.h): hold = the CD's pause (0x565BE0) and message 0x418 (every

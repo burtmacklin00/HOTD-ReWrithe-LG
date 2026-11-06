@@ -278,8 +278,17 @@ template <class P> void Game<P>::chariot_frame(uint32_t obj)
                 of<int16_t>(obj, 0x60) = 17;
             }
         }
+        // (ours, totd8: The Typing of the Dead 0's boss strike hold, game.h: an attack action waits as the arcade's
+        // own "combat not active" one does, in action 17's idle; null in the arcade)
+        const auto attack = [](int32_t a) { return a == 8 || a == 9 || a == 11 || a == 18; };
+        if (gBossHold && attack(of<int16_t>(obj, 0x60)) && gBossHold(obj)) {
+            mem.at<uint16_t>(blk + 0x24) = of<uint16_t>(obj, 0x60);
+            of<int16_t>(obj, 0x60) = 17;
+        }
     }
-    if (of<uint16_t>(obj, 0x60) == 17 && combat_active() != 0) {
+    if (of<uint16_t>(obj, 0x60) == 17 && combat_active() != 0 &&
+        !(gBossHold && (mem.at<int16_t>(blk + 0x24) == 8 || mem.at<int16_t>(blk + 0x24) == 9 ||
+                        mem.at<int16_t>(blk + 0x24) == 11 || mem.at<int16_t>(blk + 0x24) == 18) && gBossHold(obj))) {
         of<int16_t>(obj, 0x66) = 0;
         of<uint16_t>(obj, 0x60) = mem.at<uint16_t>(blk + 0x24);
     }
