@@ -839,7 +839,7 @@ void Runtime::frame_one()
     for (uint32_t k = 0; k < 12; ++k)
         camera[k] = mem.f32(slot + 4 * k);
     ragdoll_frame();   // the Ragdoll mod (game/ragdoll.h): the dead bodies' drawn poses (draws only; after the camera: it needs it)
-    if (lg_exploding || lgLook == 1 || lgWeapon[0] >= 0)
+    if (lg_exploding || lgLook == 1 || lgWeapon[0] >= 0 || weapons.mode == Weapons::Arsenal)
         lg_bodies_frame();   // (Arsenal: the rocket's targets)   // Light Gun Edition: Exploding Zombies / Night Vision (the bodies, their colours)
     if (lg_roulette)
         lg_roulette_frame();   // Light Gun Edition: Weak-Point Roulette (the glowing parts for the next shots)
@@ -977,8 +977,20 @@ void Runtime::lg_modes_frame()
             lgLastRounds_[p & 3] = pl.rounds;
             }
         } else {
+            const bool engine = weapons.mode == Weapons::Arsenal;   // (the creator's weapons: Arsenal / Shotgun / Machine Gun)
+            if (engine && pl.state == 5 && !lgArmed_[p & 3]) {   // (a seat's first frame in play: its weapons)
+                weapons.arm(*this, p);
+                lgArmed_[p & 3] = true;
+            }
             if (lgModes.freeFire && pl.state == 5) {   // Free Fire: the gun never runs dry
-                pl.rounds = pm_full_rounds(p);
+                if (engine) {
+                    Weapons::Seat& s = weapons.seat[p & 3];
+                    pl.rounds = uint8_t(weapons.magazine(p, s.cur));
+                    s.reserve[s.cur] = weapons.reserveFull(p, s.cur);
+                    s.reload = 0;
+                } else {
+                    pl.rounds = pm_full_rounds(p);
+                }
                 pl.empty = 0;
             }
             if (lgModes.shotgunShells > 0 && pl.rounds > lgModes.shotgunShells)   // Shotgun Mode: a load is 3 shells
@@ -1248,7 +1260,9 @@ void Runtime::lg_explode(int player, uint32_t part)
 // Arsenal Mode's rocket launcher (user 2026-11-05): every shot fired kills every zombie on the screen
 void Runtime::lg_fired(int player)
 {
-    if (lgWeapon[player & 3] == 3 && mem.at<int16_t>(G::game_mode) == 4)
+    const bool rocket = lgWeapon[player & 3] == 3 ||
+                        (weapons.mode == Weapons::Arsenal && weapons.seat[player & 3].cur == kRocket);
+    if (rocket && mem.at<int16_t>(G::game_mode) == 4)
         lg_blast_all(player);
 }
 

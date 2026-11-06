@@ -434,6 +434,7 @@ public:
     bool lgMachineGun = false;
     // Arsenal Mode's rocket launcher (user 2026-11-05): one rocket a load, 5 loads in reserve for the game ("x 5")
     int lgRockets[4] = {5, 5, 5, 5};
+    bool lgArmed_[4] = {};   // (the creator's weapons, Arsenal: the seat has its weapons)
     bool lgRocketLoaded[4] = {true, true, true, true};   // Machine Gun mode (not Arsenal's): its rounds drawn as the machine gun's (silver)   // a one-player mode (The Typing of the Dead 0): seats 2-4 never join
     // Coin-Op Survival: the clock (seconds left; < 0 off), what was counted so far, the last change (shown by the clock)
     double lgClock = -1;

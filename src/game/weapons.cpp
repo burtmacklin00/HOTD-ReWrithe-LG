@@ -66,6 +66,21 @@ std::vector<WeaponDef> defaults()
     hand.fireSound = "hand_fire", hand.fireGameCue = 0xA01463;   // (magician_fireball's throw: the PC's cue 249)
     hand.reloadSound = "hand_reload", hand.reloadPitch = 0.5f;
     hand.price = 8000, hand.drop = 1, hand.rank = 1;
+    // Light Gun Edition (Killer Mods): the machine gun (heavier than the SMG: a bigger magazine, faster, a lower shot)
+    // and the rocket launcher (one rocket a load, 5 in reserve; each one fired blows up every zombie on the screen:
+    // Runtime::lg_fired)
+    WeaponDef& mg = v[kMachine];
+    mg.key = "machinegun", mg.name = "MACHINE GUN";
+    mg.magazine = 50, mg.reserveMags = 4, mg.reload = 96, mg.period = 4, mg.burst = 5, mg.damage = 110;
+    mg.fireSound = "machinegun_fire", mg.fireCue = 30, mg.firePitch = 1.0f, mg.fireClip = 0.38f, mg.fireVolume = 1.0f;
+    mg.reloadSound = "machinegun_reload", mg.reloadPitch = 0.6f;
+    mg.price = 0, mg.drop = 0, mg.rank = 6;
+    WeaponDef& rk = v[kRocket];
+    rk.key = "rocket", rk.name = "ROCKET LAUNCHER";
+    rk.magazine = 1, rk.reserveMags = 5, rk.reload = 60, rk.damage = 100;
+    rk.fireSound = "rocket_fire", rk.fireGameCue = 0xA01463;   // (the Magician's fireball throw, as the Hand's)
+    rk.reloadSound = "rocket_reload", rk.reloadPitch = 0.5f;
+    rk.price = 0, rk.drop = 0, rk.rank = 7;
     return v;
 }
 
@@ -278,7 +293,28 @@ void Weapons::begin(Runtime& rt, Mode m)
             rt.actorAreas[k] = kMagicianArea;
     }
     if (rt.log && m != Off)
-        rt.log(std::string("weapons: ") + (m == Survival ? "Survival" : "Drops") + " (" + std::to_string(kWeapons) + " weapons)");
+        rt.log(std::string("weapons: ") + (m == Survival ? "Survival" : m == Arsenal ? "Arsenal" : "Drops") + " (" + std::to_string(kWeapons) + " weapons)");
+}
+
+bool Weapons::endless(int w) const
+{
+    return def(w).reserveMags < 0 || (mode == Arsenal && w != kRocket);
+}
+
+void Weapons::arm(Runtime& rt, int p)
+{
+    Seat& s = seat[p & 3];
+    s = Seat();
+    s.mag[kPistol] = magazine(p, kPistol);
+    for (int w = 1; w < kWeapons; ++w)
+        if (only < 0 || w == only)
+            give(rt, p, w);
+    if (only > 0)
+        select(rt, p, only);
+    else
+        rt.mem.at<port::a::Player>(rt.player_rec(p)).rounds = uint8_t(magazine(p, kPistol));
+    rt.survivalRounds[p & 3] = magazine(p, s.cur);
+    notice[p & 3].clear();
 }
 
 void Weapons::end(Runtime& rt)
@@ -315,14 +351,14 @@ int Weapons::reloadFrames(int p) const
 {
     const Seat& s = seat[p & 3];
     // Drops: the handgun reloads at once as the arcade's (an off-screen pull); the others take their time
-    const int f = mode == Drops && s.cur == kPistol ? 0 : def(s.cur).reload;
+    const int f = (mode == Drops || mode == Arsenal) && s.cur == kPistol ? 0 : def(s.cur).reload;   // (Arsenal: as the arcade's too)
     return s.quick ? f / 2 : f;
 }
 
 bool Weapons::hasAmmo(int p, int w) const
 {
     const Seat& s = seat[p & 3];
-    return s.own[w] && (w == kPistol || s.mag[w] > 0 || s.reserve[w] > 0);
+    return s.own[w] && (w == kPistol || endless(w) || s.mag[w] > 0 || s.reserve[w] > 0);
 }
 
 bool Weapons::give(Runtime& rt, int p, int w)
@@ -523,7 +559,7 @@ void Weapons::gunInput(Runtime& rt, int p, bool& trigger, bool onScreen, bool he
         s.timer = 0, s.burst = 0;
         if (--s.reload == 0) {
             const int mag = magazine(p, s.cur);
-            if (def(s.cur).reserveMags < 0) {
+            if (endless(s.cur)) {
                 pl.rounds = uint8_t(mag);
             } else {
                 const int take = std::max(0, std::min(mag - int(pl.rounds), s.reserve[s.cur]));
@@ -552,7 +588,7 @@ void Weapons::gunInput(Runtime& rt, int p, bool& trigger, bool onScreen, bool he
             return;
         }
         trigger = false;
-        if (def(s.cur).reserveMags >= 0 && s.reserve[s.cur] == 0) {   // (nothing to load)
+        if (!endless(s.cur) && s.reserve[s.cur] == 0) {   // (nothing to load)
             setShot(rt, p, false);
             return;
         }
@@ -609,7 +645,7 @@ void Weapons::afterFrame(Runtime& rt)
         s.mag[s.cur] = pl.rounds;
         rt.survivalRounds[p] = magazine(p, s.cur);
         // a weapon with nothing left (its magazine and reserve): gone, back to the best one with ammo (the handgun)
-        if (s.cur != kPistol && pl.rounds == 0 && s.reserve[s.cur] == 0 && s.reload == 0) {
+        if (s.cur != kPistol && !endless(s.cur) && pl.rounds == 0 && s.reserve[s.cur] == 0 && s.reload == 0) {
             const int gone = s.cur;
             s.own[gone] = false;
             s.cur = kPistol;   // (select() keeps the old magazine: the gun is gone)

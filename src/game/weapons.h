@@ -29,7 +29,9 @@ namespace hotd::game {
 class Runtime;
 struct DrawModel;
 
-enum WeaponId { kPistol, kSmg, kRifle, kDual, kShotgun, kHand, kWeapons };
+// (Light Gun Edition: the Killer Mods' machine gun and rocket launcher after Survival's six: Arsenal / Machine Gun
+// mode only, never sold or dropped)
+enum WeaponId { kPistol, kSmg, kRifle, kDual, kShotgun, kHand, kMachine, kRocket, kWeapons };
 
 struct WeaponDef {
     std::string key;                // the ini section / its id (pistol, smg, rifle, dual, shotgun, hand)
@@ -72,7 +74,12 @@ std::string weaponsSoundDir();    // data/weapons (the user's sound files)
 
 class Weapons {
 public:
-    enum Mode { Off, Survival, Drops };
+    // Arsenal (Light Gun Edition, Killer Mods): every player has every weapon (only: one weapon alone, Shotgun /
+    // Machine Gun mode), the middle button steps through them; their reserves never run out but the rocket launcher's
+    enum Mode { Off, Survival, Drops, Arsenal };
+    int only = -1;                  // Arsenal: the one weapon of Shotgun / Machine Gun mode (-1: every weapon)
+    bool endless(int w) const;      // its reserve never runs out (the handgun; Arsenal: all but the rocket launcher)
+    void arm(Runtime& rt, int p);   // Arsenal: the seat's weapons (every one, or the only one in the hand)
     Mode mode = Off;
     bool live = false;              // the weapons work now (Survival: the arena reached; Drops: in play)
     bool autoBest[4] = {};          // this seat's weapon is picked for it (a light gun; main sets it each frame)

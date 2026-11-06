@@ -2130,13 +2130,13 @@ void Hud::drawSurvival(const Runtime& rt, int ww, int wh, int scale)
                 // qa2 (QA: "16/80" here and "X16" on the bullet row showed the magazine twice): players 1 / 2 the
                 // reserve alone (the magazine is the bullet row's, as the arcade's: its bullets, past 6 "X N"); players
                 // 3 / 4 (no count on their bullet row) the magazine / reserve
-                else if (s.cur != kPistol && !top)
+                else if (s.cur != kPistol && !top && !wp.endless(s.cur))
                     ammo = lang::tr("RESERVE") + " " + std::to_string(s.reserve[s.cur]);
-                else if (s.cur != kPistol)
-                    ammo = std::to_string(int(pl.rounds)) + "/" + std::to_string(s.reserve[s.cur]);
+                else if (s.cur != kPistol && top)   // (Arsenal's endless reserves: the magazine alone)
+                    ammo = wp.endless(s.cur) ? std::to_string(int(pl.rounds)) : std::to_string(int(pl.rounds)) + "/" + std::to_string(s.reserve[s.cur]);
                 const float nw = scoreText(rt, img, W, H, name, 0, 0, 1, 0, kWhite, true);
                 const float aw = scoreText(rt, img, W, H, ammo, 0, 0, 1, 0, kWhite, true);
-                const uint8_t* ac = s.reload > 0 || (low && top) || (!top && s.reserve[s.cur] == 0) ? kRed : kWhite;
+                const uint8_t* ac = s.reload > 0 || (low && top) || (!top && !wp.endless(s.cur) && s.reserve[s.cur] == 0) ? kRed : kWhite;
                 const uint8_t* nc = newWeapon ? kSeat[p] : kWhite;
                 if (left) {
                     text(img, name, edge, yWeapon, 1, 0, nc);

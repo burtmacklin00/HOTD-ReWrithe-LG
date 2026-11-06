@@ -784,16 +784,16 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // its name as the Mods page's mods have (local games; online games are always played as normal)
         // Weapons
         r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { c.shotgun = !c.shotgun; save(); },
-                     "each blast does double damage to everything in a wide spread (several zombies at once), but the gun holds only 3 shells"});
+                     "the whole game with the shotgun (Survival Mode's): a spread of 6 pellets, 6 shells, a slower reload"});
         killerBy(r);
         r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { c.freeFire = !c.freeFire; save(); },
                      "unlimited ammo, no reloading (for young players and parties)"});
         killerBy(r);
         r.push_back({"Machine Gun", [&c]() { return onOff(c.machineGun); }, [&c, save]() { c.machineGun = !c.machineGun; save(); },
-                     "hold the trigger for automatic fire (recoil on every shot), unlimited ammo"});
+                     "the whole game with the machine gun: hold the trigger for automatic fire (recoil on every shot), unlimited ammo"});
         killerBy(r);
         r.push_back({"Arsenal Mode", [&c]() { return onOff(c.weaponSwitch); }, [&c, save]() { c.weaponSwitch = !c.weaponSwitch; save(); },
-                     "the gun's middle button switches weapons: Pistol, Shotgun, Machine Gun, Rocket Launcher (each player their own)"});
+                     "middle button: next weapon. Handgun, SMG, Rifle, Double Pistols, Shotgun, Magician's Hand, Machine Gun, Rocket Launcher"});
         killerBy(r);
         // Challenges
         r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { c.hardcore = !c.hardcore; save(); },

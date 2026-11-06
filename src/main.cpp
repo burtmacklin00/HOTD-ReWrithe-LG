@@ -5361,6 +5361,7 @@ int main(int argc, char* argv[])
         r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0, r.lgMachineGun = false;   // (online: none)
         r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
         r.lgBanner.clear();
+        if (r.weapons.mode == game::Weapons::Arsenal) r.weapons.end(r);
         if (!gNet) {
             // Arsenal Mode: each player's own weapon (the middle button), every player starts with the pistol; the
             // whole-game Shotgun / Machine Gun modes are its weapons then
@@ -5369,7 +5370,7 @@ int main(int argc, char* argv[])
             const bool arsenal = cfg.weaponSwitch && ownGuns;
             const bool shotgunOn = cfg.shotgun && ownGuns, machineGunOn = cfg.machineGun && ownGuns, freeFireOn = cfg.freeFire && ownGuns;
             r.lgModes.freeFire = freeFireOn || (machineGunOn && !arsenal);   // (Machine Gun: unlimited ammo too)
-            r.lgMachineGun = machineGunOn && !arsenal;
+            r.lgMachineGun = false;   // (v1.3.0's weapons draw every gun now: below)
             r.lgModes.hardcore = cfg.hardcore && !bossModeOpt;   // (Sudden Death: a normal game's lives and continues, user 2026-11-05)
             r.lg_one_hit = cfg.suddenDeath && !bossModeOpt;
             r.lg_hostage_crisis = cfg.hostageCrisis, r.lg_crisis_fail = false;
@@ -5405,10 +5406,19 @@ int main(int argc, char* argv[])
             r.lgModes.vampire = false;   // (user 2026-11-05: Vampire Mode removed; Married Mode in its place)
             r.lgModes.flashlight = cfg.flashlight;
             r.lgModes.bigHeads = false;   // (v1.2.0: the Big Head mod, Options > Mods, instead)
-            r.lgModes.shotgunShells = shotgunOn && !arsenal ? 3 : 0;
-            r.lg_hit_scale = shotgunOn && !arsenal ? 3.0f : 1.0f;
+            // (user 2026-11-06: the guns as the creator's Survival ones, ours kept): Arsenal, Shotgun and Machine Gun mode
+            // run on the creator's weapon engine (game/weapons.h: its shots, spread, flashes, sounds, HUD), with our
+            // machine gun and rocket launcher added to it; our own weapons code (lgWeapon) stays unused
+            r.lgModes.shotgunShells = 0;
+            r.lg_hit_scale = 1.0f;
             for (int k = 0; k < 4; ++k)
-                r.lgWeapon[k] = arsenal ? 0 : -1, r.lgRockets[k] = 5, r.lgRocketLoaded[k] = true, r.lg_dmg_scale[k] = 1.0f;
+                r.lgWeapon[k] = -1, r.lgRockets[k] = 5, r.lgRocketLoaded[k] = true, r.lg_dmg_scale[k] = 1.0f, r.lgArmed_[k] = false;
+            if (arsenal || shotgunOn || machineGunOn) {
+                r.weapons.begin(r, game::Weapons::Arsenal);
+                r.weapons.only = arsenal ? -1 : shotgunOn ? game::kShotgun : game::kMachine;
+            } else if (r.weapons.mode == game::Weapons::Arsenal) {
+                r.weapons.end(r);
+            }
             if (r.lgModes.hardcore) {
                 r.settings.lives = 0;          // (the lives table's first row: 1 life)
                 r.bossNoContinue = true;       // (everyone out: game over at once, no team countdown)
@@ -5540,6 +5550,7 @@ int main(int argc, char* argv[])
         if (title) {   // Light Gun Edition: the attract demo as the original plays it (no fun modes)
             r.lgModes = {};
             r.lgBanner.clear();
+            if (r.weapons.mode == game::Weapons::Arsenal) r.weapons.end(r);   // (the attract demo: no Killer guns)
             r.lg_one_hit = false, r.lg_hit_scale = 1.0f;
             r.lg_hostage_crisis = r.lg_crisis_fail = r.lg_roulette = false;
             r.lg_exploding = false, r.lgLook = 0, r.lgClock = -1.0, r.lgTimeUp = false, gSonic.turbo = 0, r.lgMachineGun = false;
@@ -15503,13 +15514,15 @@ int main(int argc, char* argv[])
             // Light Gun Edition: Machine Gun mode: a held trigger fires again every 110 ms (about 9 shots a second; each
             // its recoil pulse) while the player is in play; player 1's mouse counts as held from its left button
             // Arsenal Mode: the middle button: the player's next weapon (Pistol > Shotgun > Machine Gun > Rocket Launcher)
-            lightGuns.weaponSwitch = rt.lgWeapon[0] >= 0;
+            const bool arsenalNow = rt.weapons.mode == game::Weapons::Arsenal && rt.weapons.only < 0;
+            lightGuns.weaponSwitch = rt.lgWeapon[0] >= 0 || arsenalNow;
             for (int p = 0; p < rt.seat_count(); ++p)
                 if (guns[p].weaponNext) {
                     guns[p].weaponNext = false;
-                    if (rt.lgWeapon[p] >= 0) rt.lg_weapon_next(p);
+                    if (arsenalNow && p < 4) rt.weapons.request[p] = 1;   // (the creator's weapons: the next one)
+                    else if (rt.lgWeapon[p] >= 0) rt.lg_weapon_next(p);
                 }
-            if (cfg.machineGun || rt.lgWeapon[0] >= 0) {
+            if (!rt.weapons.on() && (cfg.machineGun || rt.lgWeapon[0] >= 0)) {   // (the creator's weapons: their own held fire)
                 static Uint64 nextShot[game::kInputPlayers] = {};
                 const Uint64 now = SDL_GetTicks();
                 if (cfg.p1Input == 0 && !lightGuns.active())
@@ -15560,7 +15573,8 @@ int main(int argc, char* argv[])
                 if (pads.weaponStep[p] != 0 && rt.weapons.live)
                     rt.weapons.request[seat] = pads.weaponStep[p] > 0 ? 1 : -1;
                 pads.weaponStep[p] = 0;
-                rt.weapons.autoBest[seat] = lightGuns.want[p] && game::weaponOptions().autoBestLightGun;
+                rt.weapons.autoBest[seat] = lightGuns.want[p] && game::weaponOptions().autoBestLightGun &&
+                                            rt.weapons.mode != game::Weapons::Arsenal;   // (Arsenal: the middle button picks)
             }
             // vr (docs/vr.md): player 1's aim is the VR gun's ray (the last VR frame's); its trigger and a reload (the
             // gun pointed down) add to the mouse / keys' (the preview: the mouse button is the trigger). Off screen
