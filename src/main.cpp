@@ -5364,9 +5364,12 @@ int main(int argc, char* argv[])
         if (!gNet) {
             // Arsenal Mode: each player's own weapon (the middle button), every player starts with the pistol; the
             // whole-game Shotgun / Machine Gun modes are its weapons then
-            const bool arsenal = cfg.weaponSwitch;
-            r.lgModes.freeFire = cfg.freeFire || (cfg.machineGun && !arsenal);   // (Machine Gun: unlimited ammo too)
-            r.lgMachineGun = cfg.machineGun && !arsenal;
+            // (Survival Mode has its own weapons, shop and ammo; The Typing of the Dead 0 no gun: the gun mods are off there)
+            const bool ownGuns = gSurvivalArena < 0 && !gTotd;
+            const bool arsenal = cfg.weaponSwitch && ownGuns;
+            const bool shotgunOn = cfg.shotgun && ownGuns, machineGunOn = cfg.machineGun && ownGuns, freeFireOn = cfg.freeFire && ownGuns;
+            r.lgModes.freeFire = freeFireOn || (machineGunOn && !arsenal);   // (Machine Gun: unlimited ammo too)
+            r.lgMachineGun = machineGunOn && !arsenal;
             r.lgModes.hardcore = cfg.hardcore && !bossModeOpt;   // (Sudden Death: a normal game's lives and continues, user 2026-11-05)
             r.lg_one_hit = cfg.suddenDeath && !bossModeOpt;
             r.lg_hostage_crisis = cfg.hostageCrisis, r.lg_crisis_fail = false;
@@ -5376,16 +5379,16 @@ int main(int argc, char* argv[])
                 std::vector<std::string>& b = r.lgBanner;
                 b = gActiveModNames;
                 auto on = [&b](bool v, const char* n) { if (v) b.push_back(n); };
-                on(cfg.shotgun && !arsenal, "Shotgun Mode");
-                on(cfg.freeFire, "Free Fire");
-                on(cfg.machineGun && !arsenal, "Machine Gun");
+                on(shotgunOn && !arsenal, "Shotgun Mode");
+                on(freeFireOn, "Free Fire");
+                on(machineGunOn && !arsenal, "Machine Gun");
                 on(arsenal, "Arsenal Mode");
                 on(cfg.hardcore && !bossModeOpt, "Hardcore");
                 on(cfg.suddenDeath && !bossModeOpt, "One Shot Kill");
                 on(cfg.hostageCrisis, "Hostage Crisis");
                 on(cfg.roulette && !bossModeOpt, "Weak Point Mode");
                 on(cfg.exploding, "Exploding Zombies");
-                on(cfg.survival && !bossModeOpt, "Coin-Op Survival");
+                on(cfg.survival && !bossModeOpt && gSurvivalArena < 0, "Coin-Op Survival");
                 on(cfg.flashlight, "Flashlight Mode");
                 on(cfg.funLook == 1, "Night Vision");
                 on(cfg.funLook == 2, "VHS Camcorder");
@@ -5395,15 +5398,15 @@ int main(int argc, char* argv[])
             }
             r.lg_exploding = cfg.exploding;
             r.lgLook = cfg.funLook == 1 ? 1 : cfg.funLook == 2 ? 3 : cfg.funLook == 3 ? 2 : 0;   // (RenderOptions::look)
-            r.lgClock = cfg.survival && !bossModeOpt ? 60.0 : -1.0;
+            r.lgClock = cfg.survival && !bossModeOpt && gSurvivalArena < 0 ? 60.0 : -1.0;
             r.lgTimeUp = r.lgSvInit_ = false;
             r.lgVol_.clear(), r.lgBoomed_.clear(), r.lgBlasts.clear();
             gSonic.turbo = 0;   // (Light Gun Edition: Turbo Speed Run removed, user 2026-11-05)
             r.lgModes.vampire = false;   // (user 2026-11-05: Vampire Mode removed; Married Mode in its place)
             r.lgModes.flashlight = cfg.flashlight;
             r.lgModes.bigHeads = false;   // (v1.2.0: the Big Head mod, Options > Mods, instead)
-            r.lgModes.shotgunShells = cfg.shotgun && !arsenal ? 3 : 0;
-            r.lg_hit_scale = cfg.shotgun && !arsenal ? 3.0f : 1.0f;
+            r.lgModes.shotgunShells = shotgunOn && !arsenal ? 3 : 0;
+            r.lg_hit_scale = shotgunOn && !arsenal ? 3.0f : 1.0f;
             for (int k = 0; k < 4; ++k)
                 r.lgWeapon[k] = arsenal ? 0 : -1, r.lgRockets[k] = 5, r.lgRocketLoaded[k] = true, r.lg_dmg_scale[k] = 1.0f;
             if (r.lgModes.hardcore) {
