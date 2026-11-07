@@ -381,6 +381,14 @@ Windows 10/11, 64-bit, OpenGL 3.3. Made by tools\make_portable_hotd.ps1 in the r
 $readme = Join-Path $Out "README.txt"
 $pv = ((Get-Content -LiteralPath (Join-Path $Build "CMakeCache.txt") -ErrorAction SilentlyContinue) | Where-Object { $_ -like "CMAKE_PROJECT_VERSION:*" }) -replace '^[^=]*=', ''
 (Get-Content -LiteralPath $readme -Raw).Replace("@VERSION@", $(if ($pv) { "v$pv" } else { "" })) | Set-Content -LiteralPath $readme -Encoding ascii -NoNewline
+# Light Gun Edition: its own part first (setup\README - Light Gun Edition.txt: the README.md's part as plain text), the
+# original's after it
+$lgReadme = Join-Path $repo "setup\README - Light Gun Edition.txt"
+if (Test-Path -LiteralPath $lgReadme) {
+    $sep = "`r`n`r`n" + ("=" * 64) + "`r`nThe original ReWrithe README follows.`r`n" + ("=" * 64) + "`r`n`r`n"
+    ((Get-Content -LiteralPath $lgReadme -Raw) + $sep + (Get-Content -LiteralPath $readme -Raw)) |
+        Set-Content -LiteralPath $readme -Encoding ascii -NoNewline
+}
 # the repo's shipped data (our own, no game data): data\ui (logo2: the Remake menu's "ReWrithe" wordmark, made with
 # Special Elite, Apache 2.0: NOTICE.md), data\fonts (Noto Sans for Korean / Japanese / Chinese / Arabic / Hebrew /
 # Cyrillic, OFL.txt), data\lang (the language files: en / ko / ja / zh / ru / ar / he ...), data\mods (the ragdoll mod and the example mod); every file
