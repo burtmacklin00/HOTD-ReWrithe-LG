@@ -3,6 +3,7 @@
 #include "game/menu_pages.h"
 
 #include "game/chapters.h"
+#include "game/files_check.h"
 #include "game/lang.h"
 #include "game/lives.h"
 #include "game/pad_prompts.h"
@@ -259,6 +260,7 @@ void menuReset(LaunchConfig& c, int page)
         break;
     case kCatAudio:
         c.sound = d.sound, c.sfxVolume = d.sfxVolume, c.music = d.music, c.musicVolume = d.musicVolume, c.menuMusic = d.menuMusic;
+        c.voice = d.voice, c.reloadVoice = d.reloadVoice;   // (spanish)
         break;
     case kCatControls:
         c.p1Input = d.p1Input, c.p2Input = d.p2Input, c.p3Input = d.p3Input, c.p4Input = d.p4Input;
@@ -271,7 +273,7 @@ void menuReset(LaunchConfig& c, int page)
     case kCatGameplay:
         c.lives = d.lives;   // (#30: Starting Lives / Max Lives)
         c.chapterRetry = d.chapterRetry;   // (#5)
-        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.married = d.married, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
+        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.bossCodenames = d.bossCodenames, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.married = d.married, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
         break;
     case kCatKiller:
@@ -556,6 +558,25 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      [&c, save]() { c.sound = (c.sound + 1) % 3; save(); },
                      "The sounds' source: Auto / Arcade = the arcade's sound board, PC = the 1998 PC port's sounds"});
         listed(r, {"Auto", "Arcade", "PC"});
+        // spanish (3lc3z4r's copy, 2026-11-06; docs/spanish.md): the Spanish release's dub in every mode (the arcade
+        // board's voice lines too); offered when a Spanish PC copy is there (the PC game folder or data\pc_spanish)
+        // spanish2 (user 2026-11-06): Auto (the default) follows the language: the Spanish dub with Espa\xC3\xB1ol;
+        // English / Spanish: always that one (voice= 0 Auto, 1 Spanish, 2 English)
+        r.push_back({"Voice", [&c]() { return std::string(c.voice == 1 ? "Spanish" : c.voice == 2 ? "English" : "Auto"); },
+                     [&c, save, h]() {
+                         c.voice = c.voice == 0 ? 2 : c.voice == 2 ? 1 : 0;
+                         save();
+                     },
+                     "The voices: Auto (the Spanish dub with the language Espa\xC3\xB1ol, else English), English, or the Spanish dub (Doblaje espa\xC3\xB1ol) of your Spanish PC copy, in every mode"});
+        listed(r, {"Auto", "English", "Spanish"});
+        r.back().off = [h]() {
+            return !(h.spanishVoices && h.spanishVoices())
+                       ? std::string("The Spanish voices need your Spanish PC copy (the setup's Extras page: Options > System > Repair / Change Files)")
+                       : std::string();
+        };
+        // spanish: the reload voice off, as the Spanish release (a light-gun / accessibility choice), any language
+        r.push_back({"Reload Voice", [&c]() { return onOff(c.reloadVoice); }, [&c, save]() { c.reloadVoice = !c.reloadVoice; save(); },
+                     "Off: no \"Reload!\" voice when you fire an empty gun (as the Spanish PC release); the RELOAD sign stays"});
         // (uxpolish: the volumes named as on Options, each beside its switch; the music's rows grey while it is off)
         r.push_back({"Sound Effects Volume", [&c]() { return std::to_string(c.sfxVolume) + "%"; },
                      [&c, save]() { c.sfxVolume = c.sfxVolume >= 100 ? 0 : c.sfxVolume / 5 * 5 + 5; save(); },
@@ -674,6 +695,12 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         listed(r, {"Red", "Green", "Blue", "Purple", "Yellow", "Custom"});
         previewed(r, h, "blood");
         experimental(r, [&c]() { return c.blood == 5; });
+        // spanish2: the Spanish PC copy as the only PC game: its CD has red and green blood only
+        if (c.models == 1 && isSpanishRelease(c.pc)) {
+            const char* note = "Your PC game is the Spanish CD: it has red and green blood only (Blue / Purple / Yellow show red); add your US / EU PC copy for every colour.";
+            r.push_back({note, nullptr, nullptr, note});
+            r.back().off = [note]() { return std::string(note); };
+        }
         // menufb (user 2026-10-26: "for custom blood color, players should pick a color via rgb in the main menu and
         // they should know that it does not affect arcade textures currently"): red / green / blue bars and the colour
         {
@@ -760,6 +787,14 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // scoredisp (tip: RUNESA): the arcade's hidden score line, normally the title code (left gun x3, right gun x2)
         r.push_back({"Score Display", [&c]() { return onOff(c.scoreDisplay); }, [&c, save]() { c.scoreDisplay = !c.scoreDisplay; save(); },
                      "The arcade's hidden SCORE line at the top (or at the title: left gun 3 times, right gun twice). Offline"});
+        // spanish3 (3lc3z4r: the Spanish PC release drops the bosses' names): the boss title cards' name
+        r.push_back({"Boss Names", [&c]() { return std::string(c.bossCodenames ? "Codenames Only" : "Full"); },
+                     [&c, save]() { c.bossCodenames = !c.bossCodenames; save(); },
+                     "Codenames Only: the boss cards show only the codename (TYPE 27), not the name, as the Spanish PC release"});
+        listed(r, {"Full", "Codenames Only"});
+        // charsel (user 2026-11-06): the character picks before an Arcade / Chapter Select game (looks only)
+        r.push_back({"Character Select", [&c]() { return onOff(c.charSelect); }, [&c, save]() { c.charSelect = !c.charSelect; save(); },
+                     "Before an Arcade or Chapter Select game each player picks a character (looks only: the arcade's rules)"});
         // Sonic Mode (game/sonic.h): play faster, cut-scenes at the normal speed; its own high scores
         r.push_back({"Sonic Mode", [&c]() { return std::string(sonicName(c.sonic)); },
                      [&c, save]() { c.sonic = (c.sonic + 1) % kSonicPresets; save(); },
@@ -1207,6 +1242,18 @@ std::vector<Frontend::Extra> menuLanguageRows(LaunchConfig& c, const MenuHooks& 
                      },
                      i.preview.empty() ? i.name : i.preview});
         r.back().raw = true;   // (its own name: not translated; sweep: its Current / Sample are, above)
+    }
+    // spanish2 (user 2026-11-06): what Espa\xC3\xB1ol gives with these files and models, one line when it is limited
+    if (lang::code() == "es") {
+        const bool copy = h.spanishVoices && h.spanishVoices();
+        const char* note = !copy ? "The Spanish voices, signs and cards need your Spanish PC copy (the setup's Extras page)."
+                           // (spanish3: the arcade models draw the Spanish CD's 2D pictures too; what has none stays)
+                           : c.models == 0 ? "With the arcade models PRESS START BUTTON, FREE PLAY, the reload hint, two staff roll cards and the signs in the 3D world stay in English; choose PC models for those."
+                                           : nullptr;
+        if (note) {
+            r.push_back({note, nullptr, nullptr, note});
+            r.back().off = [note]() { return std::string(note); };
+        }
     }
     return r;
 }

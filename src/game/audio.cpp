@@ -16,6 +16,7 @@ namespace hotd::audio { class SoundBoard {}; }   // never made: complete for Aud
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -58,6 +59,16 @@ bool readFile(const std::string& path, std::vector<uint8_t>& out)
 
 uint32_t le32(const uint8_t* p) { return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24; }
 
+// spanish (docs/spanish.md): what the Spanish release re-recorded, from comparing its files with the US ones (every
+// O_*.RBH there is 16 bytes longer; these differ in most samples, the others only by a few re-encoded ones):
+// O_VOC02-88 (not VOC04, nor VOC91-94: screams), the lines below, and GAMESNDS.RBH's sample 53 (cue 115)
+const char* const kDubbedLines[] = {"GOO1_2", "HEL1_2", "HELP", "HELP2", "KILLM2", "NONONO", "NO_2", "NO_F3", "OHNO",
+                                    "OHNO_2", "TELEPH", "THAN_2"};
+const int kDubbedSamples[] = {53};
+// the reload voice: PC cue 161 (GAMESNDS.RBH sample 36, silent on the Spanish CD) = arcade code 0xA01404, sent while
+// an empty gun's trigger is pulled in the first 2 s (port/hud_state.cpp; after them 0xA01405, cue 162 VOC06: kept)
+constexpr int kReloadCue = 161;
+
 // the BODY chunks of a PIFF / RBHF file ("PIFF" size "RBHF", then chunks: 4-byte tag, little-endian size, data)
 std::vector<std::pair<size_t, size_t>> rbhBodies(const std::vector<uint8_t>& d)
 {
@@ -76,10 +87,11 @@ std::vector<std::pair<size_t, size_t>> rbhBodies(const std::vector<uint8_t>& d)
 }
 
 // a file in the PC folder, whatever the case of its name (the PC files come from a CD: upper case, but copies vary)
-std::string findPath(const std::string& root, const std::string& rel)
+// (spanish: mapped false for another folder than the checked PC game's: the Spanish voices' copy)
+std::string findPath(const std::string& root, const std::string& rel, bool mapped = true)
 {
     // the launcher's files check: the checked file (also when renamed / moved, or a patch's .orig copy)
-    if (std::string m = pcFileMapped(rel); !m.empty())
+    if (std::string m = mapped ? pcFileMapped(rel) : std::string(); !m.empty())
         return m;
     // a zipped PC install: the zip reader matches names whatever their case
     if (pcfs::isZip(root) || pcfs::inZip(root + "/x"))
@@ -311,6 +323,24 @@ bool Audio::init(const std::string& pcRoot, bool device, std::string& err)
         cueMap_[code] = cue;
     if (!loadCueTable(findPath(pcRoot, "THOTD.EXE"), err) || !loadBank(findPath(pcRoot, "SOUND/GAMESNDS.RBH"), err))
         return false;
+    // spanish: GAMESNDS.RBH's dubbed sample from the Spanish copy (its sample table is the US one: the same place);
+    // its other change, the reload voice (sample 36) made silent, is not taken (the reload voice stays)
+    if (!voiceDir_.empty() && voiceDir_ != pcRoot) {
+        std::vector<uint8_t> d;
+        const auto bodies = readFile(findPath(voiceDir_, "SOUND/GAMESNDS.RBH", false), d) ? rbhBodies(d) : decltype(rbhBodies(d)){};
+        if (bodies.size() >= 2 && bodies[0].second == samples_.size() * sizeof(SampleInfo)) {
+            for (int k : kDubbedSamples) {
+                const SampleInfo& s = samples_[size_t(k)];
+                SampleInfo es;
+                std::memcpy(&es, &d[bodies[0].first + size_t(k) * sizeof(SampleInfo)], sizeof es);
+                if (s.source == 1 && std::memcmp(&s, &es, sizeof es) == 0 && s.offset + s.length <= bank_.size() &&
+                    8 + s.offset + s.length <= bodies[1].second)
+                    std::memcpy(bank_.data() + s.offset, &d[bodies[1].first + 8 + s.offset], s.length);
+            }
+        } else {
+            note("spanish voices: cannot read " + voiceDir_ + "'s SOUND/GAMESNDS.RBH");
+        }
+    }
     if (!device)
         return true;
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
@@ -467,6 +497,53 @@ bool Audio::loadBank(const std::string& path, std::string& err)
     return true;
 }
 
+bool Audio::isDubbedFile(const std::string& name)
+{
+    std::string n = name;
+    for (char& ch : n)
+        ch = char(std::toupper(uint8_t(ch)));
+    if (n.size() == 5 && n.compare(0, 3, "VOC") == 0 && std::isdigit(uint8_t(n[3])) && std::isdigit(uint8_t(n[4]))) {
+        const int k = std::atoi(n.c_str() + 3);
+        return k >= 2 && k <= 88 && k != 4;
+    }
+    for (const char* l : kDubbedLines)
+        if (n == l)
+            return true;
+    return false;
+}
+
+bool Audio::isVoiceCue(int n) const
+{
+    if (n < 0 || n >= int(cues_.size()))
+        return false;
+    const Cue& c = cues_[size_t(n)];
+    if (c.type == 4)
+        return isDubbedFile(c.name);
+    if (c.type == 1)
+        for (int k : kDubbedSamples)
+            if ((c.value & 0xFFFF) == k)
+                return true;
+    return false;
+}
+
+void Audio::setVoiceDir(const std::string& dir)
+{
+    std::lock_guard<std::recursive_mutex> g(lock_);
+    if (dir == voiceDir_)
+        return;
+    voiceDir_ = dir;
+    // the loaded lines go (a voice playing one ends first: its data is freed)
+    for (Voice& v : voices_)
+        for (const auto& [name, data] : oneShots_)
+            if (v.data && !data.empty() && v.data == data.data())
+                v = Voice{};
+    for (Voice& v : tails_)
+        for (const auto& [name, data] : oneShots_)
+            if (v.data && !data.empty() && v.data == data.data())
+                v = Voice{};
+    oneShots_.clear();
+}
+
 // SOUND\O_<name>.RBH: one BODY = {u32 load offset, u16 source 2, u16 file number} + the 8-bit data
 const std::vector<uint8_t>* Audio::loadOneShot(const std::string& name)
 {
@@ -474,7 +551,9 @@ const std::vector<uint8_t>* Audio::loadOneShot(const std::string& name)
     if (it != oneShots_.end())
         return it->second.empty() ? nullptr : &it->second;
     std::vector<uint8_t> d, data;
-    const std::string path = findPath(root_, "SOUND/O_" + name + ".RBH");
+    // spanish: a dubbed line from the Spanish copy (setVoiceDir)
+    const bool es = !voiceDir_.empty() && voiceDir_ != root_ && isDubbedFile(name);
+    const std::string path = es ? findPath(voiceDir_, "SOUND/O_" + name + ".RBH", false) : findPath(root_, "SOUND/O_" + name + ".RBH");
     if (readFile(path, d)) {
         const auto bodies = rbhBodies(d);
         if (!bodies.empty() && bodies[0].second > 8)
@@ -482,6 +561,8 @@ const std::vector<uint8_t>* Audio::loadOneShot(const std::string& name)
     }
     if (data.empty())
         note("sound: cannot read " + path);
+    else if (es && traceCues)
+        std::printf("[sound] O_%s: the Spanish line (%s)\n", name.c_str(), path.c_str());
     auto& slot = oneShots_[name] = std::move(data);
     return slot.empty() ? nullptr : &slot;
 }
@@ -748,8 +829,21 @@ void Audio::cue(uint32_t arcadeCode)
         std::printf("[sound %llu] 0x%06X -> %s\n", (unsigned long long)frameNo, arcadeCode,
                     it == cueMap_.end() ? "no PC cue" : ("cue " + std::to_string(it->second) + " " + describe(it->second)).c_str());
     }
+    if (!reloadVoice_ && it != cueMap_.end() && it->second == kReloadCue) {   // spanish: Reload Voice Off (the board's too)
+        if (traceCues)
+            std::printf("[sound %llu] 0x%06X -> left out (Reload Voice: Off)\n", (unsigned long long)frameNo, arcadeCode);
+        return;
+    }
 #ifdef HOTD_HAVE_ARCADE_SOUND
     if (boardOn_) {   // the arcade board plays every code itself (0xBExxxx too)
+        // spanish: Voice = Spanish: a dubbed line plays the Spanish copy's sample instead of the board's English one
+        if (!voiceDir_.empty() && it != cueMap_.end() && isVoiceCue(it->second)) {
+            if (traceCues)
+                std::printf("[sound %llu] 0x%06X -> the Spanish voice (cue %d), not the board\n", (unsigned long long)frameNo,
+                            arcadeCode, it->second);
+            pcCue(it->second);
+            return;
+        }
         board_->command(arcadeCode);
         return;
     }
@@ -786,7 +880,7 @@ void Audio::cue(uint32_t arcadeCode)
 // the PC's sound_cue (0x412000)
 void Audio::pcCue(int n)
 {
-    if (n < 0 || n >= int(cues_.size()))
+    if (n < 0 || n >= int(cues_.size()) || (!reloadVoice_ && n == kReloadCue))
         return;
     ++cueCount[n];
     const Cue& c = cues_[size_t(n)];

@@ -80,7 +80,7 @@ template <class P> void Game<P>::player_st3_join(uint32_t task)
         // Rogan or G (pm_join_char, again in PlStartInit: no change there): its body made again as the debug pair's
         // (4P set B: players 3 / 4's bodies, left alone)
         bool remake = debug != 0;
-        if (pm_on()) {
+        if (chars_on()) {
             const int32_t p = mem.template at<int8_t>(task + 0x20);
             bool setB = false;
             if constexpr (Seats<P>::max == 4)
@@ -122,7 +122,7 @@ template <class P> void Game<P>::PlStartInit(uint32_t task, int how)
         pm_join_char(p);   // PC Mode only: No Player -> Rogan / G
         const uint32_t row = join::kStartRows + uint32_t(how) * 0x14;
         const uint8_t flags = mem.template at<uint8_t>(row);
-        const uint32_t maxLives = mem.template at<uint8_t>(G::max_lives);
+        uint32_t maxLives = mem.template at<uint8_t>(G::max_lives);
         const uint32_t rec = 0x51F280 + uint32_t(p) * 0xCC;
         const uint32_t gun = 0x51F570 + uint32_t(p) * 28;
         if (flags & 1) {
@@ -131,6 +131,8 @@ template <class P> void Game<P>::PlStartInit(uint32_t task, int how)
                                            : uint32_t(mem.template at<uint8_t>(join::kStartLives));
             mem.set32(rec + 0x10, lives);
             mem.set32(rec + 0x14, lives);
+            pm_lives_most(int32_t(lives));   // (#62: PC Mode, a character's hit points over Max Lives)
+            maxLives = mem.template at<uint8_t>(G::max_lives);
             uint32_t icon = join::kLivesIcons + uint32_t(p) * 10;
             uint32_t i = 0;
             // GitHub #25 (Max Lives up to 9): the icons stop at the five places a player has (10 bytes), the rest of

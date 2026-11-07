@@ -120,6 +120,7 @@ void Runtime::chapter_start(int chapter, int event, int players, int mode)
             pm_join_char(p);
             pm_reload_at[p] = 0;
             pl.lives = pl.lives_saved = pm_on() ? pm_table(pm_seat_char(p)).hp : lives;   // PC Mode: the character's
+            pm_lives_most(pl.lives);
             pl.score = 0;
             pl.rounds = pm_full_rounds(p);
             pl.empty = 0;
@@ -156,6 +157,8 @@ void Runtime::chapter_start(int chapter, int event, int players, int mode)
 void Runtime::retry_point_take()
 {
     retryPoint.chapter = mem.at<int8_t>(G::chapter);
+    retryPoint.rescued = mem.at<int16_t>(G::hostages_rescued);   // (#47)
+    retryPoint.appeared = mem.at<int16_t>(G::hostages_appeared);
     for (int p = 0; p < 2; ++p) {
         const port::a::Player& pl = mem.at<port::a::Player>(G::players, uint32_t(p));
         retryPoint.in[p] = pl.state == 5 || pl.state == 2 || pl.state == 3;

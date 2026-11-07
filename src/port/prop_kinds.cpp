@@ -377,7 +377,7 @@ template <class P> void Game<P>::player_char_props_draw()
     auto model = [&](int seat, uint32_t arcade) {
         if constexpr (!P::pc) {
             car_seat_mark(seat);
-            if (pm_on()) {
+            if (chars_on()) {
                 const uint32_t m = uint32_t(pm_table(pm_seat_char(seat)).model);
                 if (pm_model_drawable(m))
                     return m;

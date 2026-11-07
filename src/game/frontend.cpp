@@ -1008,6 +1008,7 @@ std::string Frontend::mainMenuHead()
 // ---- screen_main_menu 0x4210FC (screen 1) ----
 void Frontend::screenMainMenu()
 {
+    charSel = false;   // charsel: the Character Select left (screen 16 is PC Mode's again)
     if (style == kStyleRemake) {   // remakemenu: the same items, the Remake style's layout
         remakeMainMenu();
         return;

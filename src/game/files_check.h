@@ -52,6 +52,23 @@ std::string placementHint(const std::string& where, bool arcade);
 // texels of the texture pages a shade off: a mastering fault, not a change). isEuBigger: d is that file (rel: its path
 // in the install, any case / slashes); fixEuBigger: those 5 bytes set back, the US file again (true: patched)
 bool isEuBigger(const std::string& rel, const std::vector<uint8_t>& d);
+
+// spanish (docs/spanish.md): `folder` (a PC game folder or .zip) holds the Spanish release's voices: its
+// SOUND\O_VOC02.RBH is the Spanish CD's (size + SHA-1, pc_manifest_es.inc). Read once per folder (remembered)
+bool isSpanishRelease(const std::string& folder);
+// the checked PC files' install paths (pc_manifest.inc: "THOTD.EXE", "SOUND/O_AAAH.RBH" ...; v1.3.1: the CD
+// cabinets' files placed by name, util/cab_unpack.h)
+std::vector<std::string> pcManifestPaths();
+// the folder of the Spanish voices for Audio > Voice: `spanishPc` if it is one, else `pc` if it is, else
+// <packageRoot>\data\pc_spanish (or a folder in it) if it is; empty: none
+std::string spanishVoiceDir(const std::string& pc, const std::string& spanishPc, const std::string& packageRoot);
+// spanish2: Audio > Voice (LaunchConfig::voice: 0 Auto = the Spanish dub while the language is Español, 1 Spanish,
+// 2 English): the Spanish voices wanted
+bool spanishVoiceOn(int voice, const std::string& language);
+// spanish2: the Spanish copy's ART\STAGE1\CREATURE\BIGGER.VMC for the translated texture pages
+// (setPcSpanishTextures) while `language` is "es" and a Spanish copy is there (spanishVoiceDir); else ""
+std::string spanishTextureVmc(const std::string& language, const std::string& pc, const std::string& spanishPc,
+                              const std::string& packageRoot);
 bool fixEuBigger(const std::string& rel, std::vector<uint8_t>& d);
 
 } // namespace hotd::game

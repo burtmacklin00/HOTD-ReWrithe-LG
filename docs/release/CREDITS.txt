@@ -35,6 +35,12 @@ RUNESA ............................... the secret-codes tip
 Saturn Memories (YouTube) ............ "The Typing of the Dead [PC] by SEGA" playthrough:
                                        The Typing of the Dead 0's design reference
                                        (watched only; no footage is included)
+3lc3z4r (YouTube: Cez4rPlay) ......... the Spanish PC version (Doblaje espanol): his copy
+                                       for the research, its list of differences and the
+                                       reference playthrough "The House Of The Dead (PC) -
+                                       Doblaje espanol ORIGINAL", https://youtu.be/OVnjusRO1wk
+                                       (no Spanish game file is included: the dub plays
+                                       from the player's own Spanish copy)
 Friends and testers .................. for playing early builds
 Everyone who reports a bug ........... you make it better
 

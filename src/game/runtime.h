@@ -116,6 +116,9 @@ public:
         int chapter = -1;
         bool in[2] = {};
         int32_t score[2] = {}, lives[2] = {};
+        // issues5 (GitHub #47): the game's researcher tally (hostages_rescued / _appeared: the last chapter's bonus
+        // room is hostages_rescued == hostages_appeared): a retry put them to a new game's (0 / -1), so no bonus room
+        int16_t rescued = 0, appeared = -1;
     };
     RetryPoint retryPoint;
     void retry_point_take();
@@ -199,6 +202,7 @@ public:
     // PC Mode: whether the view has a model (the host sets it: GameView::hasModel; unset, as headless: none)
     std::function<bool(uint32_t)> modelAvailable;
     bool pm_model_drawable(uint32_t model) override { return modelAvailable && modelAvailable(model); }
+    bool models_pc() const override { return pcModels; }   // (#52)
     // carchars (user 2026-10-28: "in the beginning where they drive the car, can you make the custom P1 and P2
     // characters show?"; game/creature.cpp): the opening car's seats (player_char_props_draw) show each seat's own
     // character. A seat whose character has a car model in the model set keeps it (the arcade's Rogan / G pair in
@@ -690,6 +694,7 @@ public:
     // x 64 rows x 64 cells): 1 a per-player HUD sprite (hud_player_sprite), 2 a hit mark 0x28..0x2D, 0 anything else
     std::vector<uint8_t> cellHud = std::vector<uint8_t>(4 * 64 * 64, 0);
     bool hud_player_sprite(uint32_t sprite);
+    bool hit_mark_sprite(uint32_t sprite);   // (#56: hud_player_notice_show's table 0xCA5FC)
     int hud_side_of(uint32_t sprite, int x, int w);
     void pc_cells_clear(uint32_t layer, int x, int y, int w, int h);
 
@@ -767,6 +772,17 @@ public:
     std::map<uint32_t, int> actorAreas;
     std::map<int, int> actorAreaLook;   // Survival Mode: an area's colour rows taken from this type's look (galleryLook)
     void actor_areas_update();
+    // charsel (user 2026-11-06: "the researcher's body with Rogan's head" in the ending): HOTD_PART_CHECK=1, the
+    // part-ownership check: every drawn part of players 1 / 2's bodies (cut-scenes, the ending's own bodies, the game
+    // over) must be a model of the type it is drawn as (its part tree, plus that type's own animated models: the
+    // players' shared gun hands, Rogan's coat, the ending's talking heads); "part check" lines per camera path
+    // (frames, types, parts, foreign) and each foreign model at once. Draws only
+    void part_owner_check();
+    void ending_head_fallback();   // charsel: the PC models' ending talking heads (creature.cpp; draws only)
+    std::map<int, std::set<uint32_t>> partOwned_;   // type -> its models (part_owner_check)
+    uint32_t partPath_ = 0xFFFFFFFFu;
+    uint64_t partFrom_ = 0, partFrames_ = 0, partDrawn_[2] = {0, 0}, partForeign_[2] = {0, 0}, partTotalForeign_ = 0, partMissing_ = 0;
+    int partType_[2] = {-1, -1};
     void survival_areas();   // Survival Mode: the cut creatures' part models -> their texture areas (survival.cpp)
     std::vector<DrawModel> actorPreDraw_;
     std::vector<SkinDraw> actorPreSkin_;

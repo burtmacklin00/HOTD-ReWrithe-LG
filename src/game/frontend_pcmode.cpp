@@ -182,10 +182,10 @@ void Frontend::pcModeStep(int p, int dir)
 {
     const int last = Chars::kPmCharCount - 1;
     if (dir < 0) {
-        if (--pcChars[p] < 0 || (p == 0 && pcChars[p] == 0))
+        if (--pcChars[p] < 0 || ((p == 0 || charSel) && pcChars[p] == 0))   // (charsel: every seat a character)
             pcChars[p] = last;
     } else if (++pcChars[p] > last) {
-        pcChars[p] = p == 0 ? 1 : 0;
+        pcChars[p] = p == 0 || charSel ? 1 : 0;
     }
     if (pcSeats == 4)   // (No Player: nothing to be ready for; a computer seat is ready with any character)
         pcReady[p] = pcChars[p] != 0 && (pcCpu[p] || pcReady[p]);
@@ -197,6 +197,10 @@ void Frontend::pcModeStep(int p, int dir)
 void Frontend::screenPcMode()
 {
     walking_ = false;   // (called from a widget's handler: the walk stops, as the other screen builders' callers do)
+    if (charSel) {   // charsel: the Character Select's cards (charSelectOpen)
+        charSelectOpen(charSelPlayers);
+        return;
+    }
     if (style == kStyleRemake) {   // remakepages: the Remake layout (frontend_remake_pages.cpp)
         remakePcMode();
         return;
@@ -255,6 +259,87 @@ void Frontend::screenPcMode()
         screenMainMenu();
     }, &Frontend::hitText);
     ex->tag = 1;   // 0x427CB0: Escape
+}
+
+// ---- charsel: the Character Select of Arcade / Chapter Select (frontend.h charSelectOpen), the classic cards ----
+
+// a card: "Player N" in the seat's colour, the portrait, the extras' lines, the name between the arrows (no ratings:
+// the game keeps the arcade's rules)
+void Frontend::charSelectPanel(Widget* panel, int p)
+{
+    if (pcChars[p] <= 0)
+        pcChars[p] = p % 2 == 0 ? 1 : 2;
+    const int ch = pcChars[p];
+    Widget* who = widgetNew();
+    addChild(panel, who);
+    setRect(who, 0, 0x108, 0, 0);   // (under the portrait, where PC Mode has its ratings)
+    setText(who, "Player " + std::to_string(p + 1), 0x20020);
+    Widget* pic = widgetNew();
+    addChild(panel, pic);
+    setRect(pic, 0, 0, 0, 100);
+    setImage(pic, pcPortraitId(ch, false), -1, 0x100020);
+    const std::vector<std::string> notes = pcExtraNotes(ch);
+    for (size_t i = 0; i < notes.size() && i < 1; ++i) {   // (the group only: "Plays as" is PC Mode's rules)
+        Widget* n = widgetNew();
+        addChild(panel, n);
+        setRect(n, 0, 0x14A, 0, 0);
+        setText(n, notes[i], 0x20020);
+        n->draw = &Frontend::drawTextLit;
+        n->fitW = 0xF8 - 40;
+    }
+    Widget* name = widgetNew();
+    addChild(panel, name);
+    setRect(name, 0, 0x130, 0, 0);
+    pcNameText(name, ch, 0xF8 - 56);
+    for (int d = 0; d < 2; ++d) {
+        Widget* a = widgetNew();
+        addChild(panel, a);
+        setRect(a, 0, 0x130, 0, 0);
+        setImage(a, d ? 0xD9 : 0xD8, d ? 0xDB : 0xDA, d ? 0x100004 : 0x100002);
+        setHandlers(a, [this, p, d](Widget&) { pcModeStep(p, d ? 1 : -1); }, &Frontend::hitImage);
+        a->user = p;
+    }
+}
+
+void Frontend::charSelectOpen(int players)
+{
+    walking_ = false;
+    charSel = true;
+    charSelPlayers = std::clamp(players, 1, 2);   // (Players 3 / 4: P1 / P2 pick here; 3 / 4 keep Rogan 2 / G 2)
+    pcSeats = 2;
+    screen_ = 16;
+    freeTree();
+    Widget* root = widgetNew();
+    root_ = root;
+    setRect(root, 0, 0, 0, 0);
+    setImage(root, 0xA4, -1, 0x20000A);
+    for (int p = 0; p < charSelPlayers; ++p) {
+        Widget* panel = widgetNew();
+        addChild(root, panel);
+        const int x = charSelPlayers == 1 ? (kWidth - 0xF8) / 2 : p == 0 ? 0x20 : 0x168;   // (one player: front and centre)
+        setRect(panel, x, 0x30, 0xF8, 0x14A);
+        charSelectPanel(panel, p);
+    }
+    Widget* title = widgetNew();
+    addChild(root, title);
+    setRect(title, 0, 0x10, 0, 0);
+    setText(title, "Character Select", 0x10020);
+    title->fitW = kWidth - 40;
+    auto item = [&](int y, const std::string& text, int labelId, std::function<void()> fn) {
+        Widget* w = widgetNew();
+        addChild(root, w);
+        setRect(w, 0, y, 0, 0);
+        if (labelId >= 0)
+            setLabel(w, labelId, 0x20020);
+        else
+            setText(w, text, 0x20020);
+        setHandlers(w, [this, fn](Widget&) { walking_ = false; fn(); }, &Frontend::hitText);
+        return w;
+    };
+    item(0x190, "", 0x4F, [this]() { if (onCharSelectStart) onCharSelectStart(false); });   // "Start"
+    item(0x1AC, "Default Characters", -1, [this]() { if (onCharSelectStart) onCharSelectStart(true); });
+    Widget* ex = item(0x1C8, "", 0x24, [this]() { screenMainMenu(); });   // "Exit"
+    ex->tag = 1;   // (Escape)
 }
 
 // ---- remakepages: the Remake style's PC Mode (docs/menu_remake.md): the PC's tombstones (0xA4, their own art: the
@@ -400,6 +485,7 @@ void Frontend::remakePcPanel4(int p, int x, int y)
 
 void Frontend::pcModeOpen(int players, const bool cpu[4], uint32_t seed)
 {
+    charSel = false;
     pcSeats = players >= 3 ? 4 : 2;
     if (pcSeats == 4) {
         static const int kDefault[4] = {1, 2, 3, 4};   // Rogan, G, Rogan 2, G 2 (the 4P mode's bodies, docs/coop4.md)

@@ -33,7 +33,7 @@ template <class P> void Game<P>::player_char_models_set()
         const uint32_t body = mem_alloc(0x3C8);
         int32_t type = int32_t(mem.u32(pb::char_types + mem.u32(pb::char_pair) * 8 + p * 4));
         if constexpr (!P::pc)
-            if (pm_on())
+            if (chars_on())
                 type = pm_body_type(int(p) + (setB ? 2 : 0));
         mem.set32(pb::body_types + p * 4, uint32_t(type));
         mem.at<Player>(G::players, p).body.a = body;

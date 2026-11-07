@@ -1,6 +1,7 @@
 // The HUD (hud.h).
 #include "game/hud.h"
 
+#include "assets/pc_loader.h"
 #include "assets/sprites_arcade.h"
 #include "assets/sprites_pc.h"
 #include "game/cosmods.h"
@@ -184,6 +185,7 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
     const uint8_t* tiles = !(clean || noText || subHide_) ? mem.ptr(kTileRam) : composed ? tilesCopy_.data() : filteredTiles(rt);   // (composed: drawUnder filtered it)
     if (!composed)
         tiles = withoutP2Notice(rt, tiles);
+    tiles = codenameTiles(rt, spanishCut(rt, tiles));   // (spanish3: the Spanish PC pictures' sprites out, composeEs draws them; Boss Names)
     if (wide == kWideCard || wide == kWidePicture) {
         // wide2d (wideScreen): bottom to top as the layers' order (3, 2, 1, 0): layers 3 / 2 (the card, the picture)
         // extended to wideW; a card's layer 1 (the film's scratches) stretched across it; the rest as it is
@@ -191,7 +193,7 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
         const struct { unsigned layers; int mode; } parts[3] = {{0xCu, 2}, {card ? 0x2u : 0u, 1}, {card ? 0x1u : 0x3u, 0}};
         bool any = false;
         for (const auto& part : parts) {
-            if (!part.layers || !composeLayers(rt, tiles, high, part.layers, rgba_))
+            if (!part.layers || !composeEs(rt, tiles, high, part.layers, rgba_))
                 continue;
             std::vector<uint8_t>* pic[1] = {&rgba_};
             translucent2D(rt, tiles, high, pic, 1);
@@ -202,7 +204,7 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
         return any;
     }
     if (!sides) {
-        if (!composed && !assets::Arcade2D::compose(tiles, mem.ptr(kCharRam), mem.ptr(kPalShadow), high, rgba_))
+        if (!composed && !composeEs(rt, tiles, high, 0xFu, rgba_))
             return false;
         std::vector<uint8_t>* pic[1] = {&rgba_};
         translucent2D(rt, tiles, high, pic, 1);
@@ -212,8 +214,12 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
     }
     const float x0 = leftEdge(W, H, ww, wh);
     bool drawn[3] = {};   // perf: the three sides' pictures in one pass (were three)
-    assets::Arcade2D::composeSides(tiles, mem.ptr(kCharRam), mem.ptr(kPalShadow), high, rt.cellSide.data(), arcadeSides_,
-                                   drawn);
+    if (!esCuts_.empty())   // (spanish3: each side with its Spanish PC pictures)
+        for (int s = 0; s < 3; ++s)
+            drawn[s] = composeEs(rt, tiles, high, 0xFu, arcadeSides_[s], rt.cellSide.data(), s);
+    else
+        assets::Arcade2D::composeSides(tiles, mem.ptr(kCharRam), mem.ptr(kPalShadow), high, rt.cellSide.data(), arcadeSides_,
+                                       drawn);
     std::vector<uint8_t>* pics[3] = {&arcadeSides_[0], &arcadeSides_[1], &arcadeSides_[2]};
     translucent2D(rt, tiles, high, pics, 3);
     rainbow2D(rt, tiles, high, pics, 3);
@@ -431,6 +437,331 @@ const uint8_t* Hud::withoutP2Notice(const Runtime& rt, const uint8_t* tiles)
     return tilesNoP2_.data();
 }
 
+// spanish3 (user 2026-11-06, docs/spanish.md): which arcade sprites show the Spanish PC pictures with the arcade
+// models: those whose PC picture (kArcadeToPcSprite) lies on a translated page and differs from the US one by more
+// than the re-saved colours (the US pictures read again without the Spanish pages: a texel whose alpha differs or
+// whose colour differs by more than 48 in a channel; at least 1 % of the picture's texels and 8)
+void Hud::findEsSprites()
+{
+    esLoaded_ = hotd::pcSpanishTextures();
+    esSprite_.clear();
+    esImg_.clear();
+    if (esLoaded_.empty() || !pcSprites_.loaded())
+        return;
+    assets::PcSprites us;
+    std::string err;
+    hotd::setPcSpanishTextures("");
+    const bool ok = us.load(pcDir_, err, 1, blood_);
+    hotd::setPcSpanishTextures(esLoaded_);
+    if (!ok)
+        return;
+    esSprite_.assign(0x276, 0);
+    std::vector<uint8_t> done(0x800, 2);   // a PC picture's result (2: not compared yet)
+    std::string list;
+    int n = 0;
+    // the Spanish CD as the only PC game (no US pictures to compare: RELOAD 0x421 the same in both reads): the sprites
+    // this finds with a US copy (2026-11-06), their pictures as they are
+    static const uint16_t kFound[] = {0xE, 0xF, 0x32, 0x33, 0x34, 0x35, 0x36, 0x86, 0x88, 0x8C, 0xDA, 0xDB, 0xDC, 0xDD,
+                                      0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3, 0x107, 0x108, 0x113, 0x120, 0x121, 0x122,
+                                      0x123, 0x124, 0x1C9, 0x1CA, 0x1DC, 0x22B, 0x243, 0x244, 0x245, 0x246, 0x268,
+                                      0x269, 0x26A, 0x26C};
+    const bool reference = us.image(0x421) != pcSprites_.image(0x421);
+    if (!reference)
+        for (const uint16_t s : kFound) {
+            const int id = kArcadeToPcSprite[s];
+            if (pcSprites_.drawable(id))
+                esSprite_[s] = 1, esImg_[id] = pcSprites_.image(id), ++n;
+        }
+    for (int s = 0; s < 0x276 && reference; ++s) {
+        const int id = kArcadeToPcSprite[s];
+        // (not the sprites whose PC match is another picture, checked by eye with tools/sprites_tool.py pairs: 0x8 the
+        // colour bars -> the Gargoyle's file, 0x8D a white card -> Chapter 3's card, 0x1DE / 0x1E2 the arcade staff
+        // roll's music / publicity cards -> the PC port's staff cards; they stay the arcade's)
+        if (s == 0x8 || s == 0x8D || s == 0x1DE || s == 0x1E2)
+            continue;
+        if (!id || id >= 0x800 || !pcSprites_.drawable(id) || !pcSprites_.onPage(id, hotd::pcSpanishTextPage))
+            continue;
+        if (done[size_t(id)] == 2) {
+            std::vector<uint8_t> a = pcSprites_.image(id);
+            const std::vector<uint8_t> b = us.image(id);
+            // the Spanish file's colour key is black (the US one magenta): a black texel where the US picture is
+            // see-through is the key (the PC draws them as a dark box: stripes over the arcade's 3D)
+            for (size_t i = 0; i + 3 < a.size() && a.size() == b.size(); i += 4)
+                if (!b[i + 3] && a[i + 3] && std::max({a[i], a[i + 1], a[i + 2]}) <= 24)
+                    a[i] = a[i + 1] = a[i + 2] = a[i + 3] = 0;
+            size_t texels = 0, differ = 0;
+            for (size_t i = 0; i + 3 < a.size() && a.size() == b.size(); i += 4) {
+                texels += a[i + 3] || b[i + 3];
+                if ((a[i + 3] != 0) != (b[i + 3] != 0) ||
+                    (a[i + 3] && (std::abs(a[i] - b[i]) > 48 || std::abs(a[i + 1] - b[i + 1]) > 48 || std::abs(a[i + 2] - b[i + 2]) > 48)))
+                    ++differ;
+            }
+            done[size_t(id)] = a.size() != b.size() || (differ >= 8 && differ * 100 >= texels) ? 1 : 0;
+            if (done[size_t(id)] == 1)
+                esImg_[id] = std::move(a);
+        }
+        if (done[size_t(id)] == 1) {
+            esSprite_[size_t(s)] = 1;
+            char b[24];
+            std::snprintf(b, sizeof b, " %X>%X", unsigned(s), unsigned(id));
+            list += b;
+            ++n;
+        }
+    }
+    if (std::getenv("HOTD_TRACE_ES"))
+        std::printf("[spanish] arcade models: %d arcade sprites drawn from the Spanish pages%s:%s\n", n,
+                    reference ? "" : " (the Spanish CD alone: the known list)", list.c_str());
+}
+
+// spanish3: the tiles without the cells of the arcade sprites drawn as Spanish PC pictures (Hud::esCuts_)
+const uint8_t* Hud::spanishCut(const Runtime& rt, const uint8_t* tiles)
+{
+    esCuts_.clear();
+    const std::string& es = hotd::pcSpanishTextures();
+    if (rt.pcModels || es.empty() || !tiles)
+        return tiles;
+    if (!pcTried_ || pcEs_ != es)
+        loadPcSprites();
+    if (esLoaded_ != es)
+        findEsSprites();
+    if (!pcSprites_.loaded() || esSprite_.empty())
+        return tiles;
+    port::Mem& mem = rt.mem;
+    auto rd = [](const uint8_t* p, size_t o) { return uint16_t(p[o] | p[o + 1] << 8); };
+    bool copied = false;
+    static const bool trace = std::getenv("HOTD_TRACE_ES") != nullptr;
+    std::string list;
+    for (int l = 0; l < 4; ++l) {
+        const uint16_t vr = rd(tiles, 0xA008 + 2u * unsigned(l));
+        if (vr & 0x8000)
+            continue;
+        const int hs = rd(tiles, 0xA000 + 2u * unsigned(l)) & 0x1FF, vs = vr & 0x1FF;
+        for (int cy = 0; cy < Runtime::kPcRows; ++cy)
+            for (int cx = 0; cx < 64; ++cx) {
+                const size_t ci = size_t((l * Runtime::kPcRows + cy) * 64 + cx);
+                const uint32_t v = rt.pcCells[ci], spr = v & 0xFFFF;
+                if (!v || spr >= 0x276 || !esSprite_[spr])
+                    continue;
+                const uint32_t lay = mem.u32(0xA6590 + spr * 12 + 8);   // its layout: u16 w, u16 h, w x h cells
+                if (lay == 0 || !mem.mapped(lay))
+                    continue;
+                const int w = mem.at<uint16_t>(lay), h = mem.at<uint16_t>(lay + 2);
+                const uint32_t clip = rt.pcClip[ci];
+                const int skipL = clip ? int(clip & 0xFF) : 0, skipT = clip ? int(clip >> 8 & 0xFF) : 0,
+                          cw = clip ? int(clip >> 16 & 0xFF) : w, ch = clip ? int(clip >> 24) : h;
+                // the place on the screen (as drawPc2D), the window mask at its first cell
+                int sx = (cx * 8 - hs) & 511, sy = (cy * 8 - vs) & 511;
+                if (sx >= 496) sx -= 512;
+                if (sy >= 384) sy -= 512;
+                if (sy >= 0 && sx >= 0) {
+                    const int mx = sx >> 3;
+                    const size_t line = (l < 2 ? 0xC000u : 0xD000u) + size_t(sy) * 8 + size_t(mx >> 4) * 2;
+                    if ((((rd(tiles, line) >> (15 - (mx & 15))) & 1) != 0) != ((l & 1) != 0))
+                        continue;
+                }
+                int pri = -1;
+                for (int j = 0; j < ch; ++j)
+                    for (int i = 0; i < cw; ++i) {
+                        const int x = cx + i, y = cy + j;
+                        if (x >= 64 || y >= 64 || skipL + i >= w || skipT + j >= h ||
+                            mem.at<uint16_t>(lay + 4 + uint32_t((skipT + j) * w + skipL + i) * 2) == 0)
+                            continue;
+                        if (!copied) {
+                            tilesEs_.assign(tiles, tiles + 0x10000);
+                            copied = true;
+                        }
+                        const size_t o = size_t(l) * 0x2000 + size_t(y) * 0x80 + size_t(x) * 2;
+                        const uint16_t word = rd(tilesEs_.data(), o);
+                        if (word && pri < 0)
+                            pri = word >> 15;
+                        tilesEs_[o] = tilesEs_[o + 1] = 0;
+                    }
+                if (pri < 0)
+                    continue;
+                const uint8_t side = anchorEdges && !rt.clear.active ? rt.cellSide[ci] : 0;
+                esCuts_.push_back({l, sx, sy, int(kArcadeToPcSprite[spr]), clip, side, pri == 1});
+                if (trace) {
+                    char b[16];
+                    std::snprintf(b, sizeof b, " %d:%X", l, unsigned(spr));
+                    list += b;
+                }
+            }
+    }
+    if (trace && list != esTraced_) {   // HOTD_TRACE_ES: the sprites drawn so, when they change (layer:sprite)
+        std::printf("[spanish %llu] drawn:%s\n", (unsigned long long)rt.frameCount, list.c_str());
+        esTraced_ = list;
+    }
+    return copied ? tilesEs_.data() : tiles;
+}
+
+// spanish3 (Boss Names: Codenames Only): the arcade's boss name cards (one sprite each: the name, a gap, "TYPE nn",
+// an underline under both; 4 cell rows): the cell where the codename begins, read from the ROM's pictures
+// (tools/sprites_tool.py arcade): 0xDF Chariot / Type 27, 0xE0 Hangedman / Type 041, 0xE1 Hermit / Type 6803,
+// 0xE2 Magician / Type 0, 0xE3 Hermit / Type 61 (unused)
+int Hud::bossCodenameCell(uint32_t sprite)
+{
+    switch (sprite) {
+    case 0xDF: return 11;
+    case 0xE0: return 16;
+    case 0xE1: return 11;
+    case 0xE2: return 12;
+    case 0xE3: return 11;
+    default: return 0;
+    }
+}
+
+// spanish3: each name card's cells from its codename on, moved left to the card's first cell (the cells past it
+// empty): the card shows "TYPE 27" underlined where "Chariot" was. A clipped draw (the card sliding in) keeps its
+// clip; the cell words are the layout's tiles plus the bank's offset (that of a cell shown)
+const uint8_t* Hud::codenameTiles(const Runtime& rt, const uint8_t* tiles)
+{
+    if (!bossCodenames || rt.pcModels || !tiles)
+        return tiles;
+    port::Mem& mem = rt.mem;
+    const bool es = !hotd::pcSpanishTextures().empty() && !esSprite_.empty();
+    bool copied = false;
+    for (int l = 0; l < 4; ++l)
+        for (int cy = 0; cy < Runtime::kPcRows; ++cy)
+            for (int cx = 0; cx < 64; ++cx) {
+                const size_t ci = size_t((l * Runtime::kPcRows + cy) * 64 + cx);
+                const uint32_t v = rt.pcCells[ci], spr = v & 0xFFFF;
+                const int c = v ? bossCodenameCell(spr) : 0;
+                if (!c || (es && esSprite_[spr]))   // (the Spanish CD's card: its own name only)
+                    continue;
+                const uint32_t lay = mem.u32(0xA6590 + spr * 12 + 8);
+                if (lay == 0 || !mem.mapped(lay))
+                    continue;
+                const int w = mem.at<uint16_t>(lay), h = mem.at<uint16_t>(lay + 2);
+                const uint32_t clip = rt.pcClip[ci];
+                const int skipL = clip ? int(clip & 0xFF) : 0, skipT = clip ? int(clip >> 8 & 0xFF) : 0,
+                          cw = clip ? int(clip >> 16 & 0xFF) : w, ch = clip ? int(clip >> 24) : h;
+                auto cell = [&](int col, int row) { return mem.at<uint16_t>(lay + 4 + uint32_t(row * w + col) * 2); };
+                auto at = [&](int i, int j) { return size_t(l) * 0x2000 + size_t(cy + j) * 0x80 + size_t(cx + i) * 2; };
+                int delta = -1;
+                for (int j = 0; j < ch && delta < 0; ++j)
+                    for (int i = 0; i < cw && delta < 0; ++i)
+                        if (cx + i < 64 && cy + j < 64 && cell(skipL + i, skipT + j) != 0) {
+                            const uint16_t word = uint16_t(tiles[at(i, j)] | tiles[at(i, j) + 1] << 8);
+                            if (word)
+                                delta = int(word) - int(cell(skipL + i, skipT + j));
+                        }
+                if (delta < 0)
+                    continue;
+                if (!copied) {
+                    tilesBoss_.assign(tiles, tiles + 0x10000);
+                    copied = true;
+                }
+                for (int j = 0; j < ch; ++j)
+                    for (int i = 0; i < cw; ++i) {
+                        if (cx + i >= 64 || cy + j >= 64)
+                            continue;
+                        const int from = skipL + i + c;
+                        const uint16_t t = from < w ? cell(from, skipT + j) : 0;
+                        const uint16_t word = t ? uint16_t(int(t) + delta) : 0;
+                        tilesBoss_[at(i, j)] = uint8_t(word), tilesBoss_[at(i, j) + 1] = uint8_t(word >> 8);
+                    }
+            }
+    return copied ? tilesBoss_.data() : tiles;
+}
+
+// spanish3: the layers bottom to top (3 .. 0), each composed alone, its Spanish PC pictures drawn over it (at the PC's
+// 640 x 480 into esPc_, then each arcade pixel the average of the 1.25 x 1.25 PC pixels it covers)
+bool Hud::composeEs(const Runtime& rt, const uint8_t* tiles, bool high, unsigned layers, std::vector<uint8_t>& out,
+                    const uint8_t* side, int want)
+{
+    port::Mem& mem = rt.mem;
+    auto mine = [&](const EsCut& c) { return c.high == high && (layers >> c.layer & 1u) && (!side || c.side == want); };
+    auto only = [&](unsigned ls, std::vector<uint8_t>& to) {
+        if (ls == 0xFu)
+            return assets::Arcade2D::compose(tiles, mem.ptr(kCharRam), mem.ptr(kPalShadow), high, to, side, want);
+        layerTiles_.assign(tiles, tiles + 0x10000);
+        for (int l = 0; l < 4; ++l)
+            if (!(ls >> l & 1u))
+                layerTiles_[size_t(0xA008 + 2 * l + 1)] |= 0x80;   // (the layer's y scroll bit 15: off)
+        return assets::Arcade2D::compose(layerTiles_.data(), mem.ptr(kCharRam), mem.ptr(kPalShadow), high, to, side, want);
+    };
+    if (std::none_of(esCuts_.begin(), esCuts_.end(), mine))
+        return only(layers, out);
+    const int W = assets::Arcade2D::kWidth, H = assets::Arcade2D::kHeight;
+    const int PW = assets::PcSprites::kWidth, PH = assets::PcSprites::kHeight;
+    out.assign(size_t(W) * H * 4, 0);
+    bool any = false;
+    for (int l = 3; l >= 0; --l) {
+        if (!(layers >> l & 1u))
+            continue;
+        if (only(1u << l, esLayer_)) {
+            for (size_t i = 0; i < esLayer_.size(); i += 4)
+                if (esLayer_[i + 3])
+                    std::memcpy(&out[i], &esLayer_[i], 4);
+            any = true;
+        }
+        int x0 = PW, y0 = PH, x1 = 0, y1 = 0;
+        for (const EsCut& c : esCuts_) {
+            if (c.layer != l || !mine(c))
+                continue;
+            if (x1 == 0)
+                esPc_.assign(size_t(PW) * PH * 4, 0);
+            const auto img = esImg_.find(c.id);
+            if (img == esImg_.end())
+                continue;
+            const int px = c.x * 10 / 8, py = c.y * 10 / 8, sw = pcSprites_.width(c.id), sh = pcSprites_.height(c.id);
+            // the picture's top-left on the PC screen and the part drawn (as drawPc2D: a clipped draw the PC
+            // picture's matching part)
+            int ox = px, oy = py, rx0 = 0, ry0 = 0, rx1 = PW, ry1 = PH;
+            if (c.clip) {
+                const int skipL = int(c.clip & 0xFF), skipT = int(c.clip >> 8 & 0xFF), cw = int(c.clip >> 16 & 0xFF),
+                          ch = int(c.clip >> 24);
+                const int u = sh == (skipT + ch) * 8 && sw == (skipL + cw) * 8 ? 8 : 10;
+                ox = px - skipL * u, oy = py - skipT * u;
+                rx0 = px, ry0 = py, rx1 = px + cw * u, ry1 = py + ch * u;
+            }
+            rx0 = std::max({rx0, ox, 0}), ry0 = std::max({ry0, oy, 0});
+            rx1 = std::min({rx1, ox + sw, PW}), ry1 = std::min({ry1, oy + sh, PH});
+            if (rx0 >= rx1 || ry0 >= ry1 || img->second.size() < size_t(sw) * size_t(sh) * 4)
+                continue;
+            if (x1 == 0)
+                esPc_.assign(size_t(PW) * PH * 4, 0);
+            for (int y = ry0; y < ry1; ++y)
+                for (int x = rx0; x < rx1; ++x) {
+                    const uint8_t* s = &img->second[(size_t(y - oy) * size_t(sw) + size_t(x - ox)) * 4];
+                    if (s[3])
+                        std::memcpy(&esPc_[(size_t(y) * PW + size_t(x)) * 4], s, 4);
+                }
+            x0 = std::min(x0, rx0), y0 = std::min(y0, ry0), x1 = std::max(x1, rx1), y1 = std::max(y1, ry1);
+        }
+        if (x1 == 0)
+            continue;
+        const int ax0 = std::max(0, x0 * 4 / 5), ay0 = std::max(0, y0 * 4 / 5);
+        const int ax1 = std::min(W, (x1 * 4 + 4) / 5 + 1), ay1 = std::min(H, (y1 * 4 + 4) / 5 + 1);
+        for (int ay = ay0; ay < ay1; ++ay) {
+            const int qy0 = ay * 5 / 4, qy1 = std::min(PH, std::max(qy0 + 1, (ay + 1) * 5 / 4));
+            for (int ax = ax0; ax < ax1; ++ax) {
+                const int qx0 = ax * 5 / 4, qx1 = std::min(PW, std::max(qx0 + 1, (ax + 1) * 5 / 4));
+                int sum[4] = {}, n = 0;
+                for (int qy = qy0; qy < qy1; ++qy)
+                    for (int qx = qx0; qx < qx1; ++qx, ++n) {
+                        const uint8_t* s = &esPc_[(size_t(qy) * PW + size_t(qx)) * 4];
+                        for (int k = 0; k < 3; ++k)
+                            sum[k] += s[k] * s[3];
+                        sum[3] += s[3];
+                    }
+                if (sum[3] == 0 || n == 0)
+                    continue;
+                const int a = sum[3] / n;
+                uint8_t* d = &out[(size_t(ay) * W + size_t(ax)) * 4];
+                const int da = d[3] * (255 - a) / 255, oa = a + da;   // (over, straight alpha)
+                if (oa <= 0)
+                    continue;
+                for (int k = 0; k < 3; ++k)
+                    d[k] = uint8_t((sum[k] / sum[3] * a + d[k] * da) / oa);
+                d[3] = uint8_t(oa);
+                any = true;
+            }
+        }
+    }
+    return any;
+}
+
 bool Hud::drawUnder(const Runtime& rt, int ww, int wh, const float clear[3])
 {
     port::Mem& mem = rt.mem;
@@ -450,8 +781,8 @@ bool Hud::drawUnder(const Runtime& rt, int ww, int wh, const float clear[3])
     if (rt.pcModels || !mem.mapped(kTileRam) || !mem.mapped(kCharRam))
         return false;   // PC: Runtime::pcCells carries no priority (all over the 3D)
     subHide_ = pauseSelection < 0 && !noText && lang::active() && !subLines(rt).empty();   // (lang: as draw() will)
-    const bool composed = assets::Arcade2D::compose(withoutP2Notice(rt, clean || noText || subHide_ ? filteredTiles(rt) : mem.ptr(kTileRam)),
-                                                    mem.ptr(kCharRam), mem.ptr(kPalShadow), false, rgba_);
+    const bool composed = composeEs(rt, codenameTiles(rt, spanishCut(rt, withoutP2Notice(rt, clean || noText || subHide_ ? filteredTiles(rt) : mem.ptr(kTileRam)))),
+                                    false, 0xFu, rgba_);   // (spanish3)
     subHide_ = false;
     if (!composed)
         return false;
@@ -670,8 +1001,9 @@ bool Hud::tileExtend(const std::vector<uint8_t>& pic, int W, int H, int ww, int 
 }
 
 // a full-width band of window rows [y0, y1) (y down) in one colour
-void Hud::fillRect(const uint8_t rgb[3], int ww, int wh, int y0, int y1)
+void Hud::fillRect(const uint8_t rgb[3], int ww, int wh, int y0, int y1, int x0, int x1)
 {
+    if (x1 < 0) x1 = ww;
     if (y1 <= y0 || wh <= 0)
         return;
     const uint8_t px[4] = {rgb[0], rgb[1], rgb[2], 255};
@@ -682,7 +1014,8 @@ void Hud::fillRect(const uint8_t rgb[3], int ww, int wh, int y0, int y1)
     gl::Disable(gl::DEPTH_TEST);
     gl::UseProgram(program_);
     const float h = 2.0f / float(wh);
-    gl::Uniform4f(uRect_, -1.0f, 1.0f - float(y1) * h, 2.0f, float(y1 - y0) * h);
+    const float wx = 2.0f / float(std::max(1, ww));
+    gl::Uniform4f(uRect_, -1.0f + float(x0) * wx, 1.0f - float(y1) * h, float(x1 - x0) * wx, float(y1 - y0) * h);
     gl::ActiveTexture(gl::TEXTURE0);
     gl::BindTexture(gl::TEXTURE_2D, texture_);
     gl::BindVertexArray(vao_);
@@ -823,7 +1156,16 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
                 const int px = sx * 10 / 8, py = sy * 10 / 8;
                 if (rbOn && (rt.cellHud[ci] == 2 || (rt.cellHud[ci] == 1 && rbHud)))   // rainbow2
                     rbTint(rt.cellHud[ci], sx, sy);
-                if (const uint32_t clip = rt.pcClip[ci]) {
+                const int code = bossCodenames ? bossCodenameCell(v & 0xFFFF) : 0;
+                if (code && !(!hotd::pcSpanishTextures().empty() && pcSprites_.onPage(id, hotd::pcSpanishTextPage))) {
+                    // spanish3 (Boss Names: Codenames Only): the PC card's part from the codename's cell on, drawn where
+                    // the card begins (the Spanish CD's cards, its own names only, as they are)
+                    const uint32_t clip = rt.pcClip[ci];
+                    const int skipL = clip ? int(clip & 0xFF) : 0, skipT = clip ? int(clip >> 8 & 0xFF) : 0;
+                    const int cw = clip ? int(clip >> 16 & 0xFF) : (pcSprites_.width(id) + 9) / 10,
+                              ch = clip ? int(clip >> 24) : (pcSprites_.height(id) + 9) / 10;
+                    pcSprites_.draw(canvas, id, px - (skipL + code) * 10, py - skipT * 10, px, py, px + cw * 10, py + ch * 10);
+                } else if (const uint32_t clip = rt.pcClip[ci]) {
                     // a clipped draw: the PC picture's matching part (cells of 10 PC pixels)
                     const int skipL = int(clip & 0xFF), skipT = int(clip >> 8 & 0xFF), cw = int(clip >> 16 & 0xFF),
                               ch = int(clip >> 24);
@@ -1159,6 +1501,8 @@ void Hud::drawPlaceholder(const Runtime& rt, int ww, int wh, int scale)
 void Hud::loadPcSprites()
 {
     pcTried_ = true;
+    pcEs_ = hotd::pcSpanishTextures();   // (spanish3)
+    esLoaded_ = "-";
     std::string err;
     if (pcDir_.empty() || !pcSprites_.load(pcDir_, err, 1, blood_)) {
         label_.setText({"PC HUD sprites: " + (pcDir_.empty() ? std::string("no PC folder") : err) + " (placeholder)"}, 1);
@@ -2615,15 +2959,18 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     // a 4:3 window is a little wider than the arcade's screen). The window's sides black too (hudfix4)
     // sweep (2026-10-28): the white cover (0x8D, the attract's cut to the sewer zombies at frame 7200, 5 frames) too:
     // it whitened the 4:3 middle only, the old scene showed beside it; the sides white then
+    // issues5 (GitHub #57): white only in widescreen; Original 4:3's pillarboxes stay black (they flashed white)
     else if (const uint32_t cover = coverShown(rt))
-        blackSides(ww, wh, cover == 0x8D && !std::getenv("HOTD_NO_WHITE") ? 1.0f : 0.0f);   // (HOTD_NO_WHITE: black sides)
+        blackSides(ww, wh, cover == 0x8D && widescreen && !std::getenv("HOTD_NO_WHITE") ? 1.0f : 0.0f);   // (HOTD_NO_WHITE: black sides)
     // title-2: kind 104's fade from white (palette_blend_white: white - (white - colour) x level / 32) as white over
     // the 3D picture, alpha (32 - level) / 32, under the 2D layer (MAME attract_fade snaps 0128-0132: the 3D and the
     // backdrop fade from white, PRESS START / FREE PLAY stay as they are)
     // flash: also the Magician's death fades (Runtime::paletteWhite: palette_fade_out_task / _in_task)
     static const bool noWhite = std::getenv("HOTD_NO_WHITE") != nullptr;   // (trailer footage: no white fades)
-    const int whiteLevel = noWhite ? -1 : rt.whiteFade >= 0 ? rt.whiteFade : rt.paletteWhite();
-    if (whiteLevel >= 0 && whiteLevel < 32 && !rt.pcModels) {   // PC models: the PC's own fade (pcFadeDraw)
+    // PC models: the PC's own fade (pcFadeDraw), but the Magician's death fade too (issues5, GitHub #55: no PC fade
+    // comes there, the picture stayed as it was)
+    const int whiteLevel = noWhite ? -1 : rt.pcModels ? rt.paletteWhite() : rt.whiteFade >= 0 ? rt.whiteFade : rt.paletteWhite();
+    if (whiteLevel >= 0 && whiteLevel < 32) {
         // the 496 x 384 screen's shape in original 4:3; widescreen: the window's shape, so the flash fills the whole
         // picture (it only whitened the 4:3 middle, user 2026-10-17)
         const int H = 24, W = widescreen ? std::max(31, int(float(H) * float(areaW(ww, wh)) / float(std::max(wh, 1)) + 0.5f)) : 31;
@@ -2636,23 +2983,18 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     // the cut-scene bars (letterbox_task: 0..0x28 lines of the 384-line arcade screen, top and bottom)
     static const bool noBars = std::getenv("HOTD_NO_BARS") != nullptr;   // (trailer footage: no cut-scene bars)
     if (rt.letterbox > 0 && !noBars) {
-        // the panel is 11 px a text row + 9 (render/overlay.cpp); was 8 a row, i.e. 60 of 40 lines (polish)
-        const int rows = std::max(1, (rt.letterbox * wh / 384 - 9 + 5) / 11);
-        if (rows != barRows_) {
-            barRows_ = rows;
-            bar_.setText(std::vector<std::string>(size_t(rows), std::string(size_t(4096 / 8), ' ')), 1);
-        }
-        if (barWidth > 0 && barWidth < float(ww)) {   // (Light Gun Edition: inside the game's picture, not over the bezel)
-            const float bx = (float(ww) - barWidth) * 0.5f, bh = bar_.drawnHeight();
-            bar_.drawIn(ww, wh, bx, 0.0f, barWidth, bh);
-            bar_.drawIn(ww, wh, bx, float(wh) - bh, barWidth, bh);
-        } else {
-            bar_.drawAnchored(ww, wh, 0.0f, 0.0f, 0.0f, 0.0f);
-            bar_.drawAnchored(ww, wh, 0.0f, float(wh), 0.0f, 1.0f);
-        }
+        // issues5 (GitHub #58): the bars a solid fill of the window's own rows (letterbox x wh / 384), so they slide a
+        // line at a time; they were a text panel (11 px a row + 9, render/overlay.cpp), i.e. in 11 px steps (choppier
+        // the lower the resolution)
+        const int h = std::min((rt.letterbox * wh + 192) / 384, wh / 2);
+        static const uint8_t kBlack[3] = {0, 0, 0};
+        // (Light Gun Edition: inside the game's picture with the 4:3 / 16:10 bezel, not over it: barWidth)
+        const int bx0 = barWidth > 0 && barWidth < float(ww) ? int((float(ww) - barWidth) * 0.5f) : 0;
+        fillRect(kBlack, ww, wh, 0, h, bx0, ww - bx0);
+        fillRect(kBlack, ww, wh, wh - h, wh, bx0, ww - bx0);
         // flash: the bars show 2D palette entry 0x92 (Runtime::backdrop555; black but in the Magician's death fades,
         // MAME fullgame_us t14360..t14440), through the tile layers' colour curve (brightness 0x40: about c x 255 / 31,
-        // fullgame_us t14340's table) and MAME's output gamma; over the black panel, its height (11 px a row + 9)
+        // fullgame_us t14340's table) and MAME's output gamma; over the black bars, their height
         const uint16_t c = rt.backdrop555;
         if ((c & 0x7FFF) != 0 && !rt.pcModels) {
             uint8_t rgb[3];
@@ -2660,7 +3002,6 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
                 const int v = int((c >> (5 * k)) & 31) * 255 / 31;
                 rgb[k] = uint8_t(m2Curve(v, blackLevel()));   // (bugs4 #23: Black Level; 64 as before)
             }
-            const int h = std::min(rows * 11 + 9, wh / 2);
             fillRect(rgb, ww, wh, 0, h);
             fillRect(rgb, ww, wh, wh - h, wh);
         }

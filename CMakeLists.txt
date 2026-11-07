@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 # THE version (a release: change this line only): the exes' VERSIONINFO, the main menu's corner, hotd --version
-project(hotd_m2 VERSION 1.3.0 LANGUAGES C CXX)
-# Light Gun Edition: its own build number on top of the ReWrithe version (v1.3.0-lg14): raise it for each release of
-# this edition; the release tag must match (git tag v1.3.0-lg14)
-set(HOTD_LG_EDITION "lg14")
+project(hotd_m2 VERSION 1.3.1 LANGUAGES C CXX)
+# Light Gun Edition: its own build number on top of the ReWrithe version (v1.3.1-lg15): raise it for each release of
+# this edition; the release tag must match (git tag v1.3.1-lg15)
+set(HOTD_LG_EDITION "lg15")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -302,6 +302,7 @@ add_library(hotd_engine STATIC
     src/util/window_icon.cpp
     src/util/win_shell.cpp
     src/util/update_check.cpp
+    src/util/cab_unpack.cpp
     src/util/disc_image.cpp
     src/util/game_exe.cpp
     src/util/steam_shortcut.cpp

@@ -222,7 +222,7 @@ uint64_t NetGame::gameHash(game::Runtime& rt)
             h.value(uint64_t(rt.startRequest[p]) | uint64_t(rt.shotsIn[p]) << 8 | uint64_t(rt.reloadsIn[p]) << 32);
             h.value(rt.startsIn[p]);
         }
-    if (rt.pcmode)
+    if (rt.pcmode || rt.charpick)   // (charsel: an arcade game's Character Select picks too)
         hashPm(rt, h);
     else if (bossGame(rt))
         hashBoss(rt, h);
@@ -498,10 +498,10 @@ int NetGame::seatChar(int s) const
     if (s < 0 || s > 3)
         return -1;
     if (charsFixed_)   // the game's (the host started it; a joiner has its settings)
-        return settings_.pcMode ? settings_.pmChar[s] : -1;
+        return settings_.pcMode || settings_.pmChar[0] != 0 ? settings_.pmChar[s] : -1;   // (charsel: an arcade game's picks too)
     if (!session_.isHost())   // a joiner in the waiting room: the host's ROSTER
         return session_.rosterReceived ? session_.roster[s].pcChar : -1;
-    if (!args_.pcMode)
+    if (!args_.pcMode && !args_.charPick && !charPickOn_)   // (charsel: an arcade game with Character Select picks)
         return -1;
     auto pick = [s](int c) { return c >= 1 && c <= kPmCharMax ? c : s + 1; };   // 0: the seat's default Rogan / G / Rogan 2 / G 2
     if (multi_) {
@@ -672,10 +672,21 @@ void NetGame::hostStart(Settings s)
         s.delay = uint8_t(rollback_ > 0 ? std::min(session_.suggestedDelay(), 2) : session_.suggestedDelay());
     chapter_ = s.chapter;
     // PC Mode online (protocol 16): every seat's character as the waiting room showed it (the joiners' own picks); the
-    // host's Continues / Free-Play. An arcade game: all zero
+    // host's Continues / Free-Play. An arcade game: all zero; charsel: an arcade game where the host or a joiner picked
+    // characters (Character Select, cosmetic): every seat's character too (a seat not picked: Rogan / G / Rogan 2 / G 2)
     s.pcMode = args_.pcMode ? 1 : 0;
+    if (!args_.pcMode) {
+        bool picks = args_.charPick;
+        if (multi_) {
+            for (int o = 1; o < 4; ++o)
+                picks = picks || (seat(o).peerConnected() && (seat(o).peerChar(0) != 0 || seat(o).peerChar(1) != 0));
+        } else {
+            picks = picks || (session_.peerConnected() && (session_.peerChar(0) != 0 || session_.peerChar(1) != 0));
+        }
+        charPickOn_ = picks;
+    }
     for (int k = 0; k < 4; ++k)
-        s.pmChar[k] = uint8_t(args_.pcMode ? seatChar(k) : 0);
+        s.pmChar[k] = uint8_t(args_.pcMode || charPickOn_ ? seatChar(k) : 0);
     if (!args_.pcMode)
         s.pmContinues = s.pmFreePlay = 0;
     s.bossMode = uint8_t(bossMode());   // Boss Mode (protocol 18): the host's boss game (never with PC Mode)
@@ -686,6 +697,9 @@ void NetGame::hostStart(Settings s)
         log("PC Mode: characters " + std::to_string(s.pmChar[0]) + ", " + std::to_string(s.pmChar[1]) + ", " +
             std::to_string(s.pmChar[2]) + ", " + std::to_string(s.pmChar[3]) + "; continues " + std::to_string(s.pmContinues) +
             (s.pmFreePlay ? ", free play" : ""));
+    if (log && !args_.pcMode && charPickOn_)
+        log("Character Select: characters " + std::to_string(s.pmChar[0]) + ", " + std::to_string(s.pmChar[1]) + ", " +
+            std::to_string(s.pmChar[2]) + ", " + std::to_string(s.pmChar[3]));
     if (multi_) {   // up to four PCs: each joined PC gets its seat; the free seats can join the running game
         s.seats = 4, s.pcs = 4;
         if (args_.delay == 0) {
@@ -1147,7 +1161,7 @@ bool NetGame::onlyHostSkips(const game::Runtime& rt)
 
 Input NetGame::picked(Input in) const
 {
-    if (!settings_.pcMode)   // (an arcade game: the inputs as before)
+    if (!settings_.pcMode && settings_.pmChar[0] == 0)   // (an arcade game without Character Select picks: the inputs as before)
         return in;
     auto put = [](uint8_t& f, int c) {
         if ((f & Input::kStart) && c >= 1 && c <= kPmCharMax)
@@ -1184,7 +1198,7 @@ void NetGame::applyInputs(game::Runtime& rt, const Input in[kMaxPlayers])
     // PC Mode (protocol 17): a start carrying a character (Input::kChar) gives a seat that is not in the game (waiting:
     // state 9; never a continue) that character before its start runs (PlStartInit / the 4P join read it): a joiner's
     // own pick in a running game. From the frame's inputs and the game's state, so alike on every PC and in a replay
-    if (rt.pcmode)
+    if (rt.pcmode || rt.charpick)   // (charsel: an arcade game's Character Select picks too)
         for (int s = 0; s < (four ? 4 : 2); ++s) {
             const uint8_t f = s < 2 ? in[s].flags : in[s - 2].flags2;
             const int c = (f & Input::kChar) >> Input::kCharShift;

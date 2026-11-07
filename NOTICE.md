@@ -60,6 +60,11 @@ with.
 - The Typing of the Dead 0's design reference (no footage is included or used in the game): the playthrough video "The
   Typing of the Dead [PC] by SEGA ($6,132,600) [HD] [1080p60]" by the YouTube channel **Saturn Memories**
   (youtube.com/@SaturnMemories, https://www.youtube.com/watch?v=SDK88HHndK4).
+- The Spanish dub (Options > Audio > Voice: Spanish, `docs/spanish.md`): researched on the Spanish PC version
+  ("Doblaje español") provided by **3lc3z4r** (YouTube channel **Cez4rPlay**), with his list of its differences and his
+  reference playthrough "The House Of The Dead (PC) - Doblaje español ORIGINAL" (https://youtu.be/OVnjusRO1wk).
+  No Spanish game file is included: the voices are read from the player's own Spanish copy; only file sizes and SHA-1
+  hashes are in the source (`src/game/pc_manifest_es.inc`).
 - The Windows package also carries Microsoft's Visual C++ runtime DLLs (`msvcp140*.dll`, `vcruntime140*.dll`), the
   redistributable files of Visual Studio 2022, shipped as Microsoft allows for programs built with it.
 - Third-party code that is NOT compiled into the program: the Model 2 knowledge above (MAME), the developer tools in

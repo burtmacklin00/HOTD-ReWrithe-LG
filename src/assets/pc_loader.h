@@ -32,6 +32,17 @@ bool pcBloodPages(const std::string& installDir, int blood, const std::vector<ui
 // Japanese layout, else 0); read once per file (its chunk headers)
 int pcVmcPageShift(const std::string& path);
 
+// spanish2 (user 2026-11-06; docs/spanish.md): the Spanish PC release's ("Doblaje español") translated texture pages.
+// Its BIGGER.VMC has the US page layout; of its 403 differing runs, these pages carry the translated text pictures
+// (the fonts, RELOAD / PLEASE WAIT, the chapter cards, the tutorial boards, the boss files and name cards, CONTINUE /
+// GAME OVER, the name entry / ranking, the credits and the map): pcSpanishTextPage. Set (the Spanish copy's
+// ART\STAGE1\CREATURE\BIGGER.VMC, "" off; while the language is Español): every BIGGER.VMC / B_<colour>.VMC /
+// TEXTURE.VMC read of the PC models and the PC 2D sprites takes those pages from it, every other page (the blood
+// colours, the models, the worlds) from the PC game's own files as before
+void setPcSpanishTextures(const std::string& biggerVmc);
+const std::string& pcSpanishTextures();
+bool pcSpanishTextPage(int page);
+
 class PcSource : public AssetSource {
 public:
     explicit PcSource(PcConfig cfg);

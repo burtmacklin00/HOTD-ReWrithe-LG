@@ -65,7 +65,7 @@ void Runtime::pc_cells_put(uint32_t layer, int x, int y, uint32_t sprite, int w,
     if (layer >= kTileRam && l < 4) {
         const uint8_t side = uint8_t(hud_side_of(sprite, x, w));
         // (rainbow2; HOLD YOUR FIRE! 0x107 is a warning, not a player's HUD)
-        const uint8_t kind = hud_player_sprite(sprite) && sprite != 0x107 ? 1 : sprite >= 0x28 && sprite <= 0x2D ? 2 : 0;
+        const uint8_t kind = hud_player_sprite(sprite) && sprite != 0x107 ? 1 : hit_mark_sprite(sprite) ? 2 : 0;
         for (int r = std::max(y, 0); r < std::min(y + h, 64); ++r)
             for (int c = std::max(x, 0); c < std::min(x + w, 64); ++c) {
                 // a subtitle / text cell stays centred (a HUD sprite's transparent cells over it must not take it)
@@ -110,6 +110,14 @@ bool Runtime::hud_player_sprite(uint32_t sprite)
             perPlayer = uint32_t(mem.at<int16_t>(0xCA720 + d * 2)) == sprite;   // the continue digits
     }
     return perPlayer;
+}
+
+// issues5 (GitHub #56): the hit marks are every sprite of hud_player_notice_show's table 0xCA5FC (kind x 2 players),
+// not only 0x28..0x2D: the scratches and slashes 0x271..0x275 are there too (the table's words read: 0, 0x28..0x2D
+// for kinds 0-6, 0x271..0x275 for kinds 7-11, then other data)
+bool Runtime::hit_mark_sprite(uint32_t sprite)
+{
+    return (sprite >= 0x28 && sprite <= 0x2D) || (sprite >= 0x271 && sprite <= 0x275);
 }
 
 void Runtime::pc_cells_clear(uint32_t layer, int x, int y, int w, int h)

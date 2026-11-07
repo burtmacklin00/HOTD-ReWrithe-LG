@@ -457,7 +457,7 @@ template <class P> int32_t Game<P>::score_rank_get(int p, int table)
 // 0x4AA52C-0x4AB148): the seat's character's type (4P: players 3 / 4 alone, as the bodies)
 template <class P> int32_t Game<P>::ending_body_type(uint32_t table)
 {
-    if (pm_on()) {
+    if (chars_on()) {
         const bool setB = coop4_on() && mem.u32(coop4::kMagic) == 0x34504334u &&
                           mem.template at<uint8_t>(coop4::kBodySetB) != 0;
         return pm_body_type((table == 0xCA690 ? 0 : 1) + (setB ? 2 : 0));
@@ -501,6 +501,24 @@ template <class P> void Game<P>::ending_body_head(uint32_t obj)
         enemy_frame_end(obj);
     }
 }
+
+// charsel (user 2026-11-06: "the researcher's body with Rogan's head" in the ending): role 1 of the players' bodies is
+// the head; the frames below put a talking head there, Rogan's (0x2B closed, 0x749.. / 0x748 talking) on player 1's
+// body and G's (0x281, 0x283.. / 0x282) on player 2's, for every type but the alternates 14 / 15 / 34 (the arcade's
+// pairs have no other). With the seats' characters (PC Mode, a Character Select pick) each body gets its own type's
+// head: Rogan's on Rogan, G's on G, none on the others (Sophie, the Researcher, Rogan 2, G 2 keep their own head)
+namespace {
+struct EndHead { uint32_t rest, last, first; };
+constexpr EndHead kRoganHead{0x2B, 0x748, 0x749}, kGHead{0x281, 0x282, 0x283};
+bool endHeadOf(int32_t type, EndHead& h)
+{
+    if (type == 2)
+        h = kRoganHead;
+    else if (type == 13)
+        h = kGHead;
+    return type == 2 || type == 13;
+}
+} // namespace
 
 // the hand's role-1 model animated: frame_counter % 48 / 3 = k: k 15 -> last, else first + k
 template <class P> void Game<P>::ending_body_hand(uint32_t obj, uint32_t last, uint32_t first)
@@ -555,13 +573,14 @@ template <class P> void Game<P>::ending_p1_a_frame(uint32_t obj)
 {
     ending_body_head(obj);
     const int16_t type = of<int16_t>(obj, 0xCC);
-    if (type != 14 && type != 34) {
+    EndHead h = kRoganHead;
+    if (type != 14 && type != 34 && (!chars_on() || endHeadOf(type, h))) {
         const uint32_t path = mem.u32(G::camera_path);
         const float cf = mem.f32(0x51EB9C);
         if (path == 0x77 && !(cf < 630.0f) && cf < 700.0f)
-            ending_body_hand(obj, 0x748, 0x749);
+            ending_body_hand(obj, h.last, h.first);
         else
-            body_role_model_set(obj, 1, 0x2B);
+            body_role_model_set(obj, 1, h.rest);
     }
     const bool mf = (of<uint8_t>(obj, 0x3C5) >> 4) & 1;   // MotFinish
     switch (uint32_t(int32_t(of<int16_t>(obj, 0x60)))) {
@@ -626,13 +645,14 @@ template <class P> void Game<P>::ending_p1_b_frame(uint32_t obj)
 {
     ending_body_head(obj);
     const int16_t type = of<int16_t>(obj, 0xCC);
-    if (type != 14 && type != 34) {
+    EndHead h = kRoganHead;
+    if (type != 14 && type != 34 && (!chars_on() || endHeadOf(type, h))) {
         const uint32_t path = mem.u32(G::camera_path);
         const float cf = mem.f32(0x51EB9C);
         if ((path == 0x7C && !(cf < 300.0f) && cf < 390.0f) || (path == 0x7B && !(cf < 600.0f) && cf < 670.0f))
-            ending_body_hand(obj, 0x748, 0x749);
+            ending_body_hand(obj, h.last, h.first);
         else
-            body_role_model_set(obj, 1, 0x2B);
+            body_role_model_set(obj, 1, h.rest);
     }
     const bool mf = (of<uint8_t>(obj, 0x3C5) >> 4) & 1;
     switch (uint32_t(int32_t(of<int16_t>(obj, 0x60)))) {
@@ -717,12 +737,13 @@ template <class P> void Game<P>::ending_p2_a_frame(uint32_t obj)
 {
     ending_body_head(obj);
     const int16_t type = of<int16_t>(obj, 0xCC);
-    if (type != 15 && type != 34) {
+    EndHead h = kGHead;
+    if (type != 15 && type != 34 && (!chars_on() || endHeadOf(type, h))) {
         const float cf = mem.f32(0x51EB9C);
         if (mem.u32(G::camera_path) == 0x79 && !(cf < 400.0f) && cf < 490.0f)
-            ending_body_hand(obj, 0x282, 0x283);
+            ending_body_hand(obj, h.last, h.first);
         else
-            body_role_model_set(obj, 1, 0x281);
+            body_role_model_set(obj, 1, h.rest);
     }
     const bool mf = (of<uint8_t>(obj, 0x3C5) >> 4) & 1;
     switch (uint32_t(int32_t(of<int16_t>(obj, 0x60)))) {
@@ -780,14 +801,15 @@ template <class P> void Game<P>::ending_p2_b_frame(uint32_t obj)
 {
     ending_body_head(obj);
     const int16_t type = of<int16_t>(obj, 0xCC);
-    if (type != 15 && type != 34) {
+    EndHead h = kGHead;
+    if (type != 15 && type != 34 && (!chars_on() || endHeadOf(type, h))) {
         const float cf = mem.f32(0x51EB9C);
         const bool win = mem.u32(G::camera_path) == 0x7C &&
                          ((!(cf < 180.0f) && cf < 270.0f) || (!(cf < 500.0f) && cf < 590.0f));
         if (win)
-            ending_body_hand(obj, 0x282, 0x283);
+            ending_body_hand(obj, h.last, h.first);
         else
-            body_role_model_set(obj, 1, 0x281);
+            body_role_model_set(obj, 1, h.rest);
     }
     const bool mf = (of<uint8_t>(obj, 0x3C5) >> 4) & 1;
     switch (uint32_t(int32_t(of<int16_t>(obj, 0x60)))) {

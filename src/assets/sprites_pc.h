@@ -49,6 +49,8 @@ public:
     // pchotfix: sprite id has pieces and every one of their pages was read (false: not drawn, or only in part: another
     // version of SPR.RBH / BIGGER.VMC, or a damaged one)
     bool drawable(int id) const;
+    // spanish3: a piece of sprite id lies on a page for which pred(page) is true (pcSpanishTextPage: a translated one)
+    bool onPage(int id, bool (*pred)(int)) const;
     // rainbow2 (the Rainbow Blood mod, game/cosmods.h): the next draws' texels recoloured, rgb 0..1 (null: off). mode 1
     // the red share of each texel (blood art: the hit marks; the grey under it kept), 2 each texel's brightest channel
     // (the HUD: its shading kept)

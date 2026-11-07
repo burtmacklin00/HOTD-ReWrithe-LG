@@ -38,6 +38,7 @@ struct InstallOptions {
     std::string dest;          // the install folder
     std::string programRoot;   // the package the setup runs from (copied from); == dest: Repair (the data only)
     std::string arcade, pc;    // the player's sources (zip / folder; a disc image already copied out to a folder)
+    std::string spanishPc;     // spanish2: the Extras page's Spanish PC copy ("" none): what its features read, into data\pc_spanish
     std::string settingsFrom;  // a launcher.ini to carry over (the portable copy's), "" none
     bool desktop = true, startMenu = true, steam = false, music = true;
     std::string version;       // this build's ("v1.1.0")

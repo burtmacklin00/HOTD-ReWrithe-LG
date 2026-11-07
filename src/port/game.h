@@ -171,6 +171,18 @@ public:
         else
             return pcmode != 0;
     }
+    // charsel (user 2026-11-06): the Character Select of the other modes (Arcade, Chapter Select, ...): `charpick` set,
+    // pm_char[] the seats' picks. Cosmetic only: the bodies in the cut-scenes, the ending and the game over, the car's
+    // seats (the rules stay the arcade's: lives, damage, rounds test pm_on()). chars_on(): the seats' characters are
+    // drawn (PC Mode or a pick); 0 in the arcade's own games and the proofs
+    int charpick = 0;
+    bool chars_on() const
+    {
+        if constexpr (P::pc)
+            return pm_on();
+        else
+            return pcmode != 0 || charpick != 0;
+    }
     // THOTD.EXE's character table 0x5CE348 (its defaults: the player's install has no cstats.cfg)
     struct PmStats {
         const char* name;
@@ -600,11 +612,22 @@ public:
     // the runtime: whether a model id can be drawn (the PC Mode characters' own car models 0x1D38.. exist only in the
     // PC files); false: the caller draws the arcade's model instead
     virtual bool pm_model_drawable(uint32_t model) { (void)model; return false; }
+    // issues5 (GitHub #52): the runtime: the world is the PC release's models (Video > Models: PC; synced online, in
+    // the settings hash), for the props the PC's world has nothing under (kind 147's table group)
+    virtual bool models_pc() const { return false; }
     // carchars (draws only): player_char_props_draw is about to draw seat `seat`'s car model; the runtime notes the
     // draw to put the seat's own character there after the frame (nothing in the game state)
     virtual void car_seat_mark(int seat) { (void)seat; }
     // the gun's full load: 6, in PC Mode the seat's character's rounds (+0x24, low byte); Survival Mode: the seat's
     // magazine (survivalRounds: the handgun's or the SMG's, the Big Mag perk's)
+    // issues5 (GitHub #62): PC Mode's lives are the character's hit points, not the Max Lives setting's: a character
+    // with more (G 2's 5 under Max Lives 3) raises the most to its own, so all its torches show and its extra lives
+    // count. Arcade games keep the setting
+    void pm_lives_most(int32_t hp)
+    {
+        if (pm_on() && hp > int32_t(mem.template at<uint8_t>(G::max_lives)) && hp <= 9)
+            mem.template at<uint8_t>(G::max_lives) = uint8_t(hp);
+    }
     uint8_t pm_full_rounds(int p) const
     {
         return survivalRounds[p & 3] ? uint8_t(survivalRounds[p & 3]) : pm_on() ? uint8_t(pm_table(pm_seat_char(p)).rounds) : uint8_t(6);

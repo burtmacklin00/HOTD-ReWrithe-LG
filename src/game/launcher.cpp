@@ -8,6 +8,7 @@
 #include "game/lives.h"
 #include "game/sights.h"
 #include "render/gamma.h"
+#include "util/cab_unpack.h"
 #include "util/disc_image.h"
 #include "util/file64.h"
 #include "util/fullscreen.h"
@@ -274,12 +275,18 @@ bool LaunchConfig::load(const std::string& file)
         // gunfb: Show Crosshairs / Shot Flash Size (their own ifs: the chain below is at MSVC's nesting limit)
         if (k == "showcrosshairs") { showCrosshairs = n != 0; continue; }
         if (k == "shotflashsize") { shotFlashSize = std::clamp(n, 0, 2); continue; }
+        if (k == "bossnames") { bossCodenames = n != 0; continue; }   // spanish3: 0 Full, 1 Codenames Only
+        if (k == "characters") { characters = v; continue; }   // charsel: the Character Select picks
+        if (k == "charselect") { charSelect = n != 0; continue; }   // charsel: Gameplay > Character Select
         if (bindsIniLine(k, v, keys, padBinds)) {}   // keybind: key1.fire= / padbind1.fire= ...
         else if (funKey()) {}
         else if (k == "arcade") arcade = fromBase(v, base);
         else if (k == "pc") pc = fromBase(v, base);
         else if (k == "models") models = std::clamp(n, 0, 1);
         else if (k == "sound") sound = std::clamp(n, 0, 2);
+        else if (k == "voice") voice = std::clamp(n, 0, 2);   // (spanish; spanish2: 2 English, 0 Auto)
+        else if (k == "reloadvoice") reloadVoice = n != 0;
+        else if (k == "spanishpc") spanishPc = fromBase(v, base);
         else if (k == "players") players = std::clamp(n, 1, 4);   // 3 / 4: the 4P mode (docs/coop4.md)
         else if (k == "p3input") p3Input = n >= 0 && n <= 3 ? n : 2;   // 0 mouse, 1 keyboard, 2 pad, 3 gun
         else if (k == "p2bot" || k == "p3bot" || k == "p4bot") seatBot[k[1] - '1'] = std::clamp(n, 0, 4);
@@ -528,9 +535,9 @@ void LaunchConfig::save(const std::string& file) const
         }
     } c{std::ofstream(file + ".new"), file};
     std::ofstream& f = c.f;
-    f << "arcade=" << toBase(arcade, base) << "\npc=" << toBase(pc, base) << "\nmodels=" << models << "\nsound=" << sound << "\nplayers=" << players << "\np2input=" << p2Input
+    f << "arcade=" << toBase(arcade, base) << "\npc=" << toBase(pc, base) << "\nmodels=" << models << "\nsound=" << sound << "\nvoice=" << voice << "\nreloadvoice=" << (reloadVoice ? 1 : 0) << "\nspanishpc=" << toBase(spanishPc, base) << "\nplayers=" << players << "\np2input=" << p2Input
       << "\ndifficulty=" << difficulty << "\nlives=" << lives << "\nstartlives=" << livesStartOf(lives) << "\nmaxlives=" << livesMostOf(lives) << "\nsoloseat=" << soloSeat << "\nchapterretry=" << (chapterRetry ? 1 : 0) << "\nblood=" << blood << "\ncuts=" << (cuts ? 1 : 0) << "\ntitle=" << (title ? 1 : 0) << "\nfbi=" << (fbi ? 1 : 0) << "\npcsplash=" << (pcSplash ? 1 : 0) << "\ngametext=" << gameText << "\nlang=" << language
-      << "\naspect=" << aspect << "\nwiden2d=" << widen2d << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nflashlight=" << (flashlight ? 1 : 0) << "\nbigheads=" << (bigHeads ? 1 : 0) << "\nshotgun=" << (shotgun ? 1 : 0) << "\npartyboard=" << (partyBoard ? 1 : 0) << "\nhardcore=" << (hardcore ? 1 : 0) << "\nfreefire=" << (freeFire ? 1 : 0) << "\nmachinegun=" << (machineGun ? 1 : 0) << "\narsenal=" << (weaponSwitch ? 1 : 0) << "\nsuddendeath=" << (suddenDeath ? 1 : 0) << "\nvampire=" << (vampire ? 1 : 0) << "\nhostagecrisis=" << (hostageCrisis ? 1 : 0) << "\nroulette=" << (roulette ? 1 : 0) << "\nsurvival=" << (survival ? 1 : 0) << "\nexploding=" << (exploding ? 1 : 0) << "\nfunlook=" << funLook << "\nturbo=" << turbo << "\nbossrush=" << (bossRush ? 1 : 0) << "\nmarried=" << (married ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
+      << "\naspect=" << aspect << "\nwiden2d=" << widen2d << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nflashlight=" << (flashlight ? 1 : 0) << "\nbigheads=" << (bigHeads ? 1 : 0) << "\nshotgun=" << (shotgun ? 1 : 0) << "\npartyboard=" << (partyBoard ? 1 : 0) << "\nhardcore=" << (hardcore ? 1 : 0) << "\nfreefire=" << (freeFire ? 1 : 0) << "\nmachinegun=" << (machineGun ? 1 : 0) << "\narsenal=" << (weaponSwitch ? 1 : 0) << "\nsuddendeath=" << (suddenDeath ? 1 : 0) << "\nvampire=" << (vampire ? 1 : 0) << "\nhostagecrisis=" << (hostageCrisis ? 1 : 0) << "\nroulette=" << (roulette ? 1 : 0) << "\nsurvival=" << (survival ? 1 : 0) << "\nexploding=" << (exploding ? 1 : 0) << "\nfunlook=" << funLook << "\nturbo=" << turbo << "\nbossrush=" << (bossRush ? 1 : 0) << "\nmarried=" << (married ? 1 : 0) << "\nbossnames=" << (bossCodenames ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
       << "\ndisplaymode=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? (exclusive ? 2 : 1) : 0)
       << "\nexclusive=" << (exclusive ? 1 : 0)
       << "\nresolution_fullscreen=" << util::sizeKey({resFullW, resFullH}) << "\nresolution_window=" << util::sizeKey({resWinW, resWinH})
@@ -545,6 +552,8 @@ void LaunchConfig::save(const std::string& file) const
       << "\nmusic=" << (music ? 1 : 0) << "\nmusicvolume=" << musicVolume << "\nsfxvolume=" << sfxVolume << "\nmusicnumbering=" << musicNumbering << "\nmenumusic=" << menuMusic
       << "\nmenustyle=" << menuStyle << "\nlivebg=" << liveBackground << "\nmenufps=" << menuFps << "\nmenublood=" << menuBlood << "\ngallery=" << galleryEntry << "\ngallerybg=" << galleryBg << "\ngallerylayout=" << galleryLayout;
     f << "\nscenecast=" << sceneCast;   // actors2: the cut-scene viewer's Actors
+    f << "\ncharacters=" << characters;   // charsel: the Character Select picks of the other modes ("1=sophie,2=g")
+    f << "\ncharselect=" << (charSelect ? 1 : 0);   // charsel: Gameplay > Character Select
     f << "\nguntype=" << gunKind << "\ngunflash=" << gunFlash << "\ngunborder=" << gunBorder;   // padpass: light guns
     f << "\npadprompts=" << padPrompts << "\nbuttonstyle=" << buttonStyle << "\niconoutline=" << iconOutline;
     f << "\ntouchcursor=" << touchCursor << "\ngyrocursor=" << gyroCursor;   // padglyphs   // padglyphs: Button Prompts / Style
@@ -611,7 +620,8 @@ constexpr float kW = 960, kH = 600;
 
 // the actions of the page's clickable places
 enum Action { kNext = 1, kBack, kQuit, kBrowseDir, kZoneA, kZoneP, kFolderA, kFolderP, kOptDesk, kOptStart, kOptSteam,
-              kOptMusic, kDoInstall, kPlayHere, kPlay, kOpenFolder, kUpdate, kNotNow, kDownloadPage, kContinue, kStart };
+              kOptMusic, kDoInstall, kPlayHere, kPlay, kOpenFolder, kUpdate, kNotNow, kDownloadPage, kContinue, kStart,
+              kZoneS, kFolderS, kClearS };   // (spanish2: the Extras page's Spanish PC copy)
 
 // the painter: logical units (the window is 960 x 600) x s = the picture's pixels
 struct Painter {
@@ -885,8 +895,8 @@ void Launcher::open(Mode m)
     updateErr_.clear();
     if (m == Mode::Repair) {
         step_ = kFiles;
-        for (int i = 0; i < 2; ++i) {
-            const std::string& p = i == 0 ? cfg.arcade : cfg.pc;
+        for (int i = 0; i < 3; ++i) {
+            const std::string& p = i == 0 ? cfg.arcade : i == 1 ? cfg.pc : cfg.spanishPc;
             if (!p.empty()) checkZone(i, p);
         }
     } else if (m == Mode::Update) {
@@ -955,7 +965,7 @@ void Launcher::checkZone(int which, const std::string& path)
         // what is read (the drop test, user 2026-11-03): THOTD.EXE itself dropped = its folder; a zip holding nothing but
         // another archive (and notes) = that archive, unpacked into the cache first
         std::string in = path;
-        if (which == 1 && lowered(fs::path(path).filename().string()) == "thotd.exe") in = fs::path(path).parent_path().string();
+        if (which >= 1 && lowered(fs::path(path).filename().string()) == "thotd.exe") in = fs::path(path).parent_path().string();
         if (lowered(fs::path(in).extension().string()) == ".zip") {
             ZipFile outer;
             std::string err;
@@ -971,7 +981,7 @@ void Launcher::checkZone(int which, const std::string& path)
                 std::vector<uint8_t> d;
                 if (inner && !other && outer.read(*inner, d, err)) {
                     std::error_code ec;
-                    const fs::path dir = fs::path(cache) / (which == 0 ? "arcade_inner" : "pc_inner");
+                    const fs::path dir = fs::path(cache) / (which == 0 ? "arcade_inner" : which == 2 ? "pces_inner" : "pc_inner");
                     fs::create_directories(dir, ec);
                     const std::string f = (dir / fs::path(inner->name).filename()).string();
                     std::ofstream o(hotd::longPath(f), std::ios::binary | std::ios::trunc);
@@ -988,11 +998,11 @@ void Launcher::checkZone(int which, const std::string& path)
         // .bin, else the .iso / .img / .bin) unpacked into the cache, read as below, then removed
         // a .7z / .rar (user 2026-11-03 "can we support" it): unpacked into the cache by Windows' own tar (libarchive,
         // Windows 10 1803 and later) and checked there as a folder; a CD image in it (the .cue first) read as below
-        if (which == 1 && fs::is_directory(in)) {
+        if (which >= 1 && fs::is_directory(in)) {
             if (const std::string img = imageIn(in); !img.empty()) image = img;
         } else if (const std::string ext = lowered(fs::path(in).extension().string()); ext == ".7z" || ext == ".rar") {
             stage(lang::tr("Unpacking ..."), 0.1f);
-            const std::string dir = discFolder(cache, which == 0 ? "arcade_unpacked" : "pc_unpacked");
+            const std::string dir = discFolder(cache, which == 0 ? "arcade_unpacked" : which == 2 ? "pces_unpacked" : "pc_unpacked");
             std::error_code ec;
             fs::create_directories(dir, ec);
             std::ofstream(fs::path(dir) / "hotd_disc_copy.txt") << "Unpacked from " << path << " by the setup (removed with the next one).\n";
@@ -1034,12 +1044,12 @@ void Launcher::checkZone(int which, const std::string& path)
             }
             src = z.checked = dir;
             stage({}, 0.35f);
-            image = which == 1 ? imageIn(dir) : std::string();   // (a CD image in it: read as below)
+            image = which >= 1 ? imageIn(dir) : std::string();   // (a CD image in it: read as below)
             if (!image.empty()) cleanup.dir = dir;               // (then only needed while its files are copied out)
         }
         ZipFile zf;
         bool zipImage = false;
-        if (which == 1 && lowered(fs::path(in).extension().string()) == ".zip") {
+        if (which >= 1 && lowered(fs::path(in).extension().string()) == ".zip") {
             std::string err;
             if (zf.open(in, err)) {
                 const ZipFile::Entry* best = nullptr;
@@ -1089,7 +1099,7 @@ void Launcher::checkZone(int which, const std::string& path)
             else if (!di.system.empty()) { z.state = 4; z.line = lang::tr("This is a console disc, not the PC game"); }
             else if (which == 0) { z.state = 4; z.line = lang::tr("This is a CD image, not the arcade ROMs"); }
             else {
-                const std::string out = discFolder(cache, "pc");
+                const std::string out = discFolder(cache, which == 2 ? "pces" : "pc");
                 stage(lang::tr("Copying the files from the CD image ..."), 0.35f);
                 std::string err;
                 if (!disc::extract(image, out, [&](float f) { stage({}, 0.35f + 0.35f * f); }, err)) { z.state = 4; z.line = lang::tr("The CD image could not be read"); z.more = {err}; }
@@ -1141,6 +1151,36 @@ void Launcher::checkZone(int which, const std::string& path)
                 return;
             }
         }
+        // v1.3.1 (user 2026-11-07: "THotD Spanish.rar", the Spanish CD's image, was refused): a CD whose game is packed
+        // in cabinets (CAB\CAB1.CAB ..: the 2003 Spanish CD) unpacked into a folder of ours in the installed layout
+        // (util/cab_unpack.h), with the CD's loose VMC files and its ripped music; then checked there as a folder
+        if (which >= 1) {
+            if (const std::string cab1 = cab::gameCabinet(src); !cab1.empty()) {
+                stage(lang::tr("Unpacking the game from the CD's cabinets ..."), 0.82f);
+                const std::string game = discFolder(cache, which == 2 ? "pces_game" : "pc_game");
+                const std::string tmp = (fs::path(game) / "_cabinets").string();
+                std::string err;
+                bool noTool = false;
+                const bool ok = cab::extractSet(cab1, tmp, err, noTool);
+                std::error_code ec;
+                std::ofstream(fs::path(game) / "hotd_disc_copy.txt") << "Unpacked from " << path << " by the setup (removed with the next one).\n";
+                const int placed = ok ? cab::arrange(tmp, src, game, pcManifestPaths()) : 0;
+                fs::remove_all(fs::path(tmp), ec);
+                if (fs::exists(fs::path(src) / "Music", ec)) fs::rename(fs::path(src) / "Music", fs::path(game) / "Music", ec);
+                SDL_Log("[files] the CD's cabinets (%s): %s, %d file(s) laid out in %s", cab1.c_str(), ok ? "unpacked" : err.c_str(), placed, game.c_str());
+                if (fs::exists(fs::path(src) / "hotd_disc_copy.txt", ec)) fs::remove_all(fs::path(src), ec);   // (our CD copy: no longer needed)
+                if (!ok) {
+                    fs::remove_all(fs::path(game), ec);
+                    z.state = 4, z.line = lang::tr("The game on this CD could not be unpacked");
+                    z.more = {noTool ? lang::tr("This CD keeps the game in cabinet files: install cabextract (or bsdtar), or install the game from the CD and drop the installed folder here.")
+                                     : lang::tr("Install the game from the CD and drop the installed folder here."), err};
+                    std::lock_guard<std::mutex> l(zoneMutex_);
+                    if (zone_[which].path == path) zone_[which] = z;
+                    return;
+                }
+                src = z.checked = game;
+            }
+        }
         stage(lang::tr("Checking the files ..."), 0.9f);
         Verdict v;
         if (which == 0) {
@@ -1149,15 +1189,43 @@ void Launcher::checkZone(int which, const std::string& path)
             v = arcadeVerdict(src, r);
         } else {
             std::map<std::string, std::string> found;
-            const CheckReport r = checkPc(src, cache + "pc_files.tsv", found);
+            const CheckReport r = checkPc(src, cache + (which == 2 ? "pces_files.tsv" : "pc_files.tsv"), found);
             for (const std::string& s : r.lines) SDL_Log("[files] %s", s.c_str());
             v = pcVerdict(src, r);
-            z.music = musicTracks(src);
+            z.music = which == 1 ? musicTracks(src) : 0;
+            // spanish2: the Extras page's box takes the Spanish release only (its manifest: pc_manifest_es.inc), and
+            // says what it gives
+            // v1.3.1 (user 2026-11-07 "is it not supposed to be less harsh"): the optional box says plainly that it is not
+            // used, not the PC game's "the game needs the 1998 PC release's files"; Next stays allowed (extrasReady)
+            if (which == 2 && std::get<0>(v) == 4)
+                v = {4, lang::tr("Not a usable Spanish copy: it will not be used"),
+                     {std::get<1>(v),
+                      lang::tr("You can go on without it: everything else works, only the Spanish voices and pictures stay off."),
+                      lang::tr("Drop the installed Spanish game, or its CD image, here.")}};
+            if (which == 2 && (std::get<0>(v) == 2 || std::get<0>(v) == 3)) {
+                if (!isSpanishRelease(src))
+                    v = {4, lang::tr("This is not the Spanish PC release"),
+                         {lang::tr("This box takes the 2003 Spanish CD (Doblaje espa\xC3\xB1ol). Your US / EU PC game goes on the Game files page.")}};
+                else
+                    v = {2, lang::tr("The Spanish PC release (Doblaje espa\xC3\xB1ol)"),
+                         {lang::tr("Spanish voices: yes (Options > Audio > Voice: Auto with Espa\xC3\xB1ol, or Spanish)."),
+                          lang::tr("Spanish signs and cards: with the language Espa\xC3\xB1ol and the PC models (the arcade models keep some in English).")}};
+            }
         }
         z.state = std::get<0>(v), z.line = std::get<1>(v), z.more = std::get<2>(v);
+        if (which == 2 && z.state == 4) {   // (v1.3.1: a refused copy's unpacked files are not kept in settings\)
+            std::error_code ec;
+            if (fs::exists(fs::path(src) / "hotd_disc_copy.txt", ec)) fs::remove_all(fs::path(src), ec);
+        }
         std::lock_guard<std::mutex> l(zoneMutex_);
         if (zone_[which].path == path) zone_[which] = z;
     });
+}
+
+bool Launcher::extrasReady() const
+{
+    std::lock_guard<std::mutex> l(zoneMutex_);
+    return zone_[2].state != 1;   // (v1.3.1: a refused Spanish copy is simply not used; it no longer blocks Next)
 }
 
 bool Launcher::zonesReady() const
@@ -1196,6 +1264,7 @@ void Launcher::startInstall()
     o.dest = repairHere ? packageRoot : installDir_;
     o.programRoot = packageRoot;
     o.arcade = cfg.arcade, o.pc = cfg.pc;
+    o.spanishPc = cfg.spanishPc;   // (spanish2: the Extras page's, optional)
     o.settingsFrom = cacheDir + "launcher.ini";
     o.desktop = optDesktop_ && !repairHere, o.startMenu = optStartMenu_ && !repairHere, o.steam = optSteam_ && !repairHere;
     o.music = optMusic_;
@@ -1222,8 +1291,8 @@ void Launcher::next(SDL_Window* window)
     (void)window;
     if (step_ == kWelcome) {
         if (installDirProblem(installDir_, packageRoot).empty() || packageRoot.empty()) step_ = kFiles;
-        for (int i = 0; i < 2; ++i) {   // (the files already known: checked as the page opens)
-            const std::string& p = i == 0 ? cfg.arcade : cfg.pc;
+        for (int i = 0; i < 3; ++i) {   // (the files already known: checked as the page opens)
+            const std::string& p = i == 0 ? cfg.arcade : i == 1 ? cfg.pc : cfg.spanishPc;
             if (!p.empty() && zoneCopy(i).state == 0) checkZone(i, p);
         }
         return;
@@ -1232,6 +1301,14 @@ void Launcher::next(SDL_Window* window)
         if (!zonesReady()) return;
         cfg.arcade = zoneCopy(0).checked;
         cfg.pc = zoneCopy(1).checked;
+        cfg.save(cacheDir + "launcher.ini");
+        step_ = kExtras;
+        return;
+    }
+    if (step_ == kExtras) {   // spanish2: the optional copies (an empty box is fine)
+        if (!extrasReady()) return;
+        const Zone zs = zoneCopy(2);
+        cfg.spanishPc = zs.state == 2 || zs.state == 3 ? zs.checked : std::string();
         cfg.save(cacheDir + "launcher.ini");
         if (mode == Mode::Repair && !installed) { click(kStart, window); return; }   // (a portable copy: these files, play)
         step_ = mode == Mode::Repair ? kInstall : kOptions;
@@ -1244,7 +1321,7 @@ void Launcher::back()
 {
     if (installState_ == 1) return;
     if (step_ == kInstall && installState_ == 3) installState_ = 0;
-    if (mode == Mode::Repair) { if (step_ == kInstall) step_ = kFiles; return; }
+    if (mode == Mode::Repair) { if (step_ == kInstall) step_ = kExtras; else if (step_ == kExtras) step_ = kFiles; return; }
     if (step_ > kWelcome && step_ < kDone) --step_;
 }
 
@@ -1256,7 +1333,7 @@ void Launcher::render(int ww, int wh)
         if (wordmarkFile.empty() || !readPngRgba(wordmarkFile, wordW_, wordH_, word_, err) || wordW_ <= 0 || wordH_ <= 0)
             wordW_ = wordH_ = 0;
     }
-    const Zone za = zoneCopy(0), zp = zoneCopy(1);
+    const Zone za = zoneCopy(0), zp = zoneCopy(1), zs = zoneCopy(2);
     std::string instLine, instErr;
     {
         std::lock_guard<std::mutex> l(zoneMutex_);
@@ -1269,7 +1346,7 @@ void Launcher::render(int ww, int wh)
                       std::to_string(pressed_) + '|' + std::to_string(hover_) + '|' + std::to_string(dropHover_) + '|' +
                       std::to_string(lang::gen()) + '|' + installDir_ + '|' + std::to_string(scroll_) + '|' +
                       std::to_string(optDesktop_) + std::to_string(optStartMenu_) + std::to_string(optSteam_) + std::to_string(optMusic_);
-    for (const Zone* z : {&za, &zp}) {
+    for (const Zone* z : {&za, &zp, &zs}) {
         key += '\n' + z->path + '\t' + std::to_string(z->state) + z->line + '\t' + std::to_string(int(z->progress * 100));
         for (const std::string& s : z->more) key += '\v' + s;
     }
@@ -1348,8 +1425,9 @@ void Launcher::render(int ww, int wh)
     }
     std::vector<std::string> steps;
     int cur = -1;
-    if (mode == Mode::Setup) steps = {T("Install to"), T("Game files"), T("Options"), T("Install"), T("Play")}, cur = step_;
-    else if (mode == Mode::Repair) steps = {T("Game files"), T("Import"), T("Play")}, cur = step_ == kFiles ? 0 : step_ == kInstall ? 1 : 2;
+    if (mode == Mode::Setup) steps = {T("Install to"), T("Game files"), T("Extras"), T("Options"), T("Install"), T("Play")}, cur = step_;
+    else if (mode == Mode::Repair)
+        steps = {T("Game files"), T("Extras"), T("Import"), T("Play")}, cur = step_ == kFiles ? 0 : step_ == kExtras ? 1 : step_ == kInstall ? 2 : 3;
     else if (mode == Mode::Update) steps = {T("Update")}, cur = 0;
     else steps = {T("What's new")}, cur = 0;
     {
@@ -1368,6 +1446,54 @@ void Launcher::render(int ww, int wh)
     const bool busy = ist == 1 || (download_ && download_->state() == util::UpdateDownload::Running);
     auto title = [&](const std::string& s) { p.text(s, L, 98, 16, kText); };
     float y = 120;
+
+    // a drop box of the Game files / Extras pages: slot 0 left, 1 right; hi = its dropHover_ index; pc: the PC game's
+    // hints (the .cue, the CD music)
+    auto zoneBox = [&](const Zone& z, int slot, int hiIdx, const char* name, const char* sub, int clickA, int folderA, bool pc) {
+        const float zy = 162, zh = 290, gap = 24, zw = (CW - gap) / 2;
+        const float x = L + float(slot) * (zw + gap);
+        const bool hi = dropHover_ == hiIdx || hover_ == clickA;
+        field(x, zy, zw, zh);
+        p.frame(x + 6, zy + 6, zw - 12, zh - 12, hi ? kBlue : z.state == 2 ? kOk : z.state == 3 ? kWarn : z.state == 4 ? kBad : kShadow);
+        hotAt(x, zy, zw, zh, clickA);
+        float yy = zy + 34;
+        p.text(T(name), x + 20, yy, 13, kText);
+        yy += 22;
+        p.text(T(sub), x + 20, yy, 8.5f, kDim);
+        yy += 40;
+        if (z.path.empty()) {
+            const std::string a = T("Drop it here"), b = T("or click to choose a zip or CD image");
+            p.text(a, x + (zw - p.textW(a, 11)) / 2, zy + zh / 2 + 10, 11, kDim);
+            p.text(b, x + (zw - p.textW(b, 8.5f)) / 2, zy + zh / 2 + 34, 8.5f, kFaint);
+            if (pc) {   // (user 2026-11-03: the .cue is the one that works best; the .bin files are the music)
+                float hy = zy + zh / 2 + 52;
+                for (const std::string& l : wrap(T("A CD image: choose its .cue file (its .bin files hold the CD music)"), zw - 40, 8.5f)) {
+                    p.text(l, x + (zw - p.textW(l, 8.5f)) / 2, hy + 8.5f, 8.5f, kFaint);
+                    hy += 16;
+                }
+            }
+        } else {
+            p.text(fitText(fileName(z.path), zw - 40, 10, false), x + 20, yy, 10, kText);
+            yy += 18;
+            p.text(fitText(backslashes(z.path), zw - 40, 7.5f, true), x + 20, yy, 7.5f, kFaint);
+            yy += 30;
+            const uint32_t c = stateColour(z.state);
+            p.mark(z.state, x + 20, yy - 10, 11, c);
+            float ly = yy - 11;
+            para(z.line, x + 40, ly, zw - 60, 9.5f, c);
+            ly += 4;
+            if (z.state == 1) {   // (checking: the loading bar)
+                progressBar(x + 40, ly, zw - 80, z.progress);
+                ly += 28;
+            }
+            for (const std::string& m : z.more)
+                if (!m.empty()) para(m, x + 40, ly, zw - 60, 8.5f, kDim);
+            if (pc && (z.state == 2 || z.state == 3))
+                p.text(z.music ? lang::fmt("{n} CD music tracks found", {{"n", std::to_string(z.music)}}) : T("No CD music (the arcade's music plays)"),
+                       x + 40, ly + 9, 8.5f, kFaint);
+        }
+        button(T("Folder..."), x + zw - 130, zy + zh - 46, 110, 28, folderA, true, false);
+    };
 
     if (mode == Mode::Setup && step_ == kWelcome) {
         title(T("Install to"));
@@ -1400,59 +1526,31 @@ void Launcher::render(int ww, int wh)
         title(T("Game files"));
         y = 124;
         para(T("Drop a zip / .7z, a folder or a CD image on each box, or click it to choose. They are checked at once."), L, y, CW, 9, kDim);
-        const float zy = 162, zh = 290, gap = 24, zw = (CW - gap) / 2;
-        const struct { const Zone* z; const char* name; const char* sub; int click, folder; } zs[2] = {
-            {&za, "Arcade ROMs", "Revision A (MAME set \"hotd\")", kZoneA, kFolderA},
-            {&zp, "PC game", "The 1998 PC version", kZoneP, kFolderP}};
-        for (int i = 0; i < 2; ++i) {
-            const Zone& z = *zs[i].z;
-            const float x = L + float(i) * (zw + gap);
-            const bool hi = dropHover_ == i || hover_ == zs[i].click;
-            field(x, zy, zw, zh);
-            p.frame(x + 6, zy + 6, zw - 12, zh - 12, hi ? kBlue : z.state == 2 ? kOk : z.state == 3 ? kWarn : z.state == 4 ? kBad : kShadow);
-            hotAt(x, zy, zw, zh, zs[i].click);
-            float yy = zy + 34;
-            p.text(T(zs[i].name), x + 20, yy, 13, kText);
-            yy += 22;
-            p.text(T(zs[i].sub), x + 20, yy, 8.5f, kDim);
-            yy += 40;
-            if (z.path.empty()) {
-                const std::string a = T("Drop it here"), b = T("or click to choose a zip or CD image");
-                p.text(a, x + (zw - p.textW(a, 11)) / 2, zy + zh / 2 + 10, 11, kDim);
-                p.text(b, x + (zw - p.textW(b, 8.5f)) / 2, zy + zh / 2 + 34, 8.5f, kFaint);
-                if (i == 1) {   // (user 2026-11-03: the .cue is the one that works best; the .bin files are the music)
-                    float hy = zy + zh / 2 + 52;
-                    for (const std::string& l : wrap(T("A CD image: choose its .cue file (its .bin files hold the CD music)"), zw - 40, 8.5f)) {
-                        p.text(l, x + (zw - p.textW(l, 8.5f)) / 2, hy + 8.5f, 8.5f, kFaint);
-                        hy += 16;
-                    }
-                }
-            } else {
-                p.text(fitText(fileName(z.path), zw - 40, 10, false), x + 20, yy, 10, kText);
-                yy += 18;
-                p.text(fitText(backslashes(z.path), zw - 40, 7.5f, true), x + 20, yy, 7.5f, kFaint);
-                yy += 30;
-                const uint32_t c = stateColour(z.state);
-                p.mark(z.state, x + 20, yy - 10, 11, c);
-                float ly = yy - 11;
-                para(z.line, x + 40, ly, zw - 60, 9.5f, c);
-                ly += 4;
-                if (z.state == 1) {   // (checking: the loading bar)
-                    progressBar(x + 40, ly, zw - 80, z.progress);
-                    ly += 28;
-                }
-                for (const std::string& m : z.more)
-                    if (!m.empty()) para(m, x + 40, ly, zw - 60, 8.5f, kDim);
-                if (i == 1 && (z.state == 2 || z.state == 3))
-                    p.text(z.music ? lang::fmt("{n} CD music tracks found", {{"n", std::to_string(z.music)}}) : T("No CD music (the arcade's music plays)"),
-                           x + 40, ly + 9, 8.5f, kFaint);
-            }
-            button(T("Folder..."), x + zw - 130, zy + zh - 46, 110, 28, zs[i].folder, true, false);
-        }
+        for (int i = 0; i < 2; ++i)
+            zoneBox(i == 0 ? za : zp, i, i, i == 0 ? "Arcade ROMs" : "PC game", i == 0 ? "Revision A (MAME set \"hotd\")" : "The 1998 PC version",
+                    i == 0 ? kZoneA : kZoneP, i == 0 ? kFolderA : kFolderP, i == 1);
         if (mode == Mode::Repair) button(T("Cancel"), L, BY, 110, BH, installed || checked ? kNotNow : kQuit, true, false);
         else button(T("Back"), L, BY, 110, BH, kBack, true, false);
-        const bool ready = zonesReady();
-        button(mode == Mode::Repair && !installed ? T("Play") : T("Next"), R - 130, BY, 130, BH, kNext, ready, true);
+        button(T("Next"), R - 130, BY, 130, BH, kNext, zonesReady(), true);   // (spanish2: then the Extras page)
+    } else if ((mode == Mode::Setup || mode == Mode::Repair) && step_ == kExtras) {
+        // spanish2 (user 2026-11-06): the optional copies, boxes as the Game files page's: the Spanish PC copy (its
+        // voices and translated textures, docs/spanish.md); the second box kept for a later extra, drawn disabled
+        title(T("Extras"));
+        y = 124;
+        para(T("Optional: more of your own game copies for extra features. A box can stay empty."), L, y, CW, 9, kDim);
+        zoneBox(zs, 0, 2, "Spanish PC copy (Doblaje espa\xC3\xB1ol)", "Optional: your installed 2003 Spanish CD", kZoneS, kFolderS, false);
+        {
+            const float zy = 162, zh = 290, zw = (CW - 24) / 2, x = L + zw + 24;
+            field(x, zy, zw, zh);
+            p.frame(x + 6, zy + 6, zw - 12, zh - 12, kShadow);
+            p.text(T("More extras"), x + 20, zy + 34, 13, kFaint);
+            p.text(T("Coming later"), x + 20, zy + 56, 8.5f, kFaint);
+            const std::string a = T("Not available yet");
+            p.text(a, x + (zw - p.textW(a, 11)) / 2, zy + zh / 2 + 10, 11, kFaint);
+        }
+        if (!zs.path.empty() && zs.state != 1) button(T("Clear"), L + 20, 162 + 290 - 46, 90, 28, kClearS, true, false);
+        button(T("Back"), L, BY, 110, BH, kBack, true, false);
+        button(mode == Mode::Repair && !installed ? T("Play") : T("Next"), R - 130, BY, 130, BH, kNext, extrasReady(), true);
     } else if (mode == Mode::Setup && step_ == kOptions) {
         title(T("Options"));
         y = 150;
@@ -1626,7 +1724,7 @@ void Launcher::click(int action, SDL_Window* window)
             std::lock_guard<std::mutex> lock(l->dialogMutex_);
             l->dialogResult_ = files && files[0] ? files[0] : "";
         };
-        const std::string cur = target == 3 ? installDir_ : target == 2 ? cfg.pc : cfg.arcade;
+        const std::string cur = target == 4 ? cfg.spanishPc : target == 3 ? installDir_ : target == 2 ? cfg.pc : cfg.arcade;
         const char* start = cur.empty() ? nullptr : cur.c_str();
         if (folder) {
             SDL_ShowOpenFolderDialog(cb, this, window, start, false);
@@ -1644,6 +1742,15 @@ void Launcher::click(int action, SDL_Window* window)
     case kZoneP: dialog(2, false); break;
     case kFolderA: dialog(1, true); break;
     case kFolderP: dialog(2, true); break;
+    case kZoneS: dialog(4, false); break;   // (spanish2)
+    case kFolderS: dialog(4, true); break;
+    case kClearS: {
+        if (zoneThread_[2].joinable()) zoneThread_[2].join();
+        std::lock_guard<std::mutex> l(zoneMutex_);
+        zone_[2] = Zone{};
+        cfg.spanishPc.clear();
+        break;
+    }
     case kOptDesk: optDesktop_ = !optDesktop_; break;
     case kOptStart: optStartMenu_ = !optStartMenu_; break;
     case kOptSteam: optSteam_ = !optSteam_; break;
@@ -1701,9 +1808,15 @@ void Launcher::handle(const SDL_Event& e, SDL_Window* window)
         return a;
     };
     const bool filesPage = (mode == Mode::Setup || mode == Mode::Repair) && step_ == kFiles;
+    const bool extrasPage = (mode == Mode::Setup || mode == Mode::Repair) && step_ == kExtras;   // (spanish2)
     if (e.type == SDL_EVENT_DROP_POSITION && filesPage) {   // a file dragged over: the zone under it lit
         const int a = at(e.drop.x, e.drop.y);
         dropHover_ = a == kZoneA || a == kFolderA ? 0 : a == kZoneP || a == kFolderP ? 1 : -1;
+        return;
+    }
+    if (e.type == SDL_EVENT_DROP_POSITION && extrasPage) {
+        const int a = at(e.drop.x, e.drop.y);
+        dropHover_ = a == kZoneS || a == kFolderS ? 2 : -1;
         return;
     }
     if (e.type == SDL_EVENT_DROP_COMPLETE) { dropHover_ = -1; return; }
@@ -1715,6 +1828,7 @@ void Launcher::handle(const SDL_Event& e, SDL_Window* window)
             which = a == kZoneA || a == kFolderA ? 0 : a == kZoneP || a == kFolderP ? 1 : -1;
         }
         if (which < 0 && filesPage) which = zoneCopy(0).path.empty() ? 0 : 1;   // (dropped elsewhere: the empty one)
+        if (extrasPage) which = 2;   // (spanish2: the page's one box)
         if (which >= 0) checkZone(which, e.drop.data);
         return;
     }
@@ -1822,7 +1936,7 @@ Launcher::Result Launcher::frame(int ww, int wh)
         std::lock_guard<std::mutex> lock(dialogMutex_);
         if (!dialogResult_.empty()) {
             if (dialogTarget_ == 3) installDir_ = installDirFor(dialogResult_);
-            else checkZone(dialogTarget_ - 1, dialogResult_);   // (a new choice: checked at once)
+            else checkZone(dialogTarget_ == 4 ? 2 : dialogTarget_ - 1, dialogResult_);   // (a new choice: checked at once)
             dialogResult_.clear();
         }
     }

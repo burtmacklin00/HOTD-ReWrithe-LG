@@ -48,6 +48,17 @@ public:
     void closeWav();
     bool wavOpen() const { return wav_ != nullptr; }
 
+    // spanish (3lc3z4r's copy, 2026-11-06): the Spanish release's dub ("Doblaje español", docs/spanish.md): dir = the
+    // folder of a Spanish PC copy (its dubbed SOUND\O_*.RBH lines and GAMESNDS.RBH's one dubbed sample), empty = the
+    // voices as the PC files / the arcade board have them. Set before init. With the arcade board the voice cues then
+    // play the Spanish samples instead of the board's English lines (every mode, the arcade models too)
+    void setVoiceDir(const std::string& dir);
+    const std::string& voiceDir() const { return voiceDir_; }
+    bool isVoiceCue(int cue) const;                   // a PC cue the Spanish release dubbed
+    static bool isDubbedFile(const std::string& name);   // "VOC02" ...: SOUND\O_<name>.RBH is a dubbed voice line
+    // spanish: Audio > Reload Voice: false leaves out the "Reload!" voice of an empty gun's trigger (arcade code
+    // 0xA01404 = PC cue 161, GAMESNDS.RBH sample 36: what the Spanish release made silent), the board's and the PC's
+    void setReloadVoice(bool on) { reloadVoice_ = on; }
     void cue(uint32_t arcadeCode);   // the arcade's sound_cue (0x154D0) argument
     void pcCue(int cue);             // the PC's sound_cue (0x412000) argument
     void setVolume(float sfx, float music) { sfxVolume_ = sfx; musicVolume_ = music; }
@@ -171,6 +182,8 @@ private:
     void note(const std::string& s) { if (log) log(s); }
 
     std::string root_;
+    std::string voiceDir_;   // setVoiceDir
+    bool reloadVoice_ = true;   // setReloadVoice
     std::map<int, TrackFile> tracks_;   // track number -> its file (indexTracks)
     bool tracksIndexed_ = false;
     std::set<int> loggedTracks_;        // tracks whose file was logged

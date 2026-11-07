@@ -599,6 +599,23 @@ itself (RELOAD, CONTINUE?, the chapter cards) stay as they are. Anyone can make 
 [docs/translating.md](docs/translating.md) (`--export-lang en`, F5 reloads in the menu, `--lang-check <code>` lists
 what does not fit). The bundled Noto Sans fonts (Korean, Japanese, Arabic, Hebrew) are under the SIL OFL.
 
+### Spanish (Doblaje español)
+
+The 1998 PC game's only official dub, the 2003 Spanish CD, works from **your own** Spanish copy: give it on the
+setup's **Extras** page (also Options > System > Repair / Change Files), next to your US / EU PC game. Then, with the
+language **Español**:
+
+| What you have | Models | Spanish voices | Spanish signs, chapter / boss cards, HUD words | Blood colours |
+|---|---|---|---|---|
+| US / EU copy only | any | no (Voice greyed) | no (the menus are Spanish: es.txt) | all |
+| US / EU + Spanish copy | PC | yes (Voice: Auto) | yes (the Spanish CD's own pictures) | all (from the US / EU copy) |
+| US / EU + Spanish copy | arcade | yes | no: the arcade's textures are English only (a note says so) | all |
+| Spanish copy as the only PC game | PC | yes | yes, in every language (it is the only copy) | red, green, custom (blue / purple / yellow show red) |
+
+Voice: Auto (follows the language), English or Spanish, in every mode and with the arcade sound board too. Reload
+Voice On / Off (the Spanish release has no "Reload!") works with every copy. The Typing of the Dead 0's words stay
+English. Every combination: [docs/spanish.md](docs/spanish.md).
+
 ## Mods, Sonic Mode, 4 players, game speed, CRT filter
 
 - **Mods:** folders in `data\mods` (or the settings folder's `mods`), each with a small `mod.ini`; switched on, ordered
@@ -777,6 +794,9 @@ screenshot to `screenshots\`, Esc quits. It starts fullscreen (F11 / Alt+Enter t
   controller and the keyboard / mouse.
 - Button prompts: **Input Prompts** by [Kenney](https://kenney.nl), CC0: Options > Controls > Button Style "Kenney",
   and the pads Xelu's pack lacks (Switch 2, GameCube, paddles).
+- The Spanish dub (Options > Audio > Voice, from your own Spanish PC copy; [docs/spanish.md](docs/spanish.md)): thanks to
+  **3lc3z4r** (YouTube: Cez4rPlay) for the Spanish PC version, its list of differences and the reference playthrough
+  [The House Of The Dead (PC) - Doblaje español ORIGINAL](https://youtu.be/OVnjusRO1wk).
 - Fonts, code libraries and the rest: [NOTICE.md](NOTICE.md). Thank-you list: [docs/release/CREDITS.txt](docs/release/CREDITS.txt) (CREDITS.txt in the package).
 
 ## Legal

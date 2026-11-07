@@ -16,6 +16,23 @@
 
 namespace hotd {
 
+// spanish2: the Spanish copy's BIGGER.VMC (pc_loader.h), "" off
+static std::string gSpanishVmc;
+void setPcSpanishTextures(const std::string& biggerVmc) { gSpanishVmc = biggerVmc; }
+const std::string& pcSpanishTextures() { return gSpanishVmc; }
+// the pages with translated text (US vs Spanish BIGGER.VMC, compared texel by texel 2026-11-06: the pages whose
+// changes are pictures of words; the blood-only pages (red -> green), the models' and the worlds' (512 and up: only
+// their blood and a colour key changed) are not in it, so every Blood Color keeps working)
+bool pcSpanishTextPage(int p)
+{
+    return p == 64 || (p >= 94 && p <= 97) || p == 99 || p == 100 ||   // the 2D fonts, the HUD's words, RELOAD, PLEASE WAIT
+           (p >= 139 && p <= 158) ||                                    // the chapter cards ("Capítulo Primero / Tragedia" ...)
+           (p >= 212 && p <= 218) || (p >= 332 && p <= 336) ||          // the tutorial boards (the instructions)
+           p == 223 || p == 226 || p == 230 || p == 231 || p == 234 || (p >= 236 && p <= 238) ||   // boss files, names
+           p == 245 || p == 246 || p == 249 || p == 250 ||              // the score signs, CONTINUE, GAME OVER, ranking
+           (p >= 273 && p <= 330);                                      // the credits, the map, the boss name cards
+}
+
 namespace {
 
 // a PC file: the one the launcher's files check found (renamed / moved files too), else <install>/<rel>
@@ -210,6 +227,18 @@ bool readVmcPages(const std::string& path, const std::vector<uint16_t>& pages, s
         if (!seen[i] && missingCleared)
             out[i].clear();   // display2: the caller keeps its own page
         else if (!seen[i]) std::fprintf(stderr, "PC texture gap: page %u is not in %s (drawn magenta)\n", unsigned(pages[i]), path.c_str());
+    // spanish2: the translated text pages from the Spanish copy's BIGGER.VMC (pc_loader.h)
+    if (!gSpanishVmc.empty() && gSpanishVmc != path) {
+        std::vector<uint16_t> want;
+        std::vector<size_t> slots;
+        for (size_t i = 0; i < pages.size(); ++i)
+            if (pcSpanishTextPage(pages[i])) want.push_back(pages[i]), slots.push_back(i);
+        std::vector<std::vector<uint8_t>> es;
+        std::string eerr;
+        if (!want.empty() && readVmcPages(gSpanishVmc, want, es, eerr, tbl, pal, true) && es.size() == want.size())
+            for (size_t k = 0; k < want.size(); ++k)
+                if (!es[k].empty()) out[slots[k]] = std::move(es[k]);
+    }
     return true;
 }
 
@@ -475,15 +504,23 @@ std::unique_ptr<StageData> PcSource::loadStage(int stage, std::string& err)
     const bool customBlood = (cfg_.blood & PcConfig::kBloodCustom) != 0;
     std::string greenVmc;   // custom blood: the green set, to find the blood texels (those that differ from B_RED's)
     int jaBlood = 0;        // pchotfix: > 0: BIGGER.VMC drawn, this blood colour's texels laid over it (the Japanese sets)
+    // spanish2: the Spanish release has only B_SI.VMC ("Blood: YES", red) and B_NO.VMC (green, = its BIGGER.VMC): as
+    // the PC game, red is B_SI, green B_NO, the colours it lacks (blue, purple, yellow) its red
+    auto bloodFile = [&](const char* name) {
+        const std::string f = pcPath(cfg_.installDir, std::string("ART/STAGE1/CREATURE/") + name + ".VMC");
+        if (pcfs::exists(f)) return f;
+        const std::string es = pcPath(cfg_.installDir, std::string("ART/STAGE1/CREATURE/") + (std::strcmp(name, "B_GREEN") == 0 ? "B_NO" : "B_SI") + ".VMC");
+        return pcfs::exists(es) ? es : f;
+    };
     if (customBlood) {
-        const std::string r = pcPath(cfg_.installDir, "ART/STAGE1/CREATURE/B_RED.VMC");
-        const std::string g = pcPath(cfg_.installDir, "ART/STAGE1/CREATURE/B_GREEN.VMC");
+        const std::string r = bloodFile("B_RED");
+        const std::string g = bloodFile("B_GREEN");
         if (pcfs::exists(r) && pcfs::exists(g)) {
             vmc = r;
             greenVmc = g;
         }
     } else if (cfg_.blood >= 0 && cfg_.blood < 5) {
-        const std::string b = pcPath(cfg_.installDir, std::string("ART/STAGE1/CREATURE/") + kBloodFiles[cfg_.blood] + ".VMC");
+        const std::string b = bloodFile(kBloodFiles[cfg_.blood]);
         // pchotfix: the Japanese release's B_<colour>.VMC sets have 4 world pages (549, 552-554) unlike its own
         // BIGGER.VMC and the US sets (Chapter 1's zombies were drawn with other textures): its BIGGER.VMC (the same as
         // the US one's, page for page) is drawn, the blood colour's texels laid over it below (pcBloodPages)

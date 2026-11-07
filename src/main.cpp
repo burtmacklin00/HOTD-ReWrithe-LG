@@ -114,6 +114,7 @@
 #include "assets/archive.h"
 #include "assets/mods.h"
 #include "assets/pc_files.h"
+#include "assets/pc_loader.h"
 #include "util/fullscreen.h"
 #include "util/resolution.h"
 #include "util/crash_log.h"
@@ -210,6 +211,9 @@ static SDL_Rect gGunArea{0, 0, 0, 0};
 // --setup (HOTDReWritheSetup.bat; user 2026-11-03: a friend could not get back into the setup after Windows Defender
 // stopped it, the files being known): the setup window always comes up, even with the files known
 static bool gForceSetup = false;
+// spanish (docs/spanish.md): --voice en|es (LaunchConfig::voice), --spanish-pc <folder> (LaunchConfig::spanishPc)
+static int gVoiceOpt = -1, gReloadVoiceOpt = -1;   // (--reload-voice on|off)
+static std::string gSpanishPcOpt;
 static void gunVisibleArea(SDL_Window* window, int lw, int lh)
 {
     gGunArea = SDL_Rect{0, 0, lw, lh};
@@ -513,6 +517,7 @@ static game::MenuHooks* gTourHooks = nullptr;   // misc18: the menu's hooks (the
 static const int gMenuTourN = std::getenv("HOTD_MENU_PERF_TOUR") ? std::max(60, std::atoi(std::getenv("HOTD_MENU_PERF_TOUR"))) : 0;
 
 static int gAutofireEvery = 15;   // --autofire-every N (T1): frames between autofire shots
+static int gBossNamesOpt = -1;    // --boss-names full|codenames (spanish3): Gameplay > Boss Names for this run
 static int gClearMarksOpt = -1;   // --hit-marks dots|smooth (old: dithered|see-through) (bugs1 #35): Video > Hit Marks for this run
 static int gShowCrossOpt = -1;   // gunfb: --no-crosshair (0) / --show-crosshair (1): Video > Show Crosshairs for this run
 static int gFlashSizeOpt = -1;   // gunfb: --shot-flash-size small|arcade|large (or 0|1|2): Video > Shot Flash Size for this run
@@ -527,6 +532,7 @@ static int gOverW = 0, gOverH = 0;
 static void liveSettings(game::LaunchConfig& g, const game::LaunchConfig& m, bool online)
 {
     g.hitSparks = m.hitSparks, g.muzzleFlash = m.muzzleFlash, g.bloodParticles = m.bloodParticles, g.clearMarks = m.clearMarks;
+    g.bossCodenames = m.bossCodenames;   // (spanish3: a picture setting, this PC's own)
     g.shotFlashSize = m.shotFlashSize, g.showCrosshairs = m.showCrosshairs;   // (gunfb)
     g.transparency = m.transparency, g.smooth = m.smooth, g.frameRate = m.frameRate, g.vsync = m.vsync, g.menuFps = m.menuFps;
     g.gamma = m.gamma, g.blackLevel = m.blackLevel, g.vrr = m.vrr, g.crt = m.crt, g.teamFlash = m.teamFlash, g.holdSkip = m.holdSkip, g.scoreDisplay = m.scoreDisplay;
@@ -1017,6 +1023,51 @@ std::string gSurvivalScoresFile;   // survival_scores.txt in the settings folder
 static constexpr bool unreleasedGame() { return false; }
 static bool gPcFreePlay = false;   // --pc-free-play (testing: as the Cheat screen's Free-Play)
 static int gPcChars[4] = {1, 0, 1, 2};
+// charsel (user 2026-11-06): the Character Select of the other modes (Arcade, Chapter Select, ...; cosmetic: Runtime
+// charpick, port/game.h chars_on): each seat's character (1-19 of PC Mode's list), 0 = the arcade's own (Rogan / G /
+// Rogan 2 / G 2). All 0: no pick (the arcade game exactly). launcher.ini characters=, --char 1=sophie,2=g
+static int gCharPick[4] = {0, 0, 0, 0};
+// "1=sophie,2=g" (or "sophie,g": seats in order) -> picks; a character by its key (rogan, g, rogan2, g2, sophie,
+// researcher, the extras' keys: r1 .. r6, w1 .. w4, curien, curien2, zsophie) or number. false: a bad entry (picks unchanged)
+static bool charPicksParse(const std::string& s, int out[4])
+{
+    using Gm = port::Game<port::A>;
+    static const char* kBase[Gm::kPmPcChars] = {"none", "rogan", "g", "rogan2", "g2", "sophie", "researcher"};
+    auto byKey = [](std::string k) {
+        for (char& ch : k)
+            ch = char(std::tolower(static_cast<unsigned char>(ch)));
+        k.erase(std::remove_if(k.begin(), k.end(), [](char ch) { return ch == ' ' || ch == '_' || ch == '-'; }), k.end());
+        for (int c = 1; c < Gm::kPmPcChars; ++c)
+            if (k == kBase[c])
+                return c;
+        for (int c = Gm::kPmPcChars; c < Gm::kPmCharCount; ++c)
+            if (k == Gm::pm_extra(c)->key)
+                return c;
+        if (!k.empty() && std::all_of(k.begin(), k.end(), [](char ch) { return ch >= '0' && ch <= '9'; }))
+            if (const int n = std::atoi(k.c_str()); n >= 0 && n < Gm::kPmCharCount)
+                return n;
+        return -1;
+    };
+    int t[4] = {out[0], out[1], out[2], out[3]};
+    std::stringstream ss(s);
+    std::string e;
+    for (int i = 0; std::getline(ss, e, ',');) {
+        if (e.find_first_not_of(' ') == std::string::npos)
+            continue;
+        int seat = i;
+        if (const size_t q = e.find('='); q != std::string::npos) {
+            seat = std::atoi(e.substr(0, q).c_str()) - 1;
+            e = e.substr(q + 1);
+        }
+        const int c = byKey(e);
+        if (seat < 0 || seat > 3 || c < 0)
+            return false;
+        t[seat] = c;
+        i = seat + 1;
+    }
+    std::copy(t, t + 4, out);
+    return true;
+}
 // the seats PC Mode's select made computer teammates (bits; -1: no select, --pc-mode: the seat bots as set). A seat
 // the select left at No Player or gave a person never gets a CPU (p2bot.. only pre-pick the four panels' CPU seats)
 static int gPcCpuSeats = -1;
@@ -1972,8 +2023,13 @@ void autofire(game::Runtime& rt, int frame)
     static const long long fireStop = std::getenv("HOTD_AUTOFIRE_STOP") ? std::atoll(std::getenv("HOTD_AUTOFIRE_STOP")) : -1;
     if (fireStop >= 0 && frame >= fireStop) return;
     if (frame % gAutofireEvery == 0 && rt.mem.at<uint8_t>(rt.player_rec(p) + 0x3D) == 0) {
-        if (noReload)
+        // spanish2 (testing): HOTD_EMPTY_PULL=1 with HOTD_NO_RELOAD: the empty gun is still fired on the screen (the
+        // empty gun's "Reload!" voice, arcade code 0xA01404 = PC cue 161: the Reload Voice option's test)
+        static const bool emptyPull = std::getenv("HOTD_EMPTY_PULL") != nullptr;
+        if (noReload) {
+            if (emptyPull) rt.gun[p] = {true, true, 0.0f, 0.0f};
             return;
+        }
         rt.gun[p].trigger = true;
         return;
     }
@@ -4017,6 +4073,7 @@ int main(int argc, char* argv[])
     int crtSightsOpt = -1;   // --crt-sights crisp|filtered
     std::string crosshairCustomOpt;
     int teamFlashOpt = -1;   // --teammate-flashes auto|full|reduced|off (docs/coop4.md section 13)
+    std::string charOpt;     // charsel: --char 1=sophie,2=g (over launcher.ini characters=)
     std::string scene4pOpt;  // --scene4p 00:B,09:C (docs/coop4.md section 16): players 3 / 4's cut-scene variations
     int crossSizeOpt = -1, crossThickOpt = -1;   // --crosshair-size tiny..huge / 0-4, --crosshair-thickness thin..bold / 0-3
     int widen2dOpt = -1;     // --widen-2d stretch|original (wide2d): over the launcher's Widen 2D Screens
@@ -4078,6 +4135,15 @@ int main(int argc, char* argv[])
         }
         if (a == "--setup-test") { setupTestDest = next(); continue; }
         if (a == "--setup") { gForceSetup = true; continue; }
+        if (a == "--char") {   // charsel: --char 1=sophie,2=g : the seats' characters outside PC Mode (cosmetic; over characters=)
+            charOpt = next();
+            int t[4] = {0, 0, 0, 0};
+            if (!charPicksParse(charOpt, t)) { std::fprintf(stderr, "--char %s: seat=character, e.g. 1=sophie,2=g\n", charOpt.c_str()); return 1; }
+            continue;
+        }
+        if (a == "--voice") { const std::string v = next(); gVoiceOpt = v == "es" || v == "spanish" ? 1 : v == "auto" ? 0 : 2; continue; }
+        if (a == "--spanish-pc") { gSpanishPcOpt = next(); continue; }
+        if (a == "--reload-voice") { gReloadVoiceOpt = next() == "off" ? 0 : 1; continue; }
         if (a == "--pace-check") {   // bugs3 (GitHub #27): the frame pacing modelled, before / after (game/frame_pace.h)
             int bad = 0;
             for (const double hz : {60.0, 59.94, 60.02})
@@ -4098,6 +4164,7 @@ int main(int argc, char* argv[])
             gFlashSizeOpt = v == "small" || v == "0" ? 0 : v == "large" || v == "2" ? 2 : 1;
             continue;
         }
+        if (a == "--boss-names") { gBossNamesOpt = next() == "codenames" ? 1 : 0; continue; }   // spanish3
         if (a == "--hit-marks") {   // bugs1 (#35): Video > Hit Marks (fxux: the menu's words too)
             const std::string v = next();
             gClearMarksOpt = v == "see-through" || v == "smooth" ? 1 : 0;
@@ -4861,12 +4928,18 @@ int main(int argc, char* argv[])
     if (teamFlashOpt >= 0) cfg.teamFlash = teamFlashOpt;
     if (shotFlash) cfg.gunFlash = 2;   // padpass: --shot-flash = Controls > Shot Flash On (the host draws it)
     if (!scene4pOpt.empty()) cfg.scene4p = scene4pOpt;
+    if (!charOpt.empty()) cfg.characters = charOpt;
+    if (!charPicksParse(cfg.characters, gCharPick))   // charsel: the Character Select's picks (characters=)
+        std::fill(gCharPick, gCharPick + 4, 0);
     if (!castOpt && !gScene.castFrom(cfg.sceneCast))   // actors2: the viewer's Actors as last picked (scenecast=)
         gScene.castReset();
     if (aspectOpt >= 0) cfg.aspect = aspectOpt;
     if (widen2dOpt >= 0) cfg.widen2d = widen2dOpt;
     if (musicOpt >= 0) cfg.music = false;
     if (numberingOpt >= 0) cfg.musicNumbering = numberingOpt;
+    if (gVoiceOpt >= 0) cfg.voice = gVoiceOpt;
+    if (gReloadVoiceOpt >= 0) cfg.reloadVoice = gReloadVoiceOpt != 0;
+    if (!gSpanishPcOpt.empty()) cfg.spanishPc = gSpanishPcOpt;
     if (menuMusicOpt >= 0) cfg.menuMusic = menuMusicOpt;
     if (menuStyleOpt >= 0) cfg.menuStyle = menuStyleOpt;
     if (liveBgOpt >= 0) cfg.liveBackground = liveBgOpt;
@@ -4875,6 +4948,7 @@ int main(int argc, char* argv[])
     if (autoReloadOpt >= 0) cfg.autoReload = autoReloadOpt != 0;
     if (scoreDisplayOpt) cfg.scoreDisplay = true;
     if (gClearMarksOpt >= 0) cfg.clearMarks = gClearMarksOpt != 0;
+    if (gBossNamesOpt >= 0) cfg.bossCodenames = gBossNamesOpt != 0;
     if (gShowCrossOpt >= 0) cfg.showCrosshairs = gShowCrossOpt != 0;   // (gunfb)
     if (gFlashSizeOpt >= 0) cfg.shotFlashSize = gFlashSizeOpt;
     if (gTranspOpt >= 0) cfg.transparency = gTranspOpt;
@@ -4990,6 +5064,7 @@ int main(int argc, char* argv[])
         o.dest = setupTestDest;
         o.programRoot = packageFolder();
         o.arcade = cfg.arcade, o.pc = cfg.pc;
+        o.spanishPc = cfg.spanishPc;   // (spanish2: --spanish-pc / spanishpc=)
         o.version = HOTD_VERSION_TEXT;
         int lastPct = -1;
         const game::InstallResult r = game::installGame(o, [&](float f, const std::string& s) {
@@ -5213,6 +5288,12 @@ int main(int argc, char* argv[])
             netArgs.pcMode = gPcMode != 0 && !bossModeOpt;
         if (hosting)   // --boss-mode: an online Boss Mode game (protocol 18; the joiners get it in the settings)
             netArgs.bossMode = bossModeOpt;
+        // charsel: an arcade game's Character Select picks online (--char / characters=: this PC's first and second
+        // seat, sent as its characters; the host's game then has every seat's, protocol 21). PC Mode keeps --net-pc-char
+        if (!netArgs.pcMode && netArgs.pcChar[0] == 0 && netArgs.pcChar[1] == 0 && !bossModeOpt) {
+            netArgs.pcChar[0] = gCharPick[0], netArgs.pcChar[1] = gCharPick[1];
+            netArgs.charPick = hosting && (gCharPick[0] != 0 || gCharPick[1] != 0);
+        }
         net::Settings ns = hosting ? netSettingsOf(cfg, netArgs.pcMode) : net::Settings{};
         {   // the same game data (protocol 19): this PC's ROMs and PC Mode data, compared when a player joins
             std::string re;
@@ -5270,6 +5351,15 @@ int main(int argc, char* argv[])
         // --mute / --audio-wav / headless: no device, the cues are still decoded and counted (--audio-wav: mixed into
         // the file, one game frame at a time)
         audio.musicNumbering = cfg.musicNumbering;
+        // spanish: Audio > Voice = Spanish: the Spanish copy's dub (none there: the voices as they are)
+        audio.setVoiceDir(game::spanishVoiceOn(cfg.voice, lang::code()) ? game::spanishVoiceDir(pc, cfg.spanishPc, root) : std::string());
+        // spanish2: Spanish + a Spanish copy: its translated texture pages (the PC models' and the PC 2D's)
+        setPcSpanishTextures(game::spanishTextureVmc(lang::code(), pc, cfg.spanishPc, root));
+        if (!pcSpanishTextures().empty())
+            SDL_Log("[files] the Spanish texture text pages from %s", pcSpanishTextures().c_str());
+        audio.setReloadVoice(cfg.reloadVoice);
+        if (!audio.voiceDir().empty())
+            SDL_Log("[sound] the Spanish voices (Doblaje espa\xC3\xB1ol) from %s", audio.voiceDir().c_str());
         if (!audio.init(pc, frames < 0 && !mute && audioWav.empty(), err)) {
             SDL_Log("no sound: %s", err.c_str());
             return;
@@ -5489,8 +5579,10 @@ int main(int argc, char* argv[])
             r.pcmode = gs.pcMode && !bossModeOpt ? 1 : 0;
             r.pm_continues = r.pcmode ? gs.pmContinues : cfg.continues;   // (an arcade game: as before; unused)
             r.pm_free_play = r.pcmode ? gs.pmFreePlay != 0 : cfg.freePlay || gPcFreePlay;
+            // charsel: an arcade game with the host's Character Select picks (every seat 1-19; all 0: none)
+            r.charpick = !r.pcmode && !bossModeOpt && gs.pmChar[0] != 0 ? 1 : 0;
             for (int k = 0; k < 4; ++k) {
-                r.pm_char[k] = r.pcmode ? gs.pmChar[k] : gPcChars[k];
+                r.pm_char[k] = r.pcmode || r.charpick ? gs.pmChar[k] : gPcChars[k];
                 r.pm_reload_at[k] = 0;
             }
             if (r.pcmode)
@@ -5499,8 +5591,10 @@ int main(int argc, char* argv[])
             r.pcmode = gPcMode && !bossModeOpt ? 1 : 0;
             r.pm_continues = cfg.continues;   // PC Mode's Continues option (docs/pcmode.md row 8)
             r.pm_free_play = cfg.freePlay || gPcFreePlay;   // the Cheat screen's Free-Play (0xD5B35C), --pc-free-play
+            // charsel: the Character Select's picks outside PC Mode (a seat left 0: the arcade's Rogan / G / Rogan 2 / G 2)
+            r.charpick = !r.pcmode && !bossModeOpt && std::any_of(gCharPick, gCharPick + 4, [](int c) { return c != 0; }) ? 1 : 0;
             for (int k = 0; k < 4; ++k) {
-                r.pm_char[k] = gPcChars[k];
+                r.pm_char[k] = r.charpick ? (gCharPick[k] != 0 ? gCharPick[k] : k + 1) : gPcChars[k];
                 r.pm_reload_at[k] = 0;
             }
         }
@@ -5638,6 +5732,9 @@ int main(int argc, char* argv[])
                 pl.score = rp.score[p];
                 pl.lives = pl.lives_saved = rp.lives[p];
             }
+        // issues5 (GitHub #47): the researcher tally as the chapter began, so the last chapter's bonus room still comes
+        r.mem.at<int16_t>(game::A::G::hostages_rescued) = rp.rescued;
+        r.mem.at<int16_t>(game::A::G::hostages_appeared) = rp.appeared;
         r.retry_point_take();
         if (r.log)
             r.log("Chapter Retry: chapter " + std::to_string(rp.chapter + 1) + " again (P1 " +
@@ -5780,6 +5877,7 @@ int main(int argc, char* argv[])
             rr.hud.widescreen = cfg.aspect != 1;
             rr.hud.widen2D = cfg.widen2d == 0;   // wide2d
             rr.hud.translucentMarks = cfg.clearMarks;
+            rr.hud.bossCodenames = cfg.bossCodenames;   // (spanish3)
             rr.shotAt = shotAt;
             rr.shotDir = shotDir.empty() ? shotsRoot : shotDir;
             rr.aspect = cfg.aspect;
@@ -6704,8 +6802,8 @@ int main(int argc, char* argv[])
         for (std::string l; std::getline(in, l);) {
             if (!l.empty() && l.back() == '\r') l.pop_back();
             if (l.empty()) continue;
-            const int which = l.rfind("A:", 0) == 0 ? 0 : 1;
-            const std::string p = which == 0 ? l.substr(2) : l;
+            const int which = l.rfind("A:", 0) == 0 ? 0 : l.rfind("S:", 0) == 0 ? 2 : 1;   // (spanish2: "S:" the Extras page's box)
+            const std::string p = which != 1 ? l.substr(2) : l;
             menu.checkZone(which, p);
             while (menu.zoneState(which) == 1) SDL_Delay(50);
             std::printf("ZONE: %s => %s\n", p.c_str(), menu.zoneReport(which).c_str());
@@ -10786,6 +10884,12 @@ int main(int argc, char* argv[])
                 menu.cfg.save(cache + "launcher.ini");
                 audio.setMusicOn(cfg.music);
                 audio.musicNumbering = cfg.musicNumbering;
+                // spanish: Voice at once (the voice lines; GAMESNDS.RBH's dubbed sample from the next start)
+                cfg.voice = menu.cfg.voice, cfg.reloadVoice = menu.cfg.reloadVoice;
+                audio.setReloadVoice(cfg.reloadVoice);
+                audio.setVoiceDir(game::spanishVoiceOn(cfg.voice, lang::code()) ? game::spanishVoiceDir(audio.pcRoot(), cfg.spanishPc, root)
+                                                                                : std::string());
+                setPcSpanishTextures(game::spanishTextureVmc(lang::code(), audio.pcRoot(), cfg.spanishPc, root));   // (spanish2)
                 audio.setVolume(0.8f * cfg.sfxVolume / 100.0f, 0.6f * cfg.musicVolume / 100.0f);
                 // the Options screen shows the same values (Gameplay / Audio change them too)
                 fe.options = {menu.cfg.difficulty, menu.cfg.lives, std::min(menu.cfg.blood, 4), menu.cfg.sfxVolume,
@@ -11561,6 +11665,7 @@ int main(int argc, char* argv[])
             for (const int pcFirst : {menu.cfg.models == 1 ? 1 : 0, menu.cfg.models == 1 ? 0 : 1})
                 for (int b = 0; b < 5; ++b)
                     fe.previewStills.push_back(cache + "menu_backdrop_" + (pcFirst ? "pc" : "arcade") + "_" + std::to_string(b) + ".png");
+            hooks.spanishVoices = [&]() { return !game::spanishVoiceDir(menu.cfg.pc, menu.cfg.spanishPc, root).empty(); };   // (spanish)
             hooks.menuMusicChanged = [&]() {   // (menufb, user 2026-10-26 "the menu music does not update right": played at once)
                 if (gOverGame) return;   // (fxux: the game's music holds; the menus play it next time)
                 fe.menuCue = game::menuSongOf(menu.cfg.menuMusic).cue;
@@ -11587,6 +11692,11 @@ int main(int argc, char* argv[])
             hooks.languageChanged = [&]() {   // lang: the texts redrawn in the new language, its own texture packs on
                 fe.langChanged();
                 applyMods(menu.cfg);
+                // spanish2: Voice Auto and the Spanish texture pages follow the language (the textures from the next
+                // chapter's load; the menu's PC pictures from the next start)
+                audio.setVoiceDir(game::spanishVoiceOn(cfg.voice, lang::code()) ? game::spanishVoiceDir(audio.pcRoot(), cfg.spanishPc, root)
+                                                                                : std::string());
+                setPcSpanishTextures(game::spanishTextureVmc(lang::code(), audio.pcRoot(), cfg.spanishPc, root));
             };
             hooks.languagePage = [&]() {   // menufb: System > Language's own page (each language in its script)
                 fe.extras = game::menuLanguageRows(menu.cfg, hooks);
@@ -12296,6 +12406,11 @@ int main(int argc, char* argv[])
                     {"05_files_pc_blocked", [&]() { menu.checkZone(1, env("HOTD_SHOT_PC_BAD")); }, [&]() { return menu.zoneState(1) != 1; }},
                     {"05b_files_saturn", [&]() { if (!env("HOTD_SHOT_PC_SATURN").empty()) menu.checkZone(1, env("HOTD_SHOT_PC_SATURN")); },
                      [&]() { return menu.zoneState(1) != 1; }},
+                    // spanish2: the Extras page: empty, the Spanish PC copy (HOTD_SHOT_ES), the US copy dropped on it (refused)
+                    {"05c_extras_empty", [&]() { menu.setPage(game::Launcher::kExtras); }, nullptr},
+                    {"05d_extras_spanish", [&]() { if (!env("HOTD_SHOT_ES").empty()) menu.checkZone(2, env("HOTD_SHOT_ES")); },
+                     [&]() { return menu.zoneState(2) != 1; }},
+                    {"05e_extras_not_spanish", [&]() { menu.checkZone(2, env("HOTD_SHOT_PC")); }, [&]() { return menu.zoneState(2) != 1; }},
                     {"06_options", [&]() { menu.checkZone(1, env("HOTD_SHOT_PC")); },
                      [&]() { if (menu.zoneState(1) == 1) return false; menu.setPage(game::Launcher::kOptions); return true; }},
                     {"07_installing", [&]() { menu.cfg.arcade = env("HOTD_SHOT_ARCADE"); menu.cfg.pc = env("HOTD_SHOT_PC"); menu.setPage(game::Launcher::kInstall); menu.testInstallProgress(0.46f, "Importing mpr-19715.17"); }, nullptr},
@@ -14086,6 +14201,17 @@ int main(int argc, char* argv[])
                     fe.pcModeOpen(n >= 3 ? 4 : 2, cpu, 1);
                 }
             }
+            // charsel (testing): HOTD_MENU_CHARSEL=players[,a,b]: the live menu's Character Select cards for that many
+            // players (with those picks) once the splash is over; with HOTD_MENU_SHOT for its picture
+            if (static const char* cs = std::getenv("HOTD_MENU_CHARSEL"); cs && !fe.splashActive() && fe.screen() == 1) {   // (on the main menu: after the attract)
+                static bool done = false;
+                int n = 1, c[2] = {1, 2};
+                if (!done && std::sscanf(cs, "%d,%d,%d", &n, &c[0], &c[1]) >= 1) {
+                    done = true;
+                    fe.pcChars[0] = c[0], fe.pcChars[1] = c[1];
+                    fe.charSelectOpen(n);
+                }
+            }
             if (static const char* pm = std::getenv("HOTD_MENU_PCMODE"); pm && action < 0) {
                 static uint64_t t0 = 0;
                 static size_t next = 0;
@@ -14198,6 +14324,36 @@ int main(int argc, char* argv[])
             }
             if (action == 0 || action == 6)   // bossbug: a new game never keeps a Boss Mode boss (its game left by Exit)
                 bossModeOpt = 0;
+            // charsel: Gameplay > Character Select (the classic menu style): an Arcade / Chapter Select game first shows
+            // the cards (frontend_pcmode.cpp charSelectOpen); their Start / Default Characters come back as feAction 50
+            // with the picks (looks only). Not for TotD 0 or the other modes, not online (the host's picks: --char)
+            {
+                static int csAction = -1, csKeepPc[4] = {};
+                if (action == 50 && csAction >= 0) {
+                    action = csAction;
+                    csAction = -1;
+                    std::copy(csKeepPc, csKeepPc + 4, fe.pcChars);   // (PC Mode's own picks as they were)
+                } else if ((action == 0 || action == 6) && menu.cfg.charSelect && fe.style != game::Frontend::kStyleRemake &&
+                           !gTotd && !gNet && !unreleasedGame()) {
+                    csAction = action;
+                    std::copy(fe.pcChars, fe.pcChars + 4, csKeepPc);
+                    for (int k = 0; k < 4; ++k)
+                        fe.pcChars[k] = gCharPick[k] != 0 ? gCharPick[k] : k % 2 + 1;   // (the last picks, else Rogan / G)
+                    fe.onCharSelectStart = [&](bool defaults) {
+                        std::string s;
+                        for (int k = 0; k < 4; ++k)
+                            gCharPick[k] = !defaults && k < fe.charSelPlayers ? fe.pcChars[k] : 0;
+                        for (int k = 0; k < fe.charSelPlayers && !defaults; ++k)
+                            s += (s.empty() ? "" : ",") + std::to_string(k + 1) + "=" + std::to_string(gCharPick[k]);
+                        menu.cfg.characters = cfg.characters = s;   // (remembered: launcher.ini characters=)
+                        menu.cfg.save(cache + "launcher.ini");
+                        SDL_Log("Character Select: %s", s.empty() ? "default characters" : s.c_str());
+                        feAction = 50;
+                    };
+                    fe.charSelectOpen(menu.cfg.players);
+                    continue;
+                }
+            }
             if (action == 0 || action == 6) {   // Arcade (0x420F70, frontend_state 2): Chapter 1 directly (the attract came
                 // before); 6: Chapter Select's chapter (menuChapter set by it)
                 if (action == 0)
@@ -15867,6 +16023,7 @@ int main(int argc, char* argv[])
         const bool crtShot = gCrt.active() && cfg.crt.shotFiltered;   // F12: the filtered picture as seen
         rt.teammateFlash = cfg.teamFlash;   // (Options can change it in the game)
         hud.translucentMarks = cfg.clearMarks;   // bugs1 (#35): Video > Hit Marks
+        hud.bossCodenames = cfg.bossCodenames;   // spanish3: Gameplay > Boss Names
         rt.hideSparks = !cfg.hitSparks, rt.shotFlashScale = game::shotFlashScaleOf(cfg.shotFlashSize), rt.hideMuzzle = !cfg.muzzleFlash; rt.hideBlood = !cfg.bloodParticles; rt.transparency = cfg.transparency;
         // totd5 (the feel report 2026-11-05: "every letter fires the arcade gun's big flash over the word; TotD: a small
         // white spark on the body"): The Typing of the Dead 0's shots with a small flash, no muzzle (no gun on screen)

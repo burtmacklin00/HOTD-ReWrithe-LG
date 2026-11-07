@@ -48,6 +48,9 @@ struct NetArgs {
     // PC's characters for its first / second seat (--net-pc-char a[,b]; the pages' Your Character): 1-6, 0 = the default
     bool pcMode = false;
     int pcChar[2] = {};
+    // charsel: an arcade game (not PC Mode) whose host picked characters (Character Select, cosmetic; main: --char /
+    // characters=, then pcChar holds those picks): the settings carry every seat's character (protocol 21)
+    bool charPick = false;
     // Boss Mode online (protocol 18): the host's boss game (--boss-mode; the Host page's Game Mode): 0 none, 2-6
     int bossMode = 0;
     // the same game data (protocol 19; docs/netplay.md "Same game data"): this PC's digests (main fills them before
@@ -201,6 +204,7 @@ private:
     int dropMode() const;                        // NetArgs::dropContinueS resolved (-1 wait, 0 on at once, N s)
     std::string dropText() const;                // the host's line while it waits
     bool charsFixed_ = false;                    // the game's settings are set (seatChar: the game's characters)
+    mutable bool charPickOn_ = false;            // charsel: an arcade game with Character Select picks (the host's or a joiner's; hostStart)
     uint64_t joinHash_ = 0;
     std::vector<uint8_t> encodeLog(uint32_t frames) const;
     void renewSession();

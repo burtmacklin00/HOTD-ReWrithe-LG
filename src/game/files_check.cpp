@@ -78,6 +78,25 @@ struct PcFile {
 const PcFile kPcFiles[] = {
 #include "game/pc_manifest.inc"
 };
+// spanish (3lc3z4r's copy, 2026-11-06): the Spanish release's ("Doblaje español", the 2003 Spanish CD) versions of
+// the checked files that differ: its THOTD.EXE (translated texts, 1 code byte), GAMESNDS.RBH (the reload voice
+// silent, one voice re-recorded), BIGGER.VMC (its textures; B_SI.VMC too) and every SOUND\O_*.RBH (the Spanish dub)
+const PcFile kPcFilesEs[] = {
+#include "game/pc_manifest_es.inc"
+};
+
+bool isSpanishFile(const char* path, const std::vector<uint8_t>& d)
+{
+    std::string sha;
+    for (const PcFile& f : kPcFilesEs)
+        if (std::strcmp(f.path, path) == 0 && f.size == d.size()) {
+            if (sha.empty())
+                sha = sha1Hex(d.data(), d.size());
+            if (sha == f.sha1)
+                return true;
+        }
+    return false;
+}
 
 std::string lower(std::string s)
 {
@@ -311,6 +330,87 @@ bool isEuBigger(const std::string& rel, const std::vector<uint8_t>& d)
     return true;
 }
 
+std::vector<std::string> pcManifestPaths()
+{
+    std::vector<std::string> v;
+    for (const PcFile& f : kPcFiles) v.emplace_back(f.path);
+    return v;
+}
+
+bool isSpanishRelease(const std::string& folder)
+{
+    static std::map<std::string, bool> known;
+    if (folder.empty())
+        return false;
+    if (auto k = known.find(folder); k != known.end())
+        return k->second;
+    // the file, whatever the case of its folders' and its name (a CD copy: SOUND\O_VOC02.RBH; the CAB's O_voc02.rbh)
+    std::string path;
+    std::error_code ec;
+    if (pcfs::isZip(folder)) {
+        path = folder + "/SOUND/O_VOC02.RBH";   // (the zip reader matches names whatever their case)
+    } else {
+        fs::path p = folder;
+        for (const char* part : {"SOUND", "O_VOC02.RBH"}) {
+            fs::path next;
+            for (const auto& e : fs::directory_iterator(p, ec))
+                if (lower(e.path().filename().string()) == lower(part)) { next = e.path(); break; }
+            if (next.empty()) { p.clear(); break; }
+            p = next;
+        }
+        path = p.string();
+    }
+    std::vector<uint8_t> d;
+    const bool es = !path.empty() && pcfs::readFile(path, d) && isSpanishFile("SOUND/O_VOC02.RBH", d);
+    known[folder] = es;
+    return es;
+}
+
+std::string spanishVoiceDir(const std::string& pc, const std::string& spanishPc, const std::string& packageRoot)
+{
+    if (isSpanishRelease(spanishPc))
+        return spanishPc;
+    if (isSpanishRelease(pc))
+        return pc;
+    std::error_code ec;
+    const std::string d = packageRoot.empty() ? std::string() : (fs::path(packageRoot) / "data" / "pc_spanish").string();
+    if (!d.empty() && fs::is_directory(d, ec)) {
+        if (isSpanishRelease(d))
+            return d;
+        for (const auto& e : fs::directory_iterator(d, ec))   // (the copy one folder down)
+            if (e.is_directory(ec) && isSpanishRelease(e.path().string()))
+                return e.path().string();
+    }
+    return "";
+}
+
+bool spanishVoiceOn(int voice, const std::string& language)
+{
+    return voice == 1 || (voice == 0 && language == "es");
+}
+
+std::string spanishTextureVmc(const std::string& language, const std::string& pc, const std::string& spanishPc,
+                              const std::string& packageRoot)
+{
+    if (language != "es")
+        return "";
+    const std::string dir = spanishVoiceDir(pc, spanishPc, packageRoot);
+    if (dir.empty())
+        return "";
+    if (pcfs::isZip(dir))
+        return dir + "/ART/STAGE1/CREATURE/BIGGER.VMC";
+    fs::path p = dir;   // (its folders' and its name's case as on the disc)
+    std::error_code ec;
+    for (const char* part : {"ART", "STAGE1", "CREATURE", "BIGGER.VMC"}) {
+        fs::path next;
+        for (const auto& e : fs::directory_iterator(p, ec))
+            if (lower(e.path().filename().string()) == lower(part)) { next = e.path(); break; }
+        if (next.empty()) return "";
+        p = next;
+    }
+    return p.generic_string();
+}
+
 bool fixEuBigger(const std::string& rel, std::vector<uint8_t>& d)
 {
     if (!isEuBigger(rel, d)) return false;
@@ -420,7 +520,7 @@ CheckReport checkPc(const std::string& folder, const std::string& cacheFile, std
     // GAMESNDS.RBH, the world / creature models and BIGGER.VMC missing entirely or not even the file type. A missing
     // SOUND\O_*.RBH (one voice / sound effect) is a note: that sound stays silent.
     std::set<std::string> variants;   // accepted different files (not remembered as matches)
-    int differ = 0, silent = 0;
+    int differ = 0, silent = 0, spanish = 0;
     for (const PcFile* want : lost) {
         const std::string rel = lower(want->path);
         const Item* hit = nullptr;
@@ -462,7 +562,10 @@ CheckReport checkPc(const std::string& folder, const std::string& cacheFile, std
                 variants.insert(other->path);
                 ++differ;
                 std::string what = "a different version of the file";
-                if (exe)
+                if (isSpanishFile(want->path, head)) {
+                    what = "the Spanish release's version (Doblaje espa\xC3\xB1ol)";
+                    ++spanish;
+                } else if (exe)
                     what = "a patched or other version of THOTD.EXE";   // relfix: only its sound cue table and icon are read
                 else if (rel == "art/stage1/creature/bigger.vmc" && other->size == 54293628)
                     what = "the Japanese PC release's version (read with its own page numbers)";
@@ -541,13 +644,23 @@ CheckReport checkPc(const std::string& folder, const std::string& cacheFile, std
                       " match the 1998 PC release" + (pcfs::isZip(folder) ? " (in the zip)" : "") +
                       (moved ? " (" + std::to_string(moved) + " found elsewhere in the " + (pcfs::isZip(folder) ? "zip" : "folder") + ")" : "") +
                       (differ ? ", " + std::to_string(differ) + " another version (accepted)" : "") +
+                      (spanish ? " (" + std::to_string(spanish) + " of them the Spanish release's)" : "") +
                       (silent ? ", " + std::to_string(silent) + " sound(s) missing (silent)" : ""));
     r.lines.push_back("Music (optional, not checked): " + std::to_string(music) + " CD track(s) found (Music\\TrackNN.ogg)");
     if (!r.ok)
         r.lines.push_back("Some PC files are missing or not readable: the game needs the 1998 PC release's files.");
     // pchotfix: the setup's short notes (yellow under the green OK)
+    // spanish: the Spanish release named once (its files not listed one by one): accepted like the US / EU copies
+    if (spanish)
+        r.notes.push_back("Spanish release (Doblaje espa\xC3\xB1ol): " + std::to_string(spanish) +
+                          " file(s) of the 2003 Spanish CD (the Spanish voices, its textures and THOTD.EXE), accepted: "
+                          "fully playable (on that CD the reload voice is silent).");
+    const size_t firstNote = r.notes.size();
+    int listed = 0;
     for (const std::string& s : r.lines) {
-        if (s.rfind("DIFFERS ", 0) == 0 && r.notes.size() < 3) {
+        if (s.find("Spanish release's") != std::string::npos)
+            continue;
+        if (s.rfind("DIFFERS ", 0) == 0 && ++listed && r.notes.size() < firstNote + 3) {
             const std::string name = s.substr(8, s.find(':') - 8);
             const bool ja = s.find("Japanese") != std::string::npos;
             if (s.find("European CD's") != std::string::npos) {
@@ -559,8 +672,8 @@ CheckReport checkPc(const std::string& folder, const std::string& cacheFile, std
                               ", accepted; an unpatched 1998 copy is recommended.");
         }
     }
-    if (differ > 3)
-        r.notes.push_back(std::to_string(differ - 3) + " more file(s) of another version accepted (the list: settings\\hotd.log).");
+    if (listed > 3)
+        r.notes.push_back(std::to_string(listed - 3) + " more file(s) of another version accepted (the list: settings\\hotd.log).");
     if (silent)
         r.notes.push_back(std::to_string(silent) + " sound file(s) missing: those sounds stay silent.");
     for (const std::string& s : r.lines)

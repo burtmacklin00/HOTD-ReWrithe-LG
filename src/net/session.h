@@ -39,7 +39,9 @@ namespace hotd::net {
 // ROMs', the 1998 PC files' that PC Mode / Boss Mode read); the host refuses a mismatch (REFUSE 5-8: a clear message)
 // 20: PC Mode's Extra Characters (docs/pcmode.md "Extra Characters"): characters 1-19 everywhere (settings, CONFIRM,
 // ROSTER), an input's character in flags bits 3-7 (was bits 4-6, 1-6)
-constexpr uint16_t kProtocol = 20;
+// 21: the Character Select of the arcade games (charsel, cosmetic): the settings' pmChar[4] in an arcade game (pcMode 0)
+// are all 0 (no picks) or every seat's character 1-19; an input's character with its start there too
+constexpr uint16_t kProtocol = 21;
 constexpr int kPmCharMax = 19;   // the last PC Mode character (port::Game::kPmCharCount - 1: the PC's 1-6, the extras 7-19)
 constexpr uint32_t kMaxLog = 8u << 20;   // the input log a joining PC accepts at most (bytes)
 constexpr uint32_t kMaxJoinFrames = 4'000'000;   // a running game joined at most this far in (~19 hours; bounds the replay's memory)

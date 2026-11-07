@@ -11,10 +11,10 @@ lang.sample = 0
 
 More Modes = Más modos
 Quit = Salir
-Options = Opciones
-High Scores = Récords
+Options = Ajustes
+High Scores = Puntuación
 Extras = Extras
-Boss Mode = Modo Jefes
+Boss Mode = Combate
 PC Mode = Modo PC
 Arcade = Arcade
 Chapter Select, Co-op, Sonic Mode, Survival = Capítulos, Co-op, Modo Sonic, Supervivencia
@@ -59,26 +59,30 @@ The characters and creatures in 3D = Los personajes y criaturas en 3D
 The music, sound effects and voices = La música, los efectos y las voces
 Yes = Sí
 No = No
-Are you sure? = ¿Seguro?
+Are you sure? = ¿Estás seguro?
 Leave the game = Salir del juego
 Enter/A Choose    Esc/B No = Enter/A Elegir    Esc/B No
 Exit = Salir
-Controller Config = Config. mando
+Controller Config = Controles
 Resolution = Resolución
 Auto = Auto
 Music = Música
-Sound Effects = Efectos
+Sound Effects = Sonido
 Blood Color = Sangre
 Red = Roja
 Off = No
-Auto Reload = Recarga auto
-Continues = Continúas
+Auto Reload = Recarga
+Continues = Continuar
 Life = Vidas
 Difficulty = Dificultad
 Normal = Normal
-How hard the game is: Very Easy .. Very Hard (the arcade's operator levels) = Dificultad del juego: Muy fácil .. Muy difícil (los niveles del operador del arcade)
+Very Easy = Muy fácil
+Easy = Fácil
+Hard = Difícil
+Very Hard = Expertos
+How hard the game is: Very Easy .. Very Hard (the arcade's operator levels) = Dificultad del juego: Muy fácil .. Expertos (los niveles del operador del arcade)
 The lives every player starts with (the most: Gameplay > Max Lives); one setting for all, 3P / 4P too = Las vidas iniciales de cada jugador (el máximo: Juego > Vidas máx.); un ajuste para todos, también 3P / 4P
-Continues in PC Mode (0-9, then Free Play: they never run out); arcade games are free play = Continúas en el Modo PC (0-9, luego Juego libre: nunca se acaban); el arcade es juego libre
+Continues in PC Mode (0-9, then Free Play: they never run out); arcade games are free play = Continuar en el Modo PC (0-9, luego Inmunidad: nunca se acaba); el arcade es juego libre
 An empty gun reloads by itself (not in the originals): one setting for all, 3P / 4P too = Un arma vacía se recarga sola (no en los originales): un ajuste para todos, también 3P / 4P
 The blood's colour (a custom colour: Gameplay) = El color de la sangre (un color propio: Juego)
 The sound effects' volume = El volumen de los efectos
@@ -193,7 +197,7 @@ On: no HUD, subtitles, crosshairs or cursor in play, only the picture (for recor
 The bosses' extra hit points for each player past two (4 players mode) = La vida extra de los jefes por cada jugador más allá de dos (modo 4 jugadores)
 Experimental: {help} = Experimental: {help}
 On (best): the game never waits on a part not ported yet; Off: the original's waits (it may stop there) = Sí (mejor): el juego nunca espera a una parte aún no portada; No: las esperas del original (puede pararse ahí)
-Back to Options (Escape) = Volver a Opciones (Escape)
+Back to Options (Escape) = Volver a Ajustes (Escape)
 Arcade (57.52 Hz) = Arcade (57.52 Hz)
 60 Hz (PC) = 60 Hz (PC)
 PC CD = CD de PC
@@ -233,7 +237,7 @@ The PC models' blood and water have sharp edges (as the 1998 PC): this setting i
 Low = Baja
 Heavy = Pesada
 Local 2 Players = 2 jugadores locales
-Start = Empezar
+Start = Jugar
 Local 4 Players = 4 jugadores locales
 Online Co-op = Co-op online
 Host / Join > = Crear / Unirse >
@@ -243,14 +247,14 @@ Player 2: Human / CPU = Jugador 2: Humano / CPU
 Human = Humano
 Player 3: Human / CPU = Jugador 3: Humano / CPU
 Player 4: Human / CPU = Jugador 4: Humano / CPU
-Two players on this PC from Chapter 1 (Player 2's input: Options > Controls) = Dos jugadores en este PC desde el Capítulo 1 (entrada del jugador 2: Opciones > Controles)
+Two players on this PC from Chapter 1 (Player 2's input: Options > Controls) = Dos jugadores en este PC desde el Capítulo 1 (entrada del jugador 2: Ajustes > Controles)
 Two PCs over the internet or the LAN: host a game or join one (3-4 PCs: Experimental) = Dos PC por internet o LAN: crea una partida o únete a una (3-4 PC: Experimental)
 How many play from the start of Arcade / Chapter Select (the others join with their start button) = Cuántos juegan desde el inicio de Arcade / Capítulos (los demás entran con su botón Start)
 Which seat a 1-player game plays in: Player 2 is G with the blue crosshair (as pressing 2P start alone) = En qué puesto juega una partida de 1 jugador: el Jugador 2 es G con la mira azul (como pulsar solo el Start de 2P)
 Only for 1 player = Solo para 1 jugador
 Player 2 played by you or by the computer (local play) = El jugador 2 lo juegas tú o la computadora (juego local)
 Back to the previous page (Escape) = Volver a la página anterior (Escape)
-Four players on this PC from Chapter 1 (players 3 / 4: gamepads; Options > Controls) = Cuatro jugadores en este PC desde el Capítulo 1 (jugadores 3 / 4: mandos; Opciones > Controles)
+Four players on this PC from Chapter 1 (players 3 / 4: gamepads; Options > Controls) = Cuatro jugadores en este PC desde el Capítulo 1 (jugadores 3 / 4: mandos; Ajustes > Controles)
 CPU Easy = CPU fácil
 CPU Normal = CPU normal
 CPU Hard = CPU difícil
@@ -265,8 +269,8 @@ Key: Aim Up = Tecla: Arriba
 Key: Aim Down = Tecla: Abajo
 Key: Aim Left = Tecla: Izquierda
 Key: Aim Right = Tecla: Derecha
-Key: Fire = Tecla: Disparar
-Key: Reload = Tecla: Recargar
+Key: Fire = Tecla: Disparo
+Key: Reload = Tecla: Recarga
 Key: Start = Tecla: Start
 Key: Pause = Tecla: Pausa
 Reset Keys = Restablecer teclas
@@ -287,10 +291,10 @@ This player's keys back to the defaults = Las teclas de este jugador vuelven a l
 Every player's keys and pad buttons back to the defaults = Las teclas y botones de todos los jugadores vuelven a los de defecto
 The page before = La página anterior
 The next page of these settings = La siguiente página de estos ajustes
-Pad: Fire = Mando: Disparar
+Pad: Fire = Mando: Disparo
 The buttons that shoot: click, then press one on the pad (Esc: cancel) = Los botones que disparan: clic y pulsa uno en el mando (Esc: cancelar)
 RT, RB, A = RT, RB, A
-Pad: Reload = Mando: Recargar
+Pad: Reload = Mando: Recarga
 The buttons that reload: click, then press one on the pad (Esc: cancel) = Los botones que recargan: clic y pulsa uno en el mando (Esc: cancelar)
 LT, LB, B, X = LT, LB, B, X
 Pad: Start = Mando: Start
@@ -342,7 +346,7 @@ Touchpad = Panel táctil
 The touchpad: off, a pointer, or a trackpad = El panel táctil: no, un puntero o un trackpad
 Touchpad Click = Clic del panel
 The touchpad's click: reload or shoot = El clic del panel táctil: recargar o disparar
-Reload = Recargar
+Reload = Recarga
 Stick Sensitivity = Sensib. stick
 Gyro Sensitivity = Sensib. giro
 Trackpad Sensitivity = Sensib. trackpad
@@ -372,7 +376,7 @@ Not Calibrated = Sin calibrar
 Rogan = Rogan
 Rogan 2 = Rogan 2
 Sophie = Sophie
-Researcher = Investigador
+Researcher = Científica
 Stage {n} = Fase {n}
 ROHAN = ROHAN
 ANDY = ANDY
@@ -388,27 +392,27 @@ The table before = La tabla anterior
 The next table = La siguiente tabla
 after Chapter 4 = tras el Capítulo 4
 The Ending = El final
-The Magician = The Magician
+The Magician = Hechicero
 Chapter {n} = Capítulo {n}
-The Hermit = The Hermit
-The Hanged Man = The Hanged Man
-The Chariot = The Chariot
-Start Chapter 1 (its boss: The Chariot) = Empieza el Capítulo 1 (su jefe: The Chariot)
-Start Chapter 2 (its boss: The Hanged Man) = Empieza el Capítulo 2 (su jefe: The Hanged Man)
-Start Chapter 3 (its boss: The Hermit) = Empieza el Capítulo 3 (su jefe: The Hermit)
-Start Chapter 4 (its boss: The Magician) = Empieza el Capítulo 4 (su jefe: The Magician)
-The ending plays after the Magician: clear Chapter 4 to see it = El final llega tras The Magician: supera el Capítulo 4 para verlo
-The Chariot (Chapter 1's boss): beat it as fast as you can, the best times go in its table = The Chariot (jefe del Capítulo 1): vencelo lo más rápido posible, los mejores tiempos van a su tabla
-The Hanged Man (Chapter 2's boss): beat it as fast as you can, the best times go in its table = The Hanged Man (jefe del Capítulo 2): vencelo lo más rápido posible, los mejores tiempos van a su tabla
-The Hermit (Chapter 3's boss): beat it as fast as you can, the best times go in its table = The Hermit (jefe del Capítulo 3): vencelo lo más rápido posible, los mejores tiempos van a su tabla
-The Magician (Chapter 4's boss): beat it as fast as you can, the best times go in its table = The Magician (jefe del Capítulo 4): vencelo lo más rápido posible, los mejores tiempos van a su tabla
-All Bosses: the four bosses one after the other on one clock = Todos los jefes: los cuatro jefes uno tras otro con un solo reloj
+The Hermit = Tarántula
+The Hanged Man = Gárgola
+The Chariot = Guerrero
+Start Chapter 1 (its boss: The Chariot) = Empieza el Capítulo 1 (su jefe: Guerrero)
+Start Chapter 2 (its boss: The Hanged Man) = Empieza el Capítulo 2 (su jefe: Gárgola)
+Start Chapter 3 (its boss: The Hermit) = Empieza el Capítulo 3 (su jefe: Tarántula)
+Start Chapter 4 (its boss: The Magician) = Empieza el Capítulo 4 (su jefe: Hechicero)
+The ending plays after the Magician: clear Chapter 4 to see it = El final llega tras Hechicero: supera el Capítulo 4 para verlo
+The Chariot (Chapter 1's boss): beat it as fast as you can, the best times go in its table = Guerrero (jefe del Capítulo 1): vencelo lo más rápido posible, los mejores tiempos van a su tabla
+The Hanged Man (Chapter 2's boss): beat it as fast as you can, the best times go in its table = Gárgola (jefe del Capítulo 2): vencelo lo más rápido posible, los mejores tiempos van a su tabla
+The Hermit (Chapter 3's boss): beat it as fast as you can, the best times go in its table = Tarántula (jefe del Capítulo 3): vencelo lo más rápido posible, los mejores tiempos van a su tabla
+The Magician (Chapter 4's boss): beat it as fast as you can, the best times go in its table = Hechicero (jefe del Capítulo 4): vencelo lo más rápido posible, los mejores tiempos van a su tabla
+All Bosses: the four bosses one after the other on one clock = Todos: los cuatro jefes uno tras otro con un solo reloj
 Q / E: scene  P: players  M: models  1-4: actors  C: clean  T: subs  F5: play  Tab: category = Q / E: escena  P: jug.  M: modelos  1-4: actores  C: limpia  T: subs  F5: ver  Tab: categoría
 Space pause, R replay, M slow, F free cam, C clean, T subs, A actors, Esc back = Espacio pausa, R repetir, M lento, F cám. libre, C limpia, T subs, A actores, Esc volver
 Scene 12 was not reached: an example status line. = La escena 12 no se alcanzó: una línea de estado de ejemplo.
-Researcher (3) = Investigador (3)
+Researcher (3) = Científico (3)
 Player 4's part = Parte jugador 4
-Researcher (2) = Investigador (2)
+Researcher (2) = Científico (2)
 Player 3's part = Parte jugador 3
 G's part = Parte de G
 Rogan's part = Parte de Rogan
@@ -421,12 +425,12 @@ Players: 4 = Jugadores: 4
 Chapter 2, scene 12: four bodies with 3 or 4 players = Capítulo 2, escena 12: cuatro cuerpos con 3 o 4 jugadores
 4-20 Staff roll = 4-20 Créditos
 4-19 Goodbye Curien = 4-19 Adiós, Curien
-4-21 The Magician's defeat = 4-21 Cae Magician
+4-21 The Magician's defeat = 4-21 Cae Hechicero
 4-18 Second scene = 4-18 Segunda escena
 4-17 Dash = 4-17 Carrera
-3-21 The Hermit's defeat = 3-21 Cae Hermit
+3-21 The Hermit's defeat = 3-21 Cae Tarántula
 3-15 Jump down = 3-15 Salto abajo
-2-21 The Hangedman's defeat = 2-21 Cae Hangedman
+2-21 The Hangedman's defeat = 2-21 Cae Gárgola
 2-14 Rattle door = 2-14 Puerta sacudida
 2-10 Jump down b = 2-10 Salto abajo b
 2-12 Reload kick = 2-12 Patada y recarga
@@ -457,7 +461,7 @@ Humans = Humanos
 Players = Jugadores
 The game's own scene code plays them = Las reproduce el propio código de escenas del juego
 The two agents and their second looks. Key: 1 = Los dos agentes y sus segundos aspectos. Tecla: 1
-Sophie, Dr. Curien and the researchers to rescue. Key: 2 = Sophie, el Dr. Curien y los investigadores a rescatar. Tecla: 2
+Sophie, Dr. Curien and the researchers to rescue. Key: 2 = Sophie, el Dr. Curien y los científicos a rescatar. Tecla: 2
 Every creature the game sends at you, with the official names. Key: 3 = Cada criatura que el juego te lanza, con sus nombres oficiales. Tecla: 3
 The four chapter bosses. Key: 4 = Los cuatro jefes de capítulo. Tecla: 4
 The golden frog, the items hidden in props, and props worth a look. Key: 5 = La rana dorada, los objetos ocultos en el decorado y decorado digno de ver. Tecla: 5
@@ -526,18 +530,18 @@ The one before in this category. Keys: Q, Page Up, pad: LB = El anterior de esta
 Its next motion (or damage step). Key: M (Shift+M back), pad: Y = Su siguiente animación (o paso de daño). Tecla: M (Shift+M atrás), mando: Y
 Play the motion, or stop it on this frame (off at first). Key: Space, pad: X = Reproduce la animación o la para en este fotograma (parada al inicio). Tecla: Espacio, mando: X
 The next one in this category. Keys: E, Page Down, pad: RB = El siguiente de esta categoría. Teclas: E, Av Pág, mando: RB
-No Player = Sin jugador
-Hit Size: = Tamaño de impacto:
-Reload Time: = Tiempo de recarga:
-Bullet Damage: = Daño de bala:
-Chamber: = Cargador:
-Hit Points: = Vida:
+No Player = Ninguno
+Hit Size: = Zona de impacto:
+Reload Time: = Recarga rápida:
+Bullet Damage: = Potencia arma:
+Chamber: = Balas:
+Hit Points: = Vidas:
 Done = Listo
 Del = Borr
 Spc = Esp
 Please enter your name: = Escribe tu nombre:
-You have a high score. = Tienes un récord.
-Congratulations! = ¡Felicidades!
+You have a high score. = Tienes un nuevo récord.
+Congratulations! = ¡Enhorabuena!
 Type a name    Backspace/B Delete    Enter Done = Escribe un nombre    Retroceso/B Borrar    Enter Listo
 Add this letter (10 at most) = Añade esta letra (10 como máximo)
 Add a space = Añade un espacio
@@ -590,9 +594,9 @@ Menu Music = Música del menú
 Chapter 4 / Main Menu = Capítulo 4 / Menú
 Audio settings (this page) = Ajustes de audio (esta página)
 The sounds' source: Auto / Arcade \= the arcade's sound board, PC \= the 1998 PC port's sounds = La fuente de los sonidos: Auto / Arcade \= la placa de sonido del arcade, PC \= los sonidos del port de PC de 1998
-The sound effects' volume in steps of 5%, after 100%: 0% (the Sound Effects slider on Options) = El volumen de los efectos en pasos de 5%, tras 100%: 0% (el control Efectos en Opciones)
+The sound effects' volume in steps of 5%, after 100%: 0% (the Sound Effects slider on Options) = El volumen de los efectos en pasos de 5%, tras 100%: 0% (el control Sonido en Ajustes)
 The music on or off (the sound effects stay on) = La música sí o no (los efectos siguen)
-The music's volume in steps of 5%, after 100%: 0% (the Music slider on Options) = El volumen de la música en pasos de 5%, tras 100%: 0% (el control Música en Opciones)
+The music's volume in steps of 5%, after 100%: 0% (the Music slider on Options) = El volumen de la música en pasos de 5%, tras 100%: 0% (el control Música en Ajustes)
 The main menu's song (the PC played Chapter 4's) = La canción del menú principal (el PC usaba la del Capítulo 4)
 title = título
 boss = jefe
@@ -692,7 +696,7 @@ Starting Lives = Vidas iniciales
 Max Lives = Vidas máx.
 Chapter Retry = Reintentar capítulo
 Edge Reload = Recarga en borde
-Free Play = Juego libre
+Free Play = Inmunidad
 Hold to Skip Cut-scenes = Mantener para saltar
 Attract Gore = Gore en la demo
 Score Display = Ver puntuación
@@ -705,7 +709,7 @@ The most lives a player can have: life-ups and a chapter's bonus stop there (the
 Pause and game over: Retry Chapter starts the chapter again, scores and lives as it began. Offline arcade games = Pausa y fin del juego: Reintentar capítulo empieza el capítulo de nuevo, puntos y vidas como al inicio. Partidas arcade sin conexión
 An empty gun reloads by itself (not in the originals): every player, 3P / 4P too; online the host's = Un arma vacía se recarga sola (no en los originales): todos los jugadores, también 3P / 4P; online la del anfitrión
 As The House of the Dead 2: moving the mouse crosshair onto the screen's edge reloads, no shot needed = Como en The House of the Dead 2: llevar la mira del ratón al borde de la pantalla recarga, sin disparar
-On: PC Mode's continues never run out (as the 1998 PC's Cheat screen). Arcade games are always free play = Sí: los continúas del Modo PC nunca se acaban (como la pantalla Cheat del PC de 1998). El arcade es siempre juego libre
+On: PC Mode's continues never run out (as the 1998 PC's Cheat screen). Arcade games are always free play = Sí: Continuar del Modo PC nunca se acaba (como la pantalla Trucos del PC de 1998). El arcade es siempre juego libre
 Hold the trigger 2 s to skip a cut-scene the arcade cannot skip (black bars up): a red ring fills. Offline = Mantén el gatillo 2 s para saltar una escena que el arcade no deja saltar (barras negras): se llena un aro rojo. Offline
 The attract demo's shots blow off heads and limbs, as in the 1998 PC version. Off: as the arcade (Revision A) = Los tiros de la demo arrancan cabezas y miembros, como en la versión PC de 1998. No: como el arcade (Revisión A)
 The arcade's hidden SCORE line at the top (or at the title: left gun 3 times, right gun twice). Offline = La línea oculta SCORE del arcade arriba (o en el título: pistola izq. 3 veces, derecha 2). Offline
@@ -760,7 +764,7 @@ DAA = DAA
 CAA = CAA
 BAA = BAA
 AAA = AAA
-Arcade Mode = Modo arcade
+Arcade Mode = Modo Arcade
 KAA = KAA
 Sonic Mode: Frenzy = Modo Sonic: Frenesí
 LAA = LAA
@@ -775,13 +779,13 @@ PAA = PAA
 4 Players: Overkill = 4 jugadores: Exceso
 QAA = QAA
 4 Players: Nightmare = 4 jugadores: Pesadilla
-Chariot Boss = Jefe Chariot
+Chariot Boss = Guerrero
 The next boss's times = Los tiempos del siguiente jefe
 The previous boss's times = Los tiempos del jefe anterior
-Hangedman Boss = Jefe Hangedman
-Hermit Boss = Jefe Hermit
-Magician Boss = Jefe Magician
-All Bosses = Todos los jefes
+Hangedman Boss = Gárgola
+Hermit Boss = Tarántula
+Magician Boss = Hechicero
+All Bosses = Todos
 Every chapter (player 1) = Todos los capítulos (jugador 1)
 Appears: = Aparece:
 AMS agent, player 1. Comes to the Curien mansion after a call for help. = Agente de la AMS, jugador 1. Llega a la mansión Curien tras una llamada de auxilio.
@@ -801,7 +805,7 @@ PC Mode character 4; one of the arcade's title-code looks = Personaje 4 del Modo
 G's alternative skin (developer name BO_staje). = El aspecto alternativo de G (nombre interno BO_staje).
 G (second look) = G (segundo aspecto)
 Chapter 1 and the ending = Capítulo 1 y el final
-DBR researcher held in the mansion; Rogan came for her. = Investigadora de la DBR retenida en la mansión; Rogan vino por ella.
+DBR researcher held in the mansion; Rogan came for her. = Científica de la DBR retenida en la mansión; Rogan vino por ella.
 Sophie Richards = Sophie Richards
 The ending = El final
 Developer name BO_zsophi. PC models: Sophie's model = Nombre interno BO_zsophi. Modelos PC: el modelo de Sophie
@@ -810,16 +814,16 @@ Sophie (zombie) = Sophie (zombi)
 The scientist whose research filled the mansion with creatures. = El científico cuya investigación llenó la mansión de criaturas.
 Dr. Roy Curien = Dr. Roy Curien
 Chapters 1, 2 = Capítulos 1, 2
-Shooting a researcher costs a life = Disparar a un investigador cuesta una vida
+Shooting a researcher costs a life = Disparar a un científico cuesta una vida
 DBR scientist, one of the staff to rescue from the creatures. = Científico de la DBR, uno del personal a rescatar de las criaturas.
 DBR scientist: the same body as the others, another head. = Científico de la DBR: el mismo cuerpo que los otros, otra cabeza.
 Chapters 1-3 = Capítulos 1-3
-Researcher (4) = Investigador (4)
-Researcher (woman) = Investigadora
+Researcher (4) = Científico (4)
+Researcher (woman) = Científica
 Chapters 2, 3 = Capítulos 2, 3
-Researcher (woman, 2) = Investigadora (2)
-Researcher (woman, 3) = Investigadora (3)
-Researcher (woman, 4) = Investigadora (4)
+Researcher (woman, 2) = Científica (2)
+Researcher (woman, 3) = Científica (3)
+Researcher (woman, 4) = Científica (4)
 Chapters 1-4 = Capítulos 1-4
 Type A-1. Hit points 100 (a few have 120 or 160) = Tipo A-1. Vida 100 (algunos 120 o 160)
 The plain zombie: slow, straight at you. = El zombi común: lento, directo hacia ti.
@@ -915,18 +919,18 @@ Neopetit 3 = Neopetit 3
 Chapters 1, 4 = Capítulos 1, 4
 Type 27. Hit points 480 = Tipo 27. Vida 480
 Chapter 1 boss: an armoured giant with a halberd. He comes back in Chapter 4 (480 hit points again). = Jefe del Capítulo 1: un gigante acorazado con alabarda. Vuelve en el Capítulo 4 (otra vez con 480 de vida).
-The Chariot once its armour has been shot away. = The Chariot una vez que le han volado la armadura.
-The Chariot (armour off) = The Chariot (sin armadura)
+The Chariot once its armour has been shot away. = Guerrero una vez que le han volado la armadura.
+The Chariot (armour off) = Guerrero (sin armadura)
 Chapters 1, 2, 4 = Capítulos 1, 2, 4
 Type F-4. Motion shows its wing frames = Tipo F-4. Animación muestra sus fotogramas de alas
-Bats that fly at the player in groups and die when they hit; a swarm comes with the Hangedman. = Murciélagos que vuelan en grupo hacia el jugador y mueren al golpear; un enjambre llega con el Hangedman.
+Bats that fly at the player in groups and die when they hit; a swarm comes with the Hangedman. = Murciélagos que vuelan en grupo hacia el jugador y mueren al golpear; un enjambre llega con el Gárgola.
 Devilon = Devilon
 Type G-2. Motion shows its crawl and spit = Tipo G-2. Animación muestra cómo repta y escupe
 A slug that crawls along the walls and spits at the player or bites. = Una babosa que repta por las paredes y escupe al jugador o muerde.
 Name = Nombre
 Type 041. Hit points 800 = Tipo 041. Vida 800
 Chapter 2 boss: a winged creature that fights over the mansion's roofs under the full moon. In Chapter 1 he carries Sophie off; he comes back in Chapter 4 with 560 hit points. = Jefe del Capítulo 2: una criatura alada que lucha sobre los tejados de la mansión bajo la luna llena. En el Capítulo 1 se lleva a Sophie; vuelve en el Capítulo 4 con 560 de vida.
-The Hangedman = The Hangedman
+The Hangedman = Gárgola
 Type 6803. Hit points 160 = Tipo 6803. Vida 160
 Chapter 3 boss: a giant spider in its web. At 100 hit points he drops off the wall. = Jefe del Capítulo 3: una araña gigante en su tela. Con 100 de vida cae de la pared.
 Type 0. Hit points 600 = Tipo 0. Vida 600
@@ -985,8 +989,8 @@ A cut leech: a segmented body with its own motions; never spawned. Its colours a
 Hiru = Hiru
 Human-faced fish = Pez con cara humana
 Model boss31_kao (0x1AC6), in no skeleton = Modelo boss31_kao (0x1AC6), en ningún esqueleto
-A second head for the Hermit next to the one the game uses; maybe a fly-eyed head (a guess). = Una segunda cabeza para The Hermit junto a la que usa el juego; quizá una cabeza de ojos de mosca (una suposición).
-The Hermit's second head = La segunda cabeza de The Hermit
+A second head for the Hermit next to the one the game uses; maybe a fly-eyed head (a guess). = Una segunda cabeza para Tarántula junto a la que usa el juego; quizá una cabeza de ojos de mosca (una suposición).
+The Hermit's second head = La segunda cabeza de Tarántula
 Rainbow = Arcoíris
 Damage {n} = Daño {n}
 Head = Cabeza
@@ -1007,7 +1011,7 @@ Start Hosting = Abrir partida
 Game Mode = Modo de juego
 Opens your game and shows the code your friends type to join = Abre tu partida y muestra el código que tus amigos escriben para unirse
 Up to 4 PCs: one or two players each. 2 PCs: one friend (with 4 players: two on each PC) = Hasta 4 PC: uno o dos jugadores cada uno. 2 PC: un amigo (con 4 jugadores: dos en cada PC)
-PC Mode: the 1998 PC port's mode (characters; Continues). Boss Mode: the bosses only, against the clock = Modo PC: el modo del port de PC de 1998 (personajes; continúas). Modo Jefes: solo los jefes, contra reloj
+PC Mode: the 1998 PC port's mode (characters; Continues). Boss Mode: the bosses only, against the clock = Modo PC: el modo del port de PC de 1998 (personajes; Continuar). Combate: solo los jefes, contra reloj
 The name players on your network see in their list = El nombre que ven los jugadores de tu red en su lista
 UDP port 47800 is already in use (is another copy of the game hosting?) = El puerto UDP 47800 ya está en uso (¿otra copia del juego está creando una partida?)
 Too many wrong codes were tried: nobody else can join now. Stop hosting and host again (you get a new code). = Se probaron demasiados códigos erróneos: nadie más puede unirse ahora. Cierra la partida y créala de nuevo (obtienes un código nuevo).
@@ -1015,7 +1019,7 @@ Your Code = Tu código
 2WFU-MBKD-YH5B-72XV = 2WFU-MBKD-YH5B-72XV
 G, 38 ms = G, 38 ms
 Copy Code = Copiar código
-Start Game = Empezar
+Start Game = Jugar
 Stop Hosting = Cerrar partida
 Internet = Internet
 Open: 203.0.113.45 = Abierto: 203.0.113.45
@@ -1058,7 +1062,7 @@ Type the host's code (16 letters, dashes optional), then Enter = Escribe el cód
 Pastes a code you copied (Ctrl+V works too) = Pega un código que copiaste (Ctrl+V también funciona)
 Connects to the host = Conecta con el anfitrión
 2: two people play on this PC (a game of up to 4 PCs, when two seats are free) = 2: dos personas juegan en este PC (una partida de hasta 4 PC, cuando hay dos puestos libres)
-Your character when the host plays PC Mode (Auto: Rogan / G / Rogan 2 / G 2 by seat) = Tu personaje cuando el anfitrión juega al Modo PC (Auto: Rogan / G / Rogan 2 / G 2 según el puesto)
+Your character when the host plays PC Mode (Auto: Rogan / G / Rogan 2 / G 2 by seat) = Tu personaje cuando el anfitrión juega al Modo PC (Auto: Rogan / Mister G / Rogan 2 / Mister G 2 según el puesto)
 On your network: click, type its code, Enter = En tu red: clic, escribe su código, Enter
 Another version of the game: both PCs need the same build = Otra versión del juego: ambos PC necesitan la misma versión
 Already playing, no free seat = Ya jugando, sin puesto libre
@@ -1083,7 +1087,7 @@ Game settings (this page) = Ajustes de partida (esta página)
 The lives each player starts with (1P and 2P together) = Las vidas iniciales de cada jugador (1P y 2P juntos)
 The lives each player starts with (1P and 2P together; Max Lives goes up with it) = Las vidas iniciales de cada jugador (1P y 2P juntos; Vidas máx. sube con ellas)
 The most lives a player can have: life-ups and a chapter's bonus stop there (Starting Lives goes down with it) = El máximo de vidas de un jugador: las vidas extra y el bono de capítulo se detienen ahí (Vidas iniciales baja con él)
-Continues in PC Mode (0-9); arcade games are free play = Continúas en el Modo PC (0-9); el arcade es juego libre
+Continues in PC Mode (0-9); arcade games are free play = Continuar en el Modo PC (0-9); el arcade es juego libre
 An empty gun reloads by itself (not in the originals; 1P and 2P together) = Un arma vacía se recarga sola (no en los originales; 1P y 2P juntos)
 Q|LB = Q|LB
 E|RB = E|RB
@@ -1092,15 +1096,15 @@ Host / Join = Crear / Unirse
 More settings below = Más ajustes abajo
 This table (Left / Right or Q / E: the others) = Esta tabla (Izquierda / Derecha o Q / E: las otras)
 Stage 4|62000|Rogan = Fase 4|62000|Rogan
-Stage 4|60000|G = Fase 4|60000|G
+Stage 4|60000|G = Fase 4|60000|Mister G
 Stage 4|50000|Rogan 2 = Fase 4|50000|Rogan 2
-Stage 3|40000|G 2 = Fase 3|40000|G 2
+Stage 3|40000|G 2 = Fase 3|40000|Mister G 2
 Stage 3|30000|Sophie = Fase 3|30000|Sophie
-Stage 2|20000|Researcher = Fase 2|20000|Investigador
+Stage 2|20000|Researcher = Fase 2|20000|Científica
 Stage 2|10000|Rogan = Fase 2|10000|Rogan
-Stage 1|8000|G = Fase 1|8000|G
+Stage 1|8000|G = Fase 1|8000|Mister G
 Stage 1|6000|Rogan 2 = Fase 1|6000|Rogan 2
-Stage 1|4000|G 2 = Fase 1|4000|G 2
+Stage 1|4000|G 2 = Fase 1|4000|Mister G 2
 One clock = Un reloj
 The Sound Effects list. Keys: Left / Right, Q / E = La lista de efectos. Teclas: Izquierda / Derecha, Q / E
 The Voices list. Keys: Left / Right, Q / E = La lista de voces. Teclas: Izquierda / Derecha, Q / E
@@ -1152,14 +1156,14 @@ Rainbow Speed = Velocidad arcoíris
 Rainbow Colours = Colores arcoíris
 Each Splash = Cada salpicadura
 The custom colour's green, by 16 (picks Custom). Click < or > = El verde del color propio, de 16 en 16 (elige Propio). Clic < o >
-The blood's colour on the model, its wounds and its blood. Key: G (Shift+G back). The Gallery's own: Options and Mods keep theirs. = El color de la sangre en el modelo, sus heridas y su sangre. Tecla: G (Shift+G atrás). Propio de la Galería: Opciones y Mods mantienen el suyo.
+The blood's colour on the model, its wounds and its blood. Key: G (Shift+G back). The Gallery's own: Options and Mods keep theirs. = El color de la sangre en el modelo, sus heridas y su sangre. Tecla: G (Shift+G atrás). Propio de la Galería: Ajustes y Mods mantienen el suyo.
 The custom colour's red, by 16 (picks Custom). Click < or > = El rojo del color propio, de 16 en 16 (elige Propio). Clic < o >
 The custom colour's blue, by 16 (picks Custom). Click < or > = El azul del color propio, de 16 en 16 (elige Propio). Clic < o >
-The Rainbow Blood mod's colours. Key: N. The Gallery's own: Options and Mods keep theirs. = Los colores del mod Sangre arcoíris. Tecla: N. Propio de la Galería: Opciones y Mods mantienen el suyo.
+The Rainbow Blood mod's colours. Key: N. The Gallery's own: Options and Mods keep theirs. = Los colores del mod Sangre arcoíris. Tecla: N. Propio de la Galería: Ajustes y Mods mantienen el suyo.
 Rainbow Blood: all blood one colour at a time, or each splash its own = Sangre arcoíris: toda la sangre de un color a la vez, o cada salpicadura el suyo
 Rainbow Blood: how fast the colours change = Sangre arcoíris: qué tan rápido cambian los colores
 Rainbow Blood: the creature's own wounds (its own colour, cycling, or as painted) = Sangre arcoíris: las heridas de la criatura (su color, en ciclo, o como están pintadas)
-The blood burst of a new damage step, the drips from a cut part. Key: J. The Gallery's own: Options and Mods keep theirs. = El chorro de sangre de un nuevo paso de daño, el goteo de una parte cortada. Tecla: J. Propio de la Galería: Opciones y Mods mantienen el suyo.
+The blood burst of a new damage step, the drips from a cut part. Key: J. The Gallery's own: Options and Mods keep theirs. = El chorro de sangre de un nuevo paso de daño, el goteo de una parte cortada. Tecla: J. Propio de la Galería: Ajustes y Mods mantienen el suyo.
 All Parts = Todas
 Whole = Entero
 Legs = Piernas
@@ -1171,7 +1175,7 @@ Every part whole again. Key: Shift+Z = Todas las partes enteras otra vez. Tecla:
 PAUSED = PAUSA
 Continue = Continuar
 Retry Chapter = Reintentar capítulo
-GAME OVER = FIN DEL JUEGO
+GAME OVER = GAME OVER
 Not in a game: Exit to the main menu to change it = No durante una partida: sal al menú principal para cambiarlo
 Online: the host's settings are used in this game = En línea: se usan los ajustes del anfitrión en esta partida
 Mods apply when a game starts: Exit to the main menu to change them = Los mods se aplican al empezar una partida: sal al menú principal para cambiarlos
@@ -1302,8 +1306,8 @@ Player {n}: CPU Easy = Jugador {n}: CPU fácil
 Player {n}: CPU Normal = Jugador {n}: CPU normal
 Player {n}: CPU Hard = Jugador {n}: CPU difícil
 Player {n}: CPU Expert = Jugador {n}: CPU experto
-Continues {n} = Continúas {n}
-Press SPACE to skip Demo = Pulsa ESPACIO para saltar la demo
+Continues {n} = Continuar {n}
+Press SPACE to skip Demo = Pulsa ESPACIO para salir
 CHAPTER {n} CLEAR = CAPÍTULO {n} SUPERADO
 Thank you for playing. = Gracias por jugar.
 Chapter {n} is not finished yet. Thank you for playing. = El Capítulo {n} aún no está terminado. Gracias por jugar.
@@ -1324,9 +1328,9 @@ The game has no damage models for this part of it = El juego no tiene modelos de
 
 # ---- cut-scene subtitles: sub.<event>.<line> (the game's own line in the comment above each) ----
 # Sophie!?
-sub.1.1 = ¡¿Sophie?!
+sub.1.1 = ¡Sophie!
 # Run! Run!
-sub.2.1 = ¡Corre! ¡Corre!
+sub.2.1 = ¡Huye, huye!
 # Wait!
 sub.3.1 = ¡Espera!
 # We'll get you for this!
@@ -1334,105 +1338,105 @@ sub.4.1 = ¡Nos las pagarás!
 # Let's go in!
 sub.5.1 = ¡Entremos!
 # Sure, why not?
-sub.6.1 = Claro, ¿por qué no?
+sub.6.1 = ¡Claro! ¿Por qué no?
 # This is terrible!!
-sub.7.1 = ¡¡Esto es terrible!!
+sub.7.1 = ¡Es terrible!
 # That voice!!
-sub.8.1 = ¡¡Esa voz!!
+sub.8.1 = Esa voz...
 # Sophie, are you ok?
-sub.9.1 = Sophie, ¿estás bien?
+sub.9.1 = Sophie... ¿Te encuentras bien?
 # It's a dead end!
-sub.10.1 = ¡Es un callejón sin salida!
+sub.10.1 = Por aquí no se puede seguir.
 # Ah! It's locked.
-sub.11.1 = ¡Ah! Está cerrada.
+sub.11.1 = ¡Maldita sea! Está cerrada.
 # This must be the Security card.
-sub.12.1 = Esta debe ser la tarjeta de seguridad.
+sub.12.1 = Esta debe ser la tarjeta de acceso.
 # It's too late.
-sub.13.1 = Es demasiado tarde.
+sub.13.1 = Demasiado tarde...
 # Curien!!
-sub.14.1 = ¡¡Curien!!
+sub.14.1 = ¡Curien!
 # After him!!
-sub.15.1 = ¡¡Tras él!!
+sub.15.1 = ¡Sigámosle!
 # I'll stop him!
-sub.16.1 = ¡Yo lo detendré!
+sub.16.1 = ¡Le detendré!
 # Better be ready, Curien!
-sub.17.1 = ¡Prepárate, Curien!
+sub.17.1 = Será mejor que te prepares, Curien.
 # I'll get you, Curien!
 sub.18.1 = ¡Te atraparé, Curien!
 # We won't let you have it your way, Curien!
-sub.19.1 = ¡No dejaremos que te salgas con la tuya, Curien!
+sub.19.1 = No permitiremos que te salgas con la tuya, Curien.
 # Ok Curien, now it's your turn!
-sub.20.1 = ¡Muy bien Curien, ahora es tu turno!
+sub.20.1 = Es tu turno, Curien.
 # Don't worry, he'll pay for this.
-sub.21.1 = Tranquila, pagará por esto.
+sub.21.1 = No te preocupes. Pagarán por ello.
 # There's no way out Curien!
-sub.22.1 = ¡No tienes salida, Curien!
+sub.22.1 = No tienes escapatoria, Curien.
 # But you will never,
-sub.23.1 = Pero nunca,
+sub.23.1 = Pero no podrás escapar
 # ever defeat me!
-sub.24.1 = ¡jamás me vencerán!
+sub.24.1 = a tu destino.
 # Say hello to my masterpiece!
-sub.25.1 = ¡Saluden a mi obra maestra!
+sub.25.1 = ¡Saluda a mi obra maestra!
 # What happened?
-sub.26.1 = ¿Qué pasó?
+sub.26.1 = ¿Qu..qué ha pasado?
 # Why don't you follow my instructions?
-sub.26.2 = ¿Por qué no siguen mis instrucciones?
+sub.26.2 = ¿Por qué no me obedeces?
 # This is the warning from Dr.Curien.
 sub.27.1 = Esta es la advertencia del Dr. Curien.
 # Stay away from this house! Or else....
 sub.28.1 = ¡Aléjense de esta casa! O si no....
 # Nobody leaves here alive!
-sub.29.1 = ¡Nadie sale vivo de aquí!
+sub.29.1 = ¡No saldréis de aquí con vida!
 # This is as far as you go!
-sub.30.1 = ¡Hasta aquí llegaron!
+sub.30.1 = ¡Nadie saldrá de aquí con vida!
 # I'll finish you here!
-sub.31.1 = ¡Acabaré con ustedes aquí!
+sub.31.1 = ¡Aquí termina tu aventura!
 # I'll finish you here!
-sub.32.1 = ¡Acabaré con ustedes aquí!
+sub.32.1 = ¡Aquí termina tu aventura!
 # Who are you?
-sub.33.1 = ¿Quién eres?
+sub.33.1 = ¿Quién eres tú...
 # I shall destroy everything.
-sub.34.1 = Lo destruiré todo.
+sub.34.1 = ¡Os destruiré a todos!
 # Unlocked.
 sub.35.1 = Abierto.
 # Unlocked.
 sub.36.1 = Abierto.
 # Others are still inside. Save them.
-sub.37.1 = Aún hay otros dentro. Sálvenlos.
+sub.37.1 = Aún hay gente dentro. ¡Sálvelos!
 # Thank you!! Take this.
-sub.42.1 = ¡¡Gracias!! Tomen esto.
+sub.42.1 = ¡Gracias! Aquí tienes.
 # Thank you!! Take this.
-sub.43.1 = ¡¡Gracias!! Tomen esto.
+sub.43.1 = ¡Gracias! Aquí tienes.
 # You can go up stairs from that room.
-sub.44.1 = Desde esa sala pueden subir.
+sub.44.1 = Por allí se puede subir.
 # They're still up stairs.
-sub.45.1 = Aún están arriba.
+sub.45.1 = ¡Hay más gente arriba!
 # Use this.
-sub.46.1 = Usen esto.
+sub.46.1 = ¡Usa esto para salir!
 # Rogan, it's you!
 sub.49.1 = ¡Rogan, eres tú!
 # I was so scared!
-sub.50.1 = ¡Tenía tanto miedo!
+sub.50.1 = Estaba tan asustada...
 # Thank you.
-sub.51.1 = Gracias.
+sub.51.1 = ¡Gracias!
 # You must stop Curien.
-sub.52.1 = Deben detener a Curien.
+sub.52.1 = Hay que detener a Curien...
 # Or else, something terrible will happen.
-sub.52.2 = O pasará algo terrible.
+sub.52.2 = o se apoderará del mundo.
 # I must compliment you,
-sub.54.1 = Debo felicitarlos,
+sub.54.1 = Te felicito...
 # I didn't think you could make it this far.
-sub.54.2 = No creí que llegaran tan lejos.
+sub.54.2 = Nunca pensé que llegarías tan lejos.
 # However, this is it!
-sub.55.1 = ¡Pero hasta aquí llegaron!
+sub.55.1 = ¡Ahora veamos...
 # Let's see how good you really are!
-sub.56.1 = ¡Veamos qué tan buenos son de verdad!
+sub.56.1 = ...si puedes conmigo!
 # I must admit,
-sub.57.1 = Debo admitir,
+sub.57.1 = Admito...
 # I really respect your consistancy.
-sub.58.1 = que respeto de verdad su constancia.
+sub.58.1 = ...que tu perseverancia es admirable.
 # I really respect your consistancy.
-sub.59.1 = que respeto de verdad su constancia.
+sub.59.1 = ...que tu perseverancia es admirable.
 # Up.
 sub.60.1 = Arriba.
 # Down.
@@ -1440,27 +1444,27 @@ sub.61.1 = Abajo.
 # Everything is over....
 sub.62.1 = Todo ha terminado....
 # I have no thing more to lose.
-sub.63.1 = Ya no tengo nada que perder.
+sub.63.1 = He perdido a Sophie...
 # However, I must go on.
-sub.64.1 = Pero debo seguir.
+sub.64.1 = ...pero debo seguir adelante.
 # Good bye, Curien....
 sub.65.1 = Adiós, Curien....
 # Mission completed.
-sub.66.1 = Misión cumplida.
+sub.66.1 = Todo ha terminado.
 # Now, on to the next mission.
-sub.67.1 = Ahora, a la siguiente misión.
+sub.67.1 = Hemos cumplido con nuestro deber.
 # Good bye, Curien.
 sub.68.1 = Adiós, Curien.
 # I guess everything's over.
-sub.69.1 = Supongo que todo terminó.
+sub.69.1 = Todo ha terminado...
 # I guess so.
-sub.70.1 = Supongo que sí.
+sub.70.1 = Eso espero...
 # Shall we go now?
 sub.71.1 = ¿Nos vamos?
 # You haven't seen....
-sub.72.1 = Aún no han visto....
+sub.72.1 = Esto no debería...
 # anything yet!!
-sub.73.1 = ¡¡nada!!
+sub.73.1 = haber ocurrido.
 # !!
 sub.74.1 = ¡¡!!
 # !?
@@ -1468,33 +1472,73 @@ sub.75.1 = ¡¿?!
 # Are you ok?
 sub.76.1 = ¿Estás bien?
 # Nobody gives me instructions.
-sub.77.1 = Nadie me da instrucciones.
+sub.77.1 = Nadie me da órdenes.
 # Farewell Sophie....
-sub.78.1 = Adiós, Sophie....
+sub.78.1 = Hasta siempre, Sophie...
 # Sophie!!
-sub.79.1 = ¡¡Sophie!!
+sub.79.1 = ¡Sophie!
 # Sophie!
 sub.80.1 = ¡Sophie!
 # Sophie....
 sub.81.1 = Sophie....
 # This is terrible!!
-sub.82.1 = ¡¡Esto es terrible!!
+sub.82.1 = ¡Es terrible!
 # That voice!!
-sub.83.1 = ¡¡Esa voz!!
+sub.83.1 = Esa voz...
 # It's a dead end!
-sub.84.1 = ¡Es un callejón sin salida!
+sub.84.1 = Por aquí no se puede seguir.
 # Ah! It's locked.
-sub.85.1 = ¡Ah! Está cerrada.
+sub.85.1 = ¡Maldita sea! ¡Está cerrada!
 # This must be the Security card.
-sub.86.1 = Esta debe ser la tarjeta de seguridad.
+sub.86.1 = Esta debe ser la tarjeta de acceso.
 # It's too late.
-sub.87.1 = Es demasiado tarde.
+sub.87.1 = Demasiado tarde...
 # Curien!!
-sub.88.1 = ¡¡Curien!!
+sub.88.1 = ¡Curien!
 # There's no way out Curien!
-sub.89.1 = ¡No tienes salida, Curien!
+sub.89.1 = ¡No tienes escapatoria, Curien!
 Dotted Edge = Borde punteado
 Smooth Edge = Borde liso
 Dark Edge = Borde oscuro
 Solid Mark = Marca sólida
 See-through = Translúcida
+Voice = Voces
+Spanish = Español
+Optional: more of your own game copies for extra features. A box can stay empty. = Opcional: más copias tuyas del juego para funciones extra. Una casilla puede quedar vacía.
+Spanish PC copy (Doblaje español) = Copia española de PC (Doblaje español)
+Optional: your installed 2003 Spanish CD = Opcional: tu CD español de 2003 instalado
+More extras = Más extras
+Coming later = Próximamente
+Not available yet = Aún no disponible
+Clear = Quitar
+This is not the Spanish PC release = No es la versión española de PC
+Unpacking the game from the CD's cabinets ... = Descomprimiendo el juego de los archivos CAB del CD ...
+The game on this CD could not be unpacked = No se pudo descomprimir el juego de este CD
+This CD keeps the game in cabinet files: install cabextract (or bsdtar), or install the game from the CD and drop the installed folder here. = Este CD guarda el juego en archivos CAB: instala cabextract (o bsdtar), o instala el juego desde el CD y suelta aquí la carpeta instalada.
+Install the game from the CD and drop the installed folder here. = Instala el juego desde el CD y suelta aquí la carpeta instalada.
+Not a usable Spanish copy: it will not be used = No es una copia española utilizable: no se usará
+You can go on without it: everything else works, only the Spanish voices and pictures stay off. = Puedes seguir sin ella: todo lo demás funciona, solo las voces y las imágenes en español quedan desactivadas.
+Drop the installed Spanish game, or its CD image, here. = Suelta aquí el juego español instalado o su imagen de CD.
+This box takes the 2003 Spanish CD (Doblaje español). Your US / EU PC game goes on the Game files page. = Esta casilla es para el CD español de 2003 (Doblaje español). Tu juego de PC de EE. UU. / Europa va en la página Archivos del juego.
+The Spanish PC release (Doblaje español) = La versión española de PC (Doblaje español)
+Spanish voices: yes (Options > Audio > Voice: Auto with Español, or Spanish). = Voces en español: sí (Ajustes > Audio > Voces: Auto con Español, o Español).
+Spanish signs and cards: with the language Español and the PC models (the arcade models keep some in English). = Carteles y rótulos en español: con el idioma Español y los modelos de PC (los modelos arcade dejan algunos en inglés).
+The voices: Auto (the Spanish dub with the language Español, else English), English, or the Spanish dub (Doblaje español) of your Spanish PC copy, in every mode = Las voces: Auto (el doblaje español con el idioma Español; si no, inglés), inglés o el doblaje español (Doblaje español) de tu copia española de PC, en todos los modos
+The Spanish voices need your Spanish PC copy (the setup's Extras page: Options > System > Repair / Change Files) = Las voces en español necesitan tu copia española de PC (la página Extras de la instalación: Ajustes > Sistema > Reparar / cambiar archivos)
+The Spanish voices, signs and cards need your Spanish PC copy (the setup's Extras page). = Las voces, carteles y rótulos en español necesitan tu copia española de PC (la página Extras de la instalación).
+With the arcade models some signs and cards stay in English; choose PC models for the full Spanish version. = Con los modelos arcade algunos carteles y rótulos quedan en inglés; elige los modelos de PC para la versión española completa.
+Your PC game is the Spanish CD: it has red and green blood only (Blue / Purple / Yellow show red); add your US / EU PC copy for every colour. = Tu juego de PC es el CD español: solo tiene sangre roja y verde (Azul / Morado / Amarillo se ven rojos); añade tu copia de PC de EE. UU. / Europa para todos los colores.
+Reload Voice = Voz de recarga
+Off: no "Reload!" voice when you fire an empty gun (as the Spanish PC release); the RELOAD sign stays = Desactivada: sin la voz "Reload!" al disparar con el arma vacía (como la versión española de PC); el letrero RELOAD sigue
+# spanish3: the arcade models' note
+With the arcade models PRESS START BUTTON, FREE PLAY, the reload hint, two staff roll cards and the signs in the 3D world stay in English; choose PC models for those. = Con los modelos arcade quedan en inglés PRESS START BUTTON, FREE PLAY, la pista de recarga, dos fichas de los créditos y los carteles del mundo 3D; elige los modelos de PC para ellos.
+# spanish3: Boss Names
+Boss Names = Nombres de jefes
+Codenames Only = Solo nombres en clave
+Codenames Only: the boss cards show only the codename (TYPE 27), not the name, as the Spanish PC release = Solo nombres en clave: las fichas de los jefes muestran solo el nombre en clave (TYPE 27), no el nombre, como la versión española de PC
+# charsel: Character Select
+Character Select = Selección de personaje
+Before an Arcade or Chapter Select game each player picks a character (looks only: the arcade's rules) = Antes de una partida Arcade o Selección de capítulo cada jugador elige un personaje (solo el aspecto: las reglas del arcade)
+Default Characters = Personajes por defecto
+Player 1 = Jugador 1
+Player 2 = Jugador 2

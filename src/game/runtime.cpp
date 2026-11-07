@@ -851,7 +851,9 @@ void Runtime::frame_one()
         actorPreSkin_ = skinDraws;
         actorOwn_[0] = ownDraws, actorOwn_[1] = ownSkins;
     }
+    ending_head_fallback();   // charsel: the PC models: the ending's talking heads (draws only)
     actor_swap(ownDraws, ownSkins);
+    part_owner_check();   // charsel: HOTD_PART_CHECK (testing; draws only)
     bigHeadFrame(*this);   // cosmods: the Big Head mod (game/cosmods.h): the drawn heads scaled (draws only; off: nothing)
     creatureBloodFrame(*this);   // cosmods: Rainbow Blood's creatures (their hues; draws only; off: nothing kept)
     // developer (clips): HOTD_DEV_ROWS_DUMP=frame prints the colour rows then (call row:entry, b = a blood row), and

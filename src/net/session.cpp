@@ -247,8 +247,13 @@ bool decodeSettings(const uint8_t* p, size_t n, Settings& s)
         return false;
     if (t.bossMode == 1 || t.bossMode > 6 || (t.bossMode && t.pcMode))   // (Boss Mode: 2-6, never PC Mode)
         return false;
-    for (uint8_t c : t.pmChar)   // (PC Mode: every seat a character 1-19; an arcade game: all 0)
-        if (t.pcMode ? c < 1 || c > kPmCharMax : c != 0)
+    // (PC Mode: every seat a character 1-19; an arcade game: all 0, or with Character Select picks every seat's 1-19:
+    // protocol 21; never with Boss Mode)
+    const bool picks = t.pcMode || t.pmChar[0] != 0;
+    if (picks && t.bossMode)
+        return false;
+    for (uint8_t c : t.pmChar)
+        if (picks ? c < 1 || c > kPmCharMax : c != 0)
             return false;
     if (t.sonic > 3 || t.gameSpeed > 1 || (t.seats != 2 && t.seats != 4) || t.players > t.seats || t.autoReload > 1 || t.gameText > 1 ||
         t.boss4p > 200 || t.enemy4p > 200)
@@ -702,10 +707,10 @@ void Session::handle(const Address& from, const uint8_t* p, size_t n, Settings* 
             std::vector<uint8_t> pl;
             rxMax_ = 0, rxWindow_ = 0;
             // CONFIRM: version, "HOTD", the name's length (at most kMaxName), the name, the seats wanted (1 / 2), the
-            // two PC Mode characters (0-6), the game data's digests (ROMs, PC files: 8 bytes each)
+            // two characters (0-19), the game data's digests (ROMs, PC files: 8 bytes each)
             if (!openSealed(*pendingRx_, kDirC2S, p, n, t, pl, false) || t != kConfirm || pl.size() < 26 ||
                 get16(pl.data()) != kProtocol || std::memcmp(pl.data() + 2, "HOTD", 4) != 0 || pl[6] > kMaxName ||
-                pl.size() != 26 + size_t(pl[6]) || pl[7 + pl[6]] < 1 || pl[7 + pl[6]] > 2 || pl[8 + pl[6]] > 6 || pl[9 + pl[6]] > 6) {
+                pl.size() != 26 + size_t(pl[6]) || pl[7 + pl[6]] < 1 || pl[7 + pl[6]] > 2 || pl[8 + pl[6]] > kPmCharMax || pl[9 + pl[6]] > kPmCharMax) {   // (charsel: 1-19 as protocol 20 says; was 6: a joiner with an extra character was refused as a wrong password)
                 ++failures();
                 refuse(from, kWrongCode);
                 log("refused " + from.str() + ": wrong password (" + std::to_string(failures()) + " of " +

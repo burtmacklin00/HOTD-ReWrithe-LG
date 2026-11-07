@@ -54,6 +54,7 @@ struct MenuHooks {
     std::function<std::string()> crosshairDir;          // feat29: the folder players put their crosshair PNGs in (made)
     std::function<const assets::PcSprites*()> sightSprites;          // optui: the PC sprites (its sight; null: the arcade style drawn)
     std::function<void()> menuMusicChanged;             // the menu's song (the front end's cue)
+    std::function<bool()> spanishVoices;                // spanish: a Spanish PC copy's voices are there (Audio > Voice)
     // rescrash: Video > Display Mode: the window's mode now (0 Windowed, 1 Borderless, 2 Fullscreen; util/resolution.h)
     // and into another one (applied at once, saved as the start's)
     std::function<int()> displayModeNow;

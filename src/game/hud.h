@@ -47,6 +47,10 @@ public:
     // bugs1 (#35, Options > Video "Hit Marks"): the hit marks (the blood / claw marks over the screen when a player is
     // hit) true see-through, as the 1998 PC port's Direct3D mode, instead of the arcade's stipple (every other pixel)
     bool translucentMarks = false;
+    // spanish3 (Options > Gameplay > Boss Names: Codenames Only, as the Spanish PC release): the bosses' title cards
+    // show only the codename ("TYPE 27", moved to where the name began), not "Chariot"; arcade and PC models, every
+    // language (the Spanish CD's own cards, "Guerrero" ..., stay as they are)
+    bool bossCodenames = false;
     // display2: widescreen: the per-player HUD (Runtime::cellSide) at the window's left / right edges, the rest of the
     // 2D picture centred over the 4:3 part (original 4:3: everything where the arcade's screen lies)
     bool anchorEdges = false;
@@ -246,7 +250,7 @@ private:
     bool tileExtend(const std::vector<uint8_t>& pic, int W, int H, int ww, int wh, int wideW, bool sidesOnly);
     std::vector<uint8_t> layerTiles_, wideBg_, wideTop_, wideExt_;
     void pcFadeDraw(float level, int ww, int wh);
-    void fillRect(const uint8_t rgb[3], int ww, int wh, int y0, int y1);   // window rows y0..y1 (top 0), opaque
+    void fillRect(const uint8_t rgb[3], int ww, int wh, int y0, int y1, int x0 = 0, int x1 = -1);   // window rows y0..y1 (top 0), columns x0..x1 (-1: all), opaque
     // widescreen: the window outside the 4:3 screen black (a 4:3 card; grey 1: white); sides: bit 0 the left, bit 1 the right
     void blackSides(int ww, int wh, float grey = 0.0f, int sides = 3, int gw = 0);   // (gw: the kept width; 0 the 4:3 screen's)
     // credits43: the ending's full-height 2D card (the staff roll's, GAME OVER) is up; rgba_: the 2D just drawn (W x H).
@@ -281,6 +285,28 @@ private:
     // the game area's left edge (the window's, or areaW's) relative to the picture's (W x H fitted to the window's
     // height, centred)
     float leftEdge(int W, int H, int ww, int wh) const { return float(areaW(ww, wh)) / 2.0f - float(W) * float(wh) / float(H) / 2.0f; }
+    // spanish3 (docs/spanish.md): Español with a Spanish PC copy and the arcade models: each arcade sprite whose PC
+    // picture (kArcadeToPcSprite) lies on a translated page of the Spanish BIGGER.VMC is drawn as that PC picture,
+    // scaled to the arcade's cells (PC 10 pixels a cell -> 8). spanishCut: the tiles without those sprites' cells
+    // (esCuts_: the sprites, rebuilt each call; `tiles` itself when none); composeEs: Arcade2D::compose of `layers`
+    // (bit n: layer n) with the PC pictures between the layers (a layer's pictures over it, under the layers above)
+    struct EsCut { int layer, x, y, id; uint32_t clip; uint8_t side; bool high; };
+    std::vector<EsCut> esCuts_;
+    std::vector<uint8_t> tilesEs_, esLayer_, esPc_;
+    // the arcade sprites drawn so (their PC picture differs from the US one: words, not only the re-saved colours),
+    // found when the PC sprites are loaded with the Spanish pages (esLoaded_: that BIGGER.VMC; "" none)
+    std::vector<uint8_t> esSprite_;
+    std::map<int, std::vector<uint8_t>> esImg_;   // PC sprite -> its Spanish picture (PcSprites::image, the key cleared)
+    std::string esLoaded_ = "-", pcEs_ = "-", esTraced_;   // (pcEs_: the Spanish file pcSprites_ were loaded with)
+    void findEsSprites();
+    const uint8_t* spanishCut(const Runtime& rt, const uint8_t* tiles);
+    // spanish3 (bossCodenames): the boss name cards' first codename cell (0: not a name card) and the tiles with their
+    // codename moved over the name (tilesBoss_; `tiles` itself when none shows)
+    static int bossCodenameCell(uint32_t sprite);
+    const uint8_t* codenameTiles(const Runtime& rt, const uint8_t* tiles);
+    std::vector<uint8_t> tilesBoss_;
+    bool composeEs(const Runtime& rt, const uint8_t* tiles, bool high, unsigned layers, std::vector<uint8_t>& out,
+                   const uint8_t* side = nullptr, int want = 0);
     // the sights (firing range: one texture per player, built from its SeatSight by game/sight_art.cpp, again when the
     // settings, the models or the window height change): the arcade style (ours: the arcade has none, it is a light-gun
     // game), the PC's sprites 0x45E / 0x45F, the drawn ones (crisp window pixels), a custom set; its pixel (cx, cy) on

@@ -220,7 +220,7 @@ std::vector<std::string> programFiles(const fs::path& root)
         }
         if (!it->is_regular_file(ec)) continue;
         if (lr == lower(util::kGameExeName) || lr == lower(kInstallMarker)) continue;
-        const bool player = lr.rfind("data/arcade/", 0) == 0 || lr.rfind("data/pc/", 0) == 0 || lr.rfind("data/music/", 0) == 0 ||
+        const bool player = lr.rfind("data/arcade/", 0) == 0 || lr.rfind("data/pc/", 0) == 0 || lr.rfind("data/music/", 0) == 0 || lr.rfind("data/pc_spanish/", 0) == 0 ||
                             lr.rfind("data/steam/", 0) == 0 || lr == "data/hotd.zip";
         if (player && lower(it->path().extension().string()) != ".txt") continue;   // (the "put ... here" notes come along)
         if (player && it.depth() > 2) continue;
@@ -597,6 +597,36 @@ InstallResult installGame(const InstallOptions& o, const std::function<void(floa
         log("PC: " + std::to_string(found.size()) + " checked + " + std::to_string(extra) + " other game files imported into data\\pc");
     }
     writeManifest(dest, m);
+    // 3b. spanish2: the Spanish PC copy (the Extras page, optional): only what the Spanish features read (docs/spanish.md):
+    // SOUND\*.RBH (the dub and GAMESNDS.RBH's dubbed sample; O_VOC02.RBH also tells the Spanish release) and
+    // ART\STAGE1\CREATURE\BIGGER.VMC (the translated texture pages), into data\pc_spanish (the uninstaller's list)
+    if (!o.spanishPc.empty()) {
+        std::map<std::string, std::string> found;
+        const fs::path memo = dest / "settings" / "setup_pces_files.tsv";
+        say(progBase + dataSpan * 0.9f, "Checking the Spanish PC copy ...");
+        (void)checkPc(o.spanishPc, memo.string(), found);
+        fs::remove(memo, ec);
+        int n = 0;
+        for (const auto& [rel, real] : found) {
+            const std::string lr = lower(fs::path(rel).generic_string());
+            const bool want = (lr.rfind("sound/", 0) == 0 && lr.size() > 4 && lr.substr(lr.size() - 4) == ".rbh") ||
+                              lr == "art/stage1/creature/bigger.vmc";
+            if (!want) continue;
+            const fs::path out = dest / "data" / "pc_spanish" / fs::path(rel);
+            if ((n & 7) == 0) say(progBase + dataSpan * 0.91f, "Importing the Spanish " + rel);
+            ++n;
+            if (samePath(fs::path(real), out)) continue;
+            std::vector<uint8_t> d;
+            if (!pcfs::readFile(real, d) || !writeAll(out, d)) {
+                r.err = "Cannot import " + rel + " into " + out.string();
+                writeManifest(dest, m);
+                return r;
+            }
+            m.data.push_back("data/pc_spanish/" + fs::path(rel).generic_string());
+        }
+        log("Spanish PC copy: " + std::to_string(n) + " file(s) imported into data\\pc_spanish");
+        writeManifest(dest, m);
+    }
     // 4. the CD music (optional)
     if (o.music) {
         int n = 0;
@@ -616,7 +646,8 @@ InstallResult installGame(const InstallOptions& o, const std::function<void(floa
         std::ifstream in(o.settingsFrom);
         std::ofstream out(dest / "settings" / "launcher.ini");
         for (std::string line; std::getline(in, line);)
-            if (line.rfind("arcade=", 0) != 0 && line.rfind("pc=", 0) != 0) out << line << "\n";
+            if (line.rfind("arcade=", 0) != 0 && line.rfind("pc=", 0) != 0 && line.rfind("spanishpc=", 0) != 0)   // (spanish2: data\pc_spanish found by itself)
+                out << line << "\n";
         log("settings: carried over from " + o.settingsFrom);
     }
     // 6. the game exe with the PC game's icon, the shortcuts, Apps & features

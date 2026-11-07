@@ -47,28 +47,49 @@ template <class T> T rd(const std::vector<uint8_t>& b, size_t off)
 // order), read once per file and set of pages: the menu loads the sprites twice (its MENU and TITLE colours) and the
 // HUD once more (~75 ms of reading each; a zipped install inflated the 55 MB file each time)
 struct RawPages {
-    std::string path;
+    std::string path, spanish;   // (spanish2: the Spanish text pages' file, pcSpanishTextures)
     std::set<int> pages;
     bool ok = false;   // the file is there and a VMC
     std::vector<std::pair<int, std::vector<uint8_t>>> list;
 };
+// the pages of one VMC file into r->list; false: not a VMC
+bool readRawPages(const std::string& path, const std::set<int>& pages, RawPages* r);
 std::shared_ptr<const RawPages> rawPages(const std::string& path, const std::set<int>& pages)
 {
     static std::mutex lock;
     static std::shared_ptr<const RawPages> last;
     std::lock_guard<std::mutex> g(lock);
-    if (last && last->path == path && last->pages == pages)
+    const std::string& es = pcSpanishTextures();
+    if (last && last->path == path && last->pages == pages && last->spanish == es)
         return last;
     auto r = std::make_shared<RawPages>();
     r->path = path;
+    r->spanish = es;
     r->pages = pages;
+    if (!readRawPages(path, pages, r.get()))
+        return r;   // (not kept: tried again next time)
+    r->ok = true;
+    // spanish2: the translated text pages from the Spanish copy (pc_loader.h), the others as read
+    std::set<int> want;
+    for (int p : pages)
+        if (pcSpanishTextPage(p)) want.insert(p);
+    RawPages sp;
+    if (!es.empty() && es != path && !want.empty() && readRawPages(es, want, &sp))
+        for (auto& [n, body] : sp.list)
+            for (auto& e : r->list)
+                if (e.first == n) e.second = std::move(body);
+    last = r;
+    return r;
+}
+
+bool readRawPages(const std::string& path, const std::set<int>& pages, RawPages* r)
+{
     const std::unique_ptr<std::istream> stream = pcfs::openStream(path);
     std::istringstream none;
     std::istream& f = stream ? *stream : none;
     char hdr[12];
     if (!f.read(hdr, 12) || std::memcmp(hdr, "PIFF", 4) != 0 || std::memcmp(hdr + 8, "VVTP", 4) != 0)
-        return r;   // (not kept: tried again next time)
-    r->ok = true;
+        return false;
     const int shift = pcVmcPageShift(path);   // pchotfix: the Japanese release's page numbers (pc_loader.h)
     std::vector<uint8_t> body;
     for (;;) {
@@ -102,8 +123,7 @@ std::shared_ptr<const RawPages> rawPages(const std::string& path, const std::set
             break;   // the file ends inside the page
         r->list.emplace_back(int(number), body);
     }
-    last = r;
-    return r;
+    return true;
 }
 
 } // namespace
@@ -445,6 +465,16 @@ bool PcSprites::drawable(int id) const
         if (!pages_.count(p.page))
             return false;
     return true;
+}
+
+bool PcSprites::onPage(int id, bool (*pred)(int)) const
+{
+    if (id <= 0 || size_t(id) >= sprites_.size())
+        return false;
+    for (const Piece& p : sprites_[size_t(id)].pieces)
+        if (pred(p.page))
+            return true;
+    return false;
 }
 
 std::vector<uint8_t> PcSprites::image(int id) const

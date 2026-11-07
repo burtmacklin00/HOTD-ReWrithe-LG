@@ -503,6 +503,16 @@ public:
     int pcSeats = 2;                        // 2: the PC's two panels; 4: the four panels
     bool pcReady[4] = {}, pcCpu[4] = {};
     bool pcModeAllReady() const;
+    // charsel (user 2026-11-06): the Character Select of Arcade / Chapter Select (looks only), the classic menu style's
+    // cards: screen 16 with charSel set: "Character Select", per player in the game a card (one player: the 1P card
+    // front and centre; two: side by side; Players 3 / 4: P1 / P2's cards, the others keep Rogan 2 / G 2) with the
+    // portrait and the name between the arrows (no ratings: the arcade's rules), Start, Default Characters, Exit.
+    // onCharSelectStart(defaults): the picks in pcChars[0..charSelPlayers) (defaults: none, the arcade's Rogan / G)
+    void charSelectOpen(int players);
+    bool charSel = false;
+    int charSelPlayers = 1;
+    std::function<void(bool)> onCharSelectStart;
+    void charSelectPanel(Widget* panel, int p);
     // Boss Mode (THOTD.EXE 0x422B90, screen 7; from the main menu's Boss Mode): background 0xA8, "Boss Mode" (0x42, white
     // 32, centred) at the top, the five boss pictures as buttons (0xE3..0xE7, hovered 0xE8..0xEC; flags 0x100060):
     // Chariot top left (16, 16), Hangedman top right (0x270 - w, 16), Hermit bottom left (16, 0x1D0 - h), Magician

@@ -46,6 +46,12 @@ bool isRoganCoat(const DrawModel& d, uint32_t ownModel)
 {
     return d.model != ownModel && d.model >= 0xB5 && d.model < 0x119 + 0x32;
 }
+// the ending's character bodies by their frame routine (ending.cpp): player 1's (alone 0x58CC0 / of two 0x59120) -> 0,
+// player 2's (0x596F0 / 0x59B10) -> 1, else -1
+int endingBodySeat(uint32_t routine)
+{
+    return routine == 0x58CC0u || routine == 0x59120u ? 0 : routine == 0x596F0u || routine == 0x59B10u ? 1 : -1;
+}
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -570,7 +576,7 @@ int Runtime::coop4_scene_type(int from, int s)
 {
     if (const int t = actorSwap[2 + (s & 1)]; t >= 0 && (t == from || !coop4_part_map(from, t).empty()))
         return t;   // actorswap: the cut-scene viewer's pick for this seat (a part tree that differs: the usual body)
-    if (pm_on()) {
+    if (chars_on()) {
         if (mem.u32(port::coop4::kMagic) == 0x34504334u && mem.at<uint8_t>(port::coop4::kBodySetB) != 0)
             return -1;
         const int t = pm_body_type(2 + s);
@@ -1252,16 +1258,13 @@ void Runtime::actor_swap(size_t nDraw, size_t nSkin)
     nDraw = std::min(nDraw, drawList.size());
     nSkin = std::min(nSkin, skinDraws.size());
     // the players' bodies; the ending's are its own tasks (ending_p1_b_frame 0x59120, ending_p2_b_frame 0x59B10, as
-    // coop4_scene_variant finds them)
+    // coop4_scene_variant finds them; charsel: the one-player ending's too, ending_p1_a_frame 0x58CC0 /
+    // ending_p2_a_frame 0x596F0: Dr. Curien alone in the ending was drawn as the Researcher he plays)
     uint32_t bodies[2] = {mem.at<port::a::Player>(G::players, 0).body.a, mem.at<port::a::Player>(G::players, 1).body.a};
     for (size_t i = 0; i < nDraw; ++i)
-        if (const uint32_t b = drawList[i].body; b != 0) {
-            const uint32_t r = mem.u32(b);
-            if (r == 0x59120u)
-                bodies[0] = b;
-            else if (r == 0x59B10u)
-                bodies[1] = b;
-        }
+        if (const uint32_t b = drawList[i].body; b != 0)
+            if (const int s = endingBodySeat(mem.u32(b)); s >= 0)
+                bodies[s] = b;
     std::vector<DrawModel> dOut;
     std::vector<SkinDraw> sOut;
     uint32_t swapped[2] = {0, 0};
@@ -1312,7 +1315,7 @@ void Runtime::actor_pm_sync()
         return;
     int want[4] = {-1, -1, -1, -1};
     bool any = false;
-    for (int p = 0; p < 4 && pcmode; ++p)
+    for (int p = 0; p < 4 && chars_on(); ++p)
         if (const PmExtra* x = pm_extra(pm_char[p]))
             want[p] = x->type, any = true;
     if (!any && !actorPm)
@@ -1359,6 +1362,118 @@ void Runtime::actor_areas_update()
         }
 }
 
+// charsel: with the PC models the ending's talking heads (Rogan's 0x748 .. 0x757, G's 0x282 .. 0x291: ending.cpp
+// ending_body_hand) have no model of their own in the 1998 PC files, so the talking body was drawn without a head
+// (seen 2026-11-06 in the 2-player ending, "I guess everything's over", also with the default characters): that
+// body's own closed head (0x2B / 0x281) in their place. Draws only (the part's model in the address space stays the
+// arcade's: both model sets run alike, online too)
+void Runtime::ending_head_fallback()
+{
+    if (!pcModels || !modelAvailable)
+        return;
+    for (DrawModel& d : drawList) {
+        if (d.body == 0 || endingBodySeat(mem.u32(d.body)) < 0)
+            continue;
+        const uint32_t closed = d.model >= 0x748 && d.model <= 0x757 ? 0x2Bu : d.model >= 0x282 && d.model <= 0x291 ? 0x281u : 0;
+        if (closed != 0 && !modelAvailable(d.model) && modelAvailable(closed))
+            d.model = closed;
+    }
+}
+
+// charsel: the part-ownership check (runtime.h part_owner_check; HOTD_PART_CHECK=1, after actor_swap)
+void Runtime::part_owner_check()
+{
+    static const bool on = std::getenv("HOTD_PART_CHECK") != nullptr;
+    if (!on || !log)
+        return;
+    auto owned = [&](int type) -> const std::set<uint32_t>& {
+        auto it = partOwned_.find(type);
+        if (it != partOwned_.end() && !it->second.empty())
+            return it->second;
+        std::set<uint32_t>& s = partOwned_[type];
+        std::function<void(uint32_t, int)> walk = [&](uint32_t part, int depth) {
+            if (part == 0 || depth > 16)
+                return;
+            if (const uint32_t m = mem.u32(part); m != 0)
+                s.insert(m);
+            const int32_t n = mem.at<int32_t>(part + 0x18);
+            for (int32_t i = 0; i >= 0 && i < n && n <= 32; ++i)
+                walk(mem.u32(part + 0x1C + 4 * uint32_t(i)), depth + 1);
+        };
+        const uint32_t h = type >= 0 && type < 100 ? mem.u32(G::creature_type_headers + 4 * uint32_t(type)) : 0;
+        const int32_t n = h ? mem.at<int32_t>(h + 0x18) : 0;
+        for (int32_t i = 0; i >= 0 && i < n && n <= 32; ++i)
+            walk(mem.u32(h + 0x1C + 4 * uint32_t(i)), 1);
+        auto range = [&](uint32_t a, uint32_t b) { for (uint32_t m = a; m <= b; ++m) s.insert(m); };
+        if (type == 2 || (type >= 13 && type <= 15)) {
+            // the players' gun hands, shared by the four player types (body_part_draw_hook: the empty hand, the
+            // reload, the torch / gun poses, the opening's gun frames f + 0x4A ..; the gun alone)
+            for (uint32_t m : {0x716u, 0x36Bu, 0x2B3u, 0x71Bu, kPlayerGunHand, kGunOnlyKey})
+                s.insert(m);
+            range(0x4A, 0x54);
+        }
+        if (type == 2) {
+            range(0xB5, 0x119 + 0x31);   // his arcade coat
+            s.insert(0x2B), range(0x748, 0x757);   // the ending's talking head (ending_p1_*_frame)
+        }
+        if (type == 13)
+            range(0x281, 0x291);   // the ending's talking head (ending_p2_*_frame)
+        if (type == 60)
+            range(0x1B52, 0x1B60);   // body_part_draw_hook's talking heads
+        if (type == 78)
+            range(0x1CEF, 0x1CFD);
+        if (type == 34)
+            range(0x60E, 0x61F), s.insert(0x631);   // Sophie's heads (looking, talking, eyes closed) and hand (body_hook_special)
+        return s;
+    };
+    uint32_t bodies[2] = {mem.at<port::a::Player>(G::players, 0).body.a, mem.at<port::a::Player>(G::players, 1).body.a};
+    for (const DrawModel& d : drawList)
+        if (d.body != 0)
+            if (const int s = endingBodySeat(mem.u32(d.body)); s >= 0)
+                bodies[s] = d.body;
+    int drawnAs[2] = {-1, -1};
+    for (int p = 0; p < 2; ++p) {
+        if (bodies[p] == 0)
+            continue;
+        const int from = mem.at<int16_t>(bodies[p] + 0xCC);
+        const int to = actorSwap[p];
+        drawnAs[p] = to >= 0 && to != from && !coop4_part_map(from, to).empty() ? to : from;
+    }
+    const uint32_t path = mem.u32(G::camera_path);
+    auto flush = [&] {
+        if (partFrames_ != 0 && (partDrawn_[0] || partDrawn_[1]))
+            log("part check: path " + std::to_string(partPath_) + " frames " + std::to_string(partFrom_) + "-" +
+                std::to_string(partFrom_ + partFrames_ - 1) + ": P1 type " + std::to_string(partType_[0]) + " " +
+                std::to_string(partDrawn_[0]) + " parts " + std::to_string(partForeign_[0]) + " foreign, P2 type " +
+                std::to_string(partType_[1]) + " " + std::to_string(partDrawn_[1]) + " parts " +
+                std::to_string(partForeign_[1]) + " foreign (total foreign " + std::to_string(partTotalForeign_) + ", missing " + std::to_string(partMissing_) + ")");
+        partPath_ = path, partFrom_ = frameCount, partFrames_ = 0;
+        partDrawn_[0] = partDrawn_[1] = partForeign_[0] = partForeign_[1] = 0;
+    };
+    if (path != partPath_ || drawnAs[0] != partType_[0] || drawnAs[1] != partType_[1] || partFrames_ >= 600)
+        flush();
+    partType_[0] = drawnAs[0], partType_[1] = drawnAs[1];
+    ++partFrames_;
+    for (const DrawModel& d : drawList) {
+        if (d.body == 0 || d.shadow)
+            continue;
+        const int p = d.body == bodies[0] ? 0 : d.body == bodies[1] ? 1 : -1;
+        if (p < 0 || drawnAs[p] < 0)
+            continue;
+        ++partDrawn_[p];
+        if (pcModels && modelAvailable && d.model != 0 && !modelAvailable(d.model) && ++partMissing_ <= 20)   // (no model to draw: a part missing)
+            log("part check MISSING: frame " + std::to_string(frameCount) + " P" + std::to_string(p + 1) + " model " + std::to_string(d.model));
+        if (d.model == 0 || owned(drawnAs[p]).count(d.model))   // (model 0: nothing drawn)
+            continue;
+        ++partForeign_[p];
+        if (++partTotalForeign_ <= 40)
+            log("part check FOREIGN: frame " + std::to_string(frameCount) + " P" + std::to_string(p + 1) + " drawn as type " +
+                std::to_string(drawnAs[p]) + " (body type " + std::to_string(mem.at<int16_t>(bodies[p] + 0xCC)) +
+                ") model 0x" + [&] { char b[16]; std::snprintf(b, sizeof b, "%X", d.model); return std::string(b); }() +
+                " joint " + std::to_string(d.joint));
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // carchars: the opening car's seats (runtime.h). player_char_props_draw notes each seat's car-model draw
 // (car_seat_mark); after the frame's logic, a seat whose character has no car model of its own gets the character's
@@ -1388,7 +1503,7 @@ int Runtime::car_seat_type(int seat)
         const int t = actorSwap[seat];
         return t < 0 || t == own ? -1 : t;
     }
-    if (!pm_on())
+    if (!chars_on())
         return -1;
     const int c = pm_seat_char(seat);
     if (c <= 0)

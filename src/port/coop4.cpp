@@ -26,6 +26,7 @@ template <class P> void Game<P>::coop4_reset(int playersInPlay, int lives)
                 pl.state = 5;
                 pm_join_char(p);
                 pl.lives = pl.lives_saved = pm_on() ? pm_table(pm_seat_char(p)).hp : lives;   // PC Mode: the character's
+                pm_lives_most(pl.lives);   // (#62)
                 pl.score = 0;
                 pl.rounds = pm_full_rounds(p);
                 pl.empty = 0;
@@ -147,6 +148,7 @@ template <class P> void Game<P>::coop4_seat_start(int p)
         pm_join_char(p);
         pl.lives = pl.lives_saved = pm_on() ? int32_t(pm_table(pm_seat_char(p)).hp)
                                             : int32_t(mem.at<uint8_t>(0x51F5B1));   // the lives setting's start lives
+        pm_lives_most(pl.lives);   // (#62)
         pl.rounds = pm_full_rounds(p);
         pl.empty = 0;
         mem.at<uint8_t>(coop4::kSeatsJoined) = uint8_t(mem.at<uint8_t>(coop4::kSeatsJoined) | (1u << p));

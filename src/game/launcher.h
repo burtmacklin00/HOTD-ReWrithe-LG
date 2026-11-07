@@ -210,6 +210,12 @@ struct LaunchConfig {
     std::string pc;              // the PC game's folder or a .zip of it (pczip)
     int models = 0;              // 0 arcade, 1 PC (world and every model the PC release has)
     int sound = 0;               // 0 auto (the arcade sound board; the PC sound without its ROMs), 1 arcade (the sound board), 2 PC
+    // spanish (docs/spanish.md): the voices, 0 Auto (spanish2: the Spanish dub while the language is Spanish), 1 Spanish
+    // (the Spanish release's dub, from spanishVoiceDir: a Spanish PC copy as `pc`, as `spanishPc`, or in the package's
+    // data\pc_spanish), 2 English; voice= / spanishpc= (the setup's Extras page sets spanishpc=)
+    int voice = 0;
+    bool reloadVoice = true;     // spanish: Audio > Reload Voice (the "Reload!" of an empty gun; reloadvoice=)
+    std::string spanishPc;
     int players = 1;             // in play at the start (the other joins with its start button); 3 / 4: the experimental
                                  // 4P mode (docs/coop4.md)
     int p2Input = 0;             // 0 a second mouse, else the keyboard; 1 the keyboard only; 2 a gamepad; 3 a light gun
@@ -320,6 +326,10 @@ struct LaunchConfig {
     // actors2: the cut-scene viewer's Actors (game/scene_view.h SceneView::castString, "rogan,g,p3,p4"); launcher.ini
     // scenecast= (empty: every part its own)
     std::string sceneCast;
+    // charsel (user 2026-11-06): the Character Select of Arcade / Chapter Select (cosmetic: the seats' bodies in the
+    // cut-scenes, the ending, the car), "1=sophie,2=g" (seat=character key or number, main.cpp charPicksParse; empty:
+    // the arcade's Rogan / G); launcher.ini characters=, --char
+    std::string characters;
     bool autoReload = false;     // hud3: an empty gun reloads by itself (as a shot off the screen; not in the originals)
     bool updateCheck = false;    // Options > System > Check for Updates (util/update_check.h). Light Gun Edition: off
                                  // by default and its own key (lgupdatecheck=), so an old updatecheck=1 never pops up
@@ -358,6 +368,8 @@ struct LaunchConfig {
     std::string lastVersion;
     bool attractGore = true;     // Gameplay "Attract Gore": the attract demo blows parts off as the 1998 PC (port::gAttractGore)
     bool scoreDisplay = false;   // scoredisp: the arcade's score line (title code LLLRR's SCORE:%05d) in every offline game
+    bool bossCodenames = false;  // spanish3: Gameplay > Boss Names: Full (false) / Codenames Only (the Spanish CD's cards; bossnames=)
+    bool charSelect = false;     // charsel: Gameplay > Character Select (the classic menu style: the cards before an Arcade / Chapter Select game; charselect=)
     // skipfix (user 2026-10-27): the cut-scenes' hold-to-skip (main.cpp; only scenes the arcade cannot skip, the bars
     // up); Gameplay "Hold to Skip Cut-scenes", launcher.ini holdskip=
     bool holdSkip = true;
@@ -478,7 +490,7 @@ class Launcher {
 public:
     enum class Result { None, Start, Quit };
     enum class Mode { Setup, Repair, WhatsNew, Update };
-    enum Page { kWelcome, kFiles, kOptions, kInstall, kDone, kPages };
+    enum Page { kWelcome, kFiles, kExtras, kOptions, kInstall, kDone, kPages };   // (spanish2: kExtras, the optional copies)
     ~Launcher();
     bool init(std::string& err);
     void handle(const SDL_Event& e, SDL_Window* window);
@@ -521,7 +533,7 @@ public:
     void testZone(int which, const std::string& path, int state, const std::string& line, const std::vector<std::string>& more);
     void testInstallProgress(float f, const std::string& line);
     void testDone(const std::string& dest);
-    // a zone's source checked on its own thread (0 arcade, 1 PC); its state (1 while it runs)
+    // a zone's source checked on its own thread (0 arcade, 1 PC, 2 the Spanish PC copy); its state (1 while it runs)
     void checkZone(int which, const std::string& path);
     int zoneState(int which) const;
     // (testing, HOTD_ZONE_TEST) the box's verdict as one line: state, line, the lines under it, the music found
@@ -572,14 +584,14 @@ private:
     bool checkRequested_ = false, startAfterCheck_ = false;
     std::mutex dialogMutex_;
     std::string dialogResult_;
-    int dialogTarget_ = 0;       // 1 arcade, 2 pc, 3 the install folder
+    int dialogTarget_ = 0;       // 1 arcade, 2 pc, 3 the install folder, 4 the Spanish PC copy
     int step_ = kWelcome;
     std::string installDir_;
     bool optDesktop_ = true, optStartMenu_ = true, optSteam_ = false, optMusic_ = true;
     // the zones' checks (one thread each) and the install / the update download (their own threads)
     mutable std::mutex zoneMutex_;
-    Zone zone_[2];
-    std::thread zoneThread_[2];
+    Zone zone_[3];               // (spanish2: 2 = the Extras page's Spanish PC copy, optional)
+    std::thread zoneThread_[3];
     std::thread installThread_;
     std::atomic<int> installState_{0};   // 0 not started, 1 running, 2 done, 3 failed
     std::atomic<float> installFrac_{0};
@@ -594,6 +606,7 @@ private:
     void startInstall();
     Zone zoneCopy(int which) const { std::lock_guard<std::mutex> l(zoneMutex_); return zone_[which]; }
     bool zonesReady() const;
+    bool extrasReady() const;   // spanish2: the Extras page's boxes empty or accepted (none checking)
     void next(SDL_Window* window);
     void back();
 };
