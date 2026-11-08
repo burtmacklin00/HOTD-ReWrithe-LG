@@ -64,8 +64,9 @@ What this edition adds
 - Killer Mods (Options > Killer Mods tab; local games only, online games play as normal). Each shows "Killer
   Mod, by NF". When a game starts, the names of the mods that are on (Options > Mods and Killer Mods) show for 5 seconds.
   Only one mod can be on at a time (a Killer Mod or one of Options > Mods; Party Scoreboard aside): turning one on
-  turns the others off. Turn All Mods Off (top of both pages) switches everything off. The shotgun's shells are
-  red, the machine gun's rounds silver and the rocket green.
+  turns the others off. Turn All Mods Off (top of both pages) switches everything off. Each gun's bullets have
+  their own colour: handgun gold, SMG blue, assault rifle orange, double pistols purple, shotgun red,
+  Magician's Hand pink, machine gun silver, rocket green.
   - Arsenal Mode: the middle button steps through Handgun, SMG, Assault Rifle, Double Pistols, Shotgun, Magician's
     Hand, Machine Gun and Rocket Launcher, each player their own, with Survival Mode's guns, sounds and HUD. Ammo never
     runs out, for any gun (one rocket a load); each rocket blows up every zombie on the screen in a big explosion.

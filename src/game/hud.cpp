@@ -3143,8 +3143,12 @@ void Hud::drawArsenalAmmo(const Runtime& rt, int ww, int wh)
     const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
     const int src = pc ? 1 : 0;
     // the bullets: the game's own picture, its brightness through the weapon's colour
-    static const uint8_t kTint[4][3] = {{255, 255, 255}, {215, 45, 35}, {205, 210, 220}, {70, 210, 70}};
-    for (int w = 1; w < 4; ++w) {
+    // (user 2026-11-08: "give them all a unique color"): 1 the shotgun's red, 2 the machine gun's silver, 3 the rocket's
+    // green, 4 the handgun's gold, 5 the SMG's blue, 6 the assault rifle's orange, 7 the double pistols' purple, 8 the
+    // Magician's Hand's pink
+    static const uint8_t kTint[9][3] = {{255, 255, 255}, {215, 45, 35}, {205, 210, 220}, {70, 210, 70}, {240, 200, 40},
+                                        {60, 140, 255}, {255, 130, 30}, {170, 80, 235}, {255, 90, 190}};
+    for (int w = 1; w < 9; ++w) {
         SeatImg& b = arsenalBullet_[w][src];
         if (!b.px.empty()) continue;
         b = spriteImg(mem, pc, pcSprites_, 0x10);

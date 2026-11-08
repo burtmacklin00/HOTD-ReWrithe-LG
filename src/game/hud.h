@@ -227,7 +227,7 @@ private:
     // menu font, centred, one a line, white and red in turn
     void drawModBanner(const Runtime& rt, int ww, int wh);
     int seatDy_[2] = {-0x25, -0x25};   // players 3 / 4's band offset as drawSeatHud placed it last
-    SeatImg arsenalBullet_[4][2];      // [weapon][arcade, PC]
+    SeatImg arsenalBullet_[9][2];      // [colour: Runtime::lgEngineTint][arcade, PC]
     SeatImg arsenalDigit_[4][10][2];   // [seat][digit][arcade, PC]
     // GitHub #25: players 1 / 2 with more than 5 lives: "x N" beside their one torch (the name entry's X 0x1AC and the
     // results' digits 0x181.., drawn as drawSeatHud draws its pieces: no game banks used)

@@ -403,12 +403,15 @@ public:
     // Arsenal Mode (each seat: 0 Pistol, 1 Shotgun, 2 Machine Gun, 3 Rocket Launcher); off: -1 for every seat
     int lgWeapon[4] = {-1, -1, -1, -1};
     // Light Gun Edition: the creator's weapons (Arsenal / Shotgun Mode / Machine Gun, not Survival): the colour of a
-    // seat's bullets (0 the game's own white, 1 the shotgun's red, 2 the machine gun's silver, 3 the rocket's green)
+    // seat's bullets (Hud::drawArsenalAmmo's colours; user 2026-11-08: every gun its own: the shotgun red, the machine
+    // gun silver, the rocket green, the handgun gold, the SMG blue, the assault rifle orange, the double pistols
+    // purple, the Magician's Hand pink)
     int lgEngineTint(int p) const
     {
         if (weapons.mode != Weapons::Arsenal || p < 0 || p >= 4) return 0;
+        static const int kOf[kWeapons] = {4, 5, 6, 7, 1, 8, 2, 3};   // (kPistol .. kRocket)
         const int w = weapons.seat[p].cur;
-        return w == kShotgun ? 1 : w == kMachine ? 2 : w == kRocket ? 3 : 0;
+        return w >= 0 && w < kWeapons ? kOf[w] : 0;
     }
     uint8_t lgLastRounds_[4] = {6, 6, 6, 6};
     void lg_weapon_next(int p);   // the middle button: the next weapon, its magazine full
