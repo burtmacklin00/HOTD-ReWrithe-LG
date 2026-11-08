@@ -364,6 +364,28 @@ struct LaunchConfig {
     bool bossRush = false;      // Boss Rush (launcher.ini bossrush=): Arcade = the four bosses back to back, lives carried on
     bool roulette = false;      // Weak-Point Roulette (launcher.ini roulette=): a zombie takes hits only on its glowing part (moves every 2 s)
     bool weaponSwitch = false; // Arsenal Mode (launcher.ini arsenal=): the middle button: Pistol > Shotgun > Machine Gun > Rocket Launcher, each player their own
+    // Light Gun Edition (user 2026-11-08: "only one can be enabled at a time to be safe"): one Killer Mod at a time
+    // (Party Scoreboard aside: only a screen at a chapter's end). The modes in the page's order: 0 Shotgun, 1 Free
+    // Fire, 2 Machine Gun, 3 Arsenal, 4 Hardcore, 5 One Shot Kill, 6 Hostage Crisis, 7 Weak Point, 8 Exploding Zombies,
+    // 9 Coin-Op Survival, 10 Flashlight, 11 Screen Filter, 12 Married. killerOn: the first one on (-1 none);
+    // killerSolo(k): every mode but k off (-1: all off; the Screen Filter's choice kept when k is 11)
+    int killerOn() const
+    {
+        const bool on[] = {shotgun, freeFire, machineGun, weaponSwitch, hardcore, suddenDeath, hostageCrisis,
+                           roulette, exploding, survival, flashlight, funLook != 0, married};
+        for (int k = 0; k < int(sizeof on / sizeof on[0]); ++k)
+            if (on[k]) return k;
+        return -1;
+    }
+    void killerSolo(int k)
+    {
+        shotgun = shotgun && k == 0, freeFire = freeFire && k == 1, machineGun = machineGun && k == 2;
+        weaponSwitch = weaponSwitch && k == 3, hardcore = hardcore && k == 4, suddenDeath = suddenDeath && k == 5;
+        hostageCrisis = hostageCrisis && k == 6, roulette = roulette && k == 7, exploding = exploding && k == 8;
+        survival = survival && k == 9, flashlight = flashlight && k == 10, married = married && k == 12;
+        if (k != 11) funLook = 0;
+        vampire = bossRush = false, turbo = 0;   // (removed modes: never on)
+    }
     // setup2: the version that last ran with these settings (launcher.ini lastversion=; another one: What's New once)
     std::string lastVersion;
     bool attractGore = true;     // Gameplay "Attract Gore": the attract demo blows parts off as the 1998 PC (port::gAttractGore)

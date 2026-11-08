@@ -817,48 +817,51 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
     case kCatKiller:
         // Light Gun Edition (user 2026-11-05: "Killer Mods"): the edition's own game modes, each with who made it under
         // its name as the Mods page's mods have (local games; online games are always played as normal)
+        // (user 2026-11-08: one at a time, to be safe: turning one on turns the others off; Party Scoreboard aside)
+        r.push_back({"One Killer Mod at a Time", []() { return std::string(); }, nullptr,
+                     "Turning a Killer Mod on turns the others off (Party Scoreboard can stay on with any of them)"});
         // Weapons
-        r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { c.shotgun = !c.shotgun; save(); },
+        r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { { const bool on = !c.shotgun; c.killerSolo(-1); c.shotgun = on; } save(); },
                      "the whole game with the shotgun (Survival Mode's): a spread of 6 pellets, 6 shells, a slower reload"});
         killerBy(r);
-        r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { c.freeFire = !c.freeFire; save(); },
+        r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { { const bool on = !c.freeFire; c.killerSolo(-1); c.freeFire = on; } save(); },
                      "unlimited ammo, no reloading (for young players and parties)"});
         killerBy(r);
-        r.push_back({"Machine Gun", [&c]() { return onOff(c.machineGun); }, [&c, save]() { c.machineGun = !c.machineGun; save(); },
+        r.push_back({"Machine Gun", [&c]() { return onOff(c.machineGun); }, [&c, save]() { { const bool on = !c.machineGun; c.killerSolo(-1); c.machineGun = on; } save(); },
                      "the whole game with the machine gun: hold the trigger for automatic fire (recoil on every shot), unlimited ammo"});
         killerBy(r);
-        r.push_back({"Arsenal Mode", [&c]() { return onOff(c.weaponSwitch); }, [&c, save]() { c.weaponSwitch = !c.weaponSwitch; save(); },
+        r.push_back({"Arsenal Mode", [&c]() { return onOff(c.weaponSwitch); }, [&c, save]() { { const bool on = !c.weaponSwitch; c.killerSolo(-1); c.weaponSwitch = on; } save(); },
                      "middle button: next weapon. Handgun, SMG, Rifle, Double Pistols, Shotgun, Magician's Hand, Machine Gun, Rocket Launcher"});
         killerBy(r);
         // Challenges
-        r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { c.hardcore = !c.hardcore; save(); },
+        r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { { const bool on = !c.hardcore; c.killerSolo(-1); c.hardcore = on; } save(); },
                      "one life each, no continues, no joining back in; its own high scores"});
         killerBy(r);
-        r.push_back({"One Shot Kill", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { c.suddenDeath = !c.suddenDeath; save(); },
+        r.push_back({"One Shot Kill", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { { const bool on = !c.suddenDeath; c.killerSolo(-1); c.suddenDeath = on; } save(); },
                      "one shot kills any zombie (bosses fight as normal); lives and continues as a normal game. Its own high scores"});
         killerBy(r);
-        r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { c.hostageCrisis = !c.hostageCrisis; save(); },
+        r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { { const bool on = !c.hostageCrisis; c.killerSolo(-1); c.hostageCrisis = on; } save(); },
                      "shoot a hostage or scientist and it's game over for everyone: no continues. Aim carefully!"});
         killerBy(r);
-        r.push_back({"Weak Point Mode", [&c]() { return onOff(c.roulette); }, [&c, save]() { c.roulette = !c.roulette; save(); },
+        r.push_back({"Weak Point Mode", [&c]() { return onOff(c.roulette); }, [&c, save]() { { const bool on = !c.roulette; c.killerSolo(-1); c.roulette = on; } save(); },
                      "each zombie has one weak point, marked by a pulsing target: only shots there hurt it (bosses fight as normal)"});
         killerBy(r);
-        r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { c.exploding = !c.exploding; save(); },
+        r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { { const bool on = !c.exploding; c.killerSolo(-1); c.exploding = on; } save(); },
                      "about one zombie in three glows orange. Head shot: it blows up every zombie on the screen! Anywhere else: only it blows up, and it hurts you"});
         killerBy(r);
-        r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { c.survival = !c.survival; save(); },
+        r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { { const bool on = !c.survival; c.killerSolo(-1); c.survival = on; } save(); },
                      "a 60 s clock counts down in play: each kill +10 s, each rescue +30 s; time up = game over. Its own high scores"});
         killerBy(r);
         // Looks
-        r.push_back({"Flashlight Mode", [&c]() { return onOff(c.flashlight); }, [&c, save]() { c.flashlight = !c.flashlight; save(); },
+        r.push_back({"Flashlight Mode", [&c]() { return onOff(c.flashlight); }, [&c, save]() { { const bool on = !c.flashlight; c.killerSolo(-1); c.flashlight = on; } save(); },
                      "the mansion goes dark and each player's gun lights the screen where it aims"});
         killerBy(r);
         r.push_back({"Screen Filter", [&c]() { return std::string(c.funLook == 1 ? "Night Vision" : c.funLook == 2 ? "VHS Camcorder" : c.funLook == 3 ? "Wireframe" : "Off"); },
-                     [&c, save]() { c.funLook = (c.funLook + 1) % 4; save(); },
+                     [&c, save]() { { const int f = (c.funLook + 1) % 4; c.killerSolo(-1); c.funLook = f; } save(); },
                      "Night Vision: green with glowing heat; VHS Camcorder: tracking lines, static, a REC time stamp; Wireframe: 80s neon vector lines"});
         killerBy(r);
         // Co-op
-        r.push_back({"Married Mode", [&c]() { return onOff(c.married); }, [&c, save]() { c.married = !c.married; save(); },
+        r.push_back({"Married Mode", [&c]() { return onOff(c.married); }, [&c, save]() { { const bool on = !c.married; c.killerSolo(-1); c.married = on; } save(); },
                      "Married? You don't have to play by yourself anymore! You play player 1, computer teammates fill every other seat"});
         killerBy(r);
         r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
