@@ -1001,8 +1001,18 @@ void Runtime::lg_modes_frame()
             // the HUD (the game's own six bullets erased: a reload drew six and three were left on the screen)
             lg_splash[p & 3] = lgModes.shotgunShells > 0;
             lg_hide_bullets[p & 3] = lgModes.shotgunShells > 0 || lgMachineGun;   // (Machine Gun mode: silver rounds)
+            // (user 2026-11-08: "color the bullets like before"): the creator's weapons in Arsenal / Shotgun Mode /
+            // Machine Gun: the shotgun's red shells, the machine gun's silver rounds, the rocket green (Hud::
+            // drawArsenalAmmo; the game's own white bullets for the others)
+            if (engine && pl.state == 5)
+                lg_hide_bullets[p & 3] = lgEngineTint(p) > 0;
             lg_seat_scale[p & 3] = 1.0f;
             lg_dmg_scale[p & 3] = lgModes.shotgunShells > 0 ? 2.0f : 1.0f;   // (Shotgun Mode: double damage)
+            // (user 2026-11-08: "the RPG explosion is not good ... a full on explosion like before"): the rocket on the
+            // creator's weapons as Arsenal's own was: its shot's reach 5 times, everything in it hit (with the blasts on
+            // every zombie on the screen: lg_fired)
+            if (engine && weapons.seat[p & 3].cur == kRocket)
+                lg_seat_scale[p & 3] = 5.0f, lg_splash[p & 3] = true;
         }
         if (lgModes.vampire) {
             // Vampire Mode: the meter drains in about 15 s in play; a hit gives 8 %, a kill 30 %; empty: a life lost (as an
@@ -1175,7 +1185,7 @@ void Runtime::lg_bodies_frame()
             b.part = d.part, b.x = bp.view_pos[0], b.y = bp.view_pos[1], b.z = bp.view_pos[2], b.r = bp.hit_radius;
         }
     }
-    lgBlasts.erase(std::remove_if(lgBlasts.begin(), lgBlasts.end(), [&](const LgBlast& b) { return b.frame + 60 < frameCount; }),
+    lgBlasts.erase(std::remove_if(lgBlasts.begin(), lgBlasts.end(), [&](const LgBlast& b) { return b.frame + (b.big ? 90 : 60) < frameCount; }),
                    lgBlasts.end());   // (the blasts' puffs: the last one ends 51 frames in)
     if (!lg_exploding)
         return;
@@ -1222,13 +1232,13 @@ void Runtime::lg_blast_hit(int player, const LgBody& b)
 }
 
 // every zombie on the screen blown up by the shooter (a blast drawn on each); bodies blown up here glow no more
-void Runtime::lg_blast_all(int player)
+void Runtime::lg_blast_all(int player, bool big)
 {
     for (const LgBody& b : lgBodies_) {
         if (!lgZombieType(b.type))
             continue;   // (zombies only: never the hostages / scientists)
         lgBoomed_.insert(b.body);
-        lgBlasts.push_back({b.x, b.y, b.z, frameCount});
+        lgBlasts.push_back({b.x, b.y, b.z, frameCount, big});
         lg_blast_hit(player, b);
     }
 }
@@ -1265,7 +1275,7 @@ void Runtime::lg_fired(int player)
     const bool rocket = lgWeapon[player & 3] == 3 ||
                         (weapons.mode == Weapons::Arsenal && weapons.seat[player & 3].cur == kRocket);
     if (rocket && mem.at<int16_t>(G::game_mode) == 4)
-        lg_blast_all(player);
+        lg_blast_all(player, true);
 }
 
 // Coin-Op Survival: the clock runs down in play (not in cut-scenes, the results, the continue countdowns); a kill +2 s,

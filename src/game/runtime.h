@@ -402,6 +402,14 @@ public:
     bool lgOut_[4] = {false, false, false, false};
     // Arsenal Mode (each seat: 0 Pistol, 1 Shotgun, 2 Machine Gun, 3 Rocket Launcher); off: -1 for every seat
     int lgWeapon[4] = {-1, -1, -1, -1};
+    // Light Gun Edition: the creator's weapons (Arsenal / Shotgun Mode / Machine Gun, not Survival): the colour of a
+    // seat's bullets (0 the game's own white, 1 the shotgun's red, 2 the machine gun's silver, 3 the rocket's green)
+    int lgEngineTint(int p) const
+    {
+        if (weapons.mode != Weapons::Arsenal || p < 0 || p >= 4) return 0;
+        const int w = weapons.seat[p].cur;
+        return w == kShotgun ? 1 : w == kMachine ? 2 : w == kRocket ? 3 : 0;
+    }
     uint8_t lgLastRounds_[4] = {6, 6, 6, 6};
     void lg_weapon_next(int p);   // the middle button: the next weapon, its magazine full
     // Weak-Point Roulette: each zombie's glowing part this moment (by its body), and the parts' rings to draw (camera
@@ -418,7 +426,7 @@ public:
     // draw (camera space, the frame they went off) and the bodies blown up already
     struct LgBody { uint32_t body, part; float x, y, z, r; int type; };
     std::vector<LgBody> lgBodies_;
-    struct LgBlast { float x, y, z; uint64_t frame; };
+    struct LgBlast { float x, y, z; uint64_t frame; bool big = false; };   // (big: the rocket's)
     std::vector<LgBlast> lgBlasts;
     std::set<uint32_t> lgBoomed_;
     std::map<uint32_t, bool> lgVol_;   // each zombie on screen: volatile or not (decided when it first shows)
@@ -427,7 +435,7 @@ public:
     void lg_explode(int player, uint32_t part) override;
     void lg_fired(int player) override;
     void lg_blast_hit(int player, const LgBody& b);
-    void lg_blast_all(int player);
+    void lg_blast_all(int player, bool big = false);
     void lg_bodies_frame();   // (the bodies' list, the glow / heat colours)
     // the looks (Night Vision 1, Wireframe 2, VHS 3: RenderOptions::look); Night Vision: the creatures in heat colours
     int lgLook = 0;

@@ -301,14 +301,18 @@ void GameOutputs::resetAll()
         track_[i] = Track{};
         lampBlink_[i] = true;
     }
-    std::string msg = line("mame_stop", 1) + "mame_start = " + kRomName + "\r";
+    // (user 2026-11-08: no recoil and an error from Hook of the Reaper after a game: mame_stop / mame_start here made
+    // it close and at once open the guns' COM ports again (its hotdrw profile's Close_COM / Open_COM), twice at a
+    // game's start: the port not free yet, its error, the guns left without recoil. Every output to 0 alone puts the
+    // lights out; mame_start stays the connection's own, once)
+    std::string msg;
     for (Output& o : outputs_) {
         o.value = 0;
         msg += line(o.name, 0);
     }
     for (uintptr_t c : clients_)
         sendTo(c, msg);
-    logLine("outputs reset (the menu / a new game): every output 0, mame_start sent again");
+    logLine("outputs reset (the menu / a new game): every output 0");
 }
 
 void GameOutputs::tick(uint64_t nowMs)

@@ -16595,21 +16595,25 @@ int main(int argc, char* argv[])
                 float px, py, qx, qy;
                 view->fromArcade(496.0f * b.x / b.z, 496.0f * b.y / b.z, ww, wh, px, py);
                 view->fromArcade(496.0f * (b.x + 45.0f) / b.z, 496.0f * b.y / b.z, ww, wh, qx, qy);
-                const float reach = std::clamp(std::fabs(qx - px) * 2.2f, wh * 0.14f, wh * 0.9f);
-                if (age < 4.0f) {   // the flash
+                // (the rocket's: user 2026-11-08 "a full on explosion": twice the size, a longer, brighter flash,
+                // seven puffs over a longer time)
+                const float reach = std::clamp(std::fabs(qx - px) * 2.2f * (b.big ? 2.0f : 1.0f), wh * (b.big ? 0.30f : 0.14f), wh * (b.big ? 1.3f : 0.9f));
+                const float flashFrames = b.big ? 8.0f : 4.0f;
+                if (age < flashFrames) {   // the flash
                     static std::vector<uint8_t> one(4);
-                    one = {255, 220, 150, uint8_t(90 * (1.0f - age / 4.0f))};
+                    one = {255, 220, 150, uint8_t((b.big ? 150 : 90) * (1.0f - age / flashFrames))};
                     flash.setImage(one, 1, 1);
                     flash.drawIn(ww, wh, 0, 0, float(ww), float(wh));
                 }
                 // the puffs: (delay frames, offset x / y in the reach, size)
                 const uint32_t seed = uint32_t(b.frame * 2654435761u) ^ uint32_t(px * 7.0f);
-                for (int k = 0; k < 4; ++k) {
+                const int puffs = b.big ? 7 : 4;
+                for (int k = 0; k < puffs; ++k) {
                     const float delay = k == 0 ? 0.0f : float(2 + 3 * k);
-                    const float tt = (age - delay) / 40.0f;
+                    const float tt = (age - delay) / (b.big ? 55.0f : 40.0f);
                     if (tt < 0.0f || tt >= 1.0f) continue;
-                    const float ang = float((seed >> (k * 5)) & 31) / 31.0f * 6.2832f;
-                    const float off = k == 0 ? 0.0f : reach * 0.28f;
+                    const float ang = float((seed >> ((k * 5) % 27)) & 31) / 31.0f * 6.2832f + float(k) * 0.9f;
+                    const float off = k == 0 ? 0.0f : reach * (b.big ? 0.36f : 0.28f);
                     const float sz = reach * (k == 0 ? 1.0f : 0.62f);
                     const float cx = px + std::cos(ang) * off, cy = py + std::sin(ang) * off * 0.8f - (k ? reach * 0.05f : 0.0f);
                     fire.setImage(book[size_t(std::min(FN - 1, int(tt * FN)))], FS, FS, true);

@@ -298,7 +298,9 @@ void Weapons::begin(Runtime& rt, Mode m)
 
 bool Weapons::endless(int w) const
 {
-    return def(w).reserveMags < 0 || (mode == Arsenal && w != kRocket);
+    // (Light Gun Edition, user 2026-11-08: "I don't want any gun to run out ... use any gun the whole time": in the
+    // Killer Mods every reserve endless, the rocket launcher's too; one rocket a load still)
+    return def(w).reserveMags < 0 || mode == Arsenal;
 }
 
 void Weapons::arm(Runtime& rt, int p)
@@ -403,9 +405,9 @@ bool Weapons::select(Runtime& rt, int p, int w)
     s.mag[s.cur] = pl.rounds;   // (the magazine stays in that gun)
     // Light Gun Edition (user 2026-11-06): the rocket launcher put away fired and not reloaded is reloaded on the way
     // (a rocket from its reserve), so it is ready when it comes back
-    if (mode == Arsenal && s.cur == kRocket && s.mag[kRocket] == 0 && s.reserve[kRocket] > 0) {
+    if (mode == Arsenal && s.cur == kRocket && s.mag[kRocket] == 0 && (endless(kRocket) || s.reserve[kRocket] > 0)) {
         s.mag[kRocket] = 1;
-        --s.reserve[kRocket];
+        if (!endless(kRocket)) --s.reserve[kRocket];
     }
     s.cur = w;
     s.reload = 0, s.timer = 0, s.burst = 0;
