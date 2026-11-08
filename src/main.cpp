@@ -11640,6 +11640,19 @@ int main(int argc, char* argv[])
             };
             hooks.shortcutValue = [&]() { return shortcutMsg.empty() ? std::string("Create") : shortcutMsg; };
             hooks.modsRows = [&]() { return modsRows(); };
+            // Light Gun Edition (user 2026-11-08: "a reset or turn all mods off option"): every Killer Mod (Party
+            // Scoreboard too) and every mod of the Mods page off, a new texture pack's default too
+            hooks.allModsOff = [&]() {
+                menu.cfg.killerSolo(-1);
+                menu.cfg.partyBoard = false;
+                allPacks = findMods(modDirs);
+                menu.cfg.modsAllOff();
+                for (const auto& [p, on] : game::modOrder(menu.cfg, allPacks))
+                    if (std::find(menu.cfg.modsOff.begin(), menu.cfg.modsOff.end(), p->id) == menu.cfg.modsOff.end())
+                        menu.cfg.modsOff.push_back(p->id);
+                saveCfg();
+                applyMods(menu.cfg);
+            };
             hooks.customSights = [&]() { return game::findCustomSights(xhairDirs); };
             // feat29 (user 2026-10-29: "make sure the player knows they can add custom crosshairs"): the settings
             // folder's crosshairs (one of xhairDirs; made here so the player finds it), named on the Crosshair row

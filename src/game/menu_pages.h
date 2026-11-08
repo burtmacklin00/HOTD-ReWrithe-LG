@@ -50,6 +50,7 @@ struct MenuHooks {
     std::function<void()> shortcut;                     // create the desktop shortcut
     std::function<std::string()> shortcutValue;         // "Create" / "Created" / ...
     std::function<std::vector<Frontend::Extra>()> modsRows;          // the mods' rows (menuModRows with the host's mods)
+    std::function<void()> allModsOff;                   // Light Gun Edition: every mod off (Killer Mods, Options > Mods), saved, applied
     std::function<std::vector<CustomSight>()> customSights;          // the crosshairs folders' sets
     std::function<std::string()> crosshairDir;          // feat29: the folder players put their crosshair PNGs in (made)
     std::function<const assets::PcSprites*()> sightSprites;          // optui: the PC sprites (its sight; null: the arcade style drawn)

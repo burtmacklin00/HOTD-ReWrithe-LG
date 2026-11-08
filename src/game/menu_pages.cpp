@@ -820,6 +820,13 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // (user 2026-11-08: one at a time, to be safe: turning one on turns the others off; Party Scoreboard aside)
         r.push_back({"One Mod at a Time", []() { return std::string(); }, nullptr,
                      "Turning a mod on turns every other mod off, here and on the Mods page (Party Scoreboard can stay on)"});
+        // (user 2026-11-08: "a reset or turn all mods off option") every mod off, on both pages
+        r.push_back({"Turn All Mods Off", [&c]() { return std::string(c.killerOn() >= 0 || c.partyBoard || !c.modsOn.empty() ? "Turn Off" : "All Off"); },
+                     [&c, h, save]() {
+                         if (h.allModsOff) h.allModsOff();
+                         else { c.killerSolo(-1), c.partyBoard = false, c.modsAllOff(); save(); }
+                     },
+                     "Every Killer Mod (Party Scoreboard too) and every mod on the Mods page off"});
         // Weapons
         r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { { const bool on = !c.shotgun; c.killerSolo(-1); c.shotgun = on; if (on) c.modsAllOff(); } save(); },
                      "the whole game with the shotgun (Survival Mode's): a spread of 6 pellets, 6 shells, a slower reload"});
@@ -951,6 +958,21 @@ std::vector<X> menuModRows(LaunchConfig& c, const std::vector<ModPack>& mods, st
         return -1;
     };
     const auto order = modOrder(c, mods);
+    // Light Gun Edition (user 2026-11-08): every mod off at once (the Killer Mods too)
+    if (!order.empty())
+        r.push_back({"Turn All Mods Off", [&c, &mods]() {
+                         bool any = c.killerOn() >= 0 || c.partyBoard;
+                         for (const auto& [p, on] : modOrder(c, mods)) any = any || on;
+                         return std::string(any ? "Turn Off" : "All Off");
+                     },
+                     [&c, &mods, setOrder]() {
+                         c.killerSolo(-1);
+                         c.partyBoard = false;
+                         auto l = modOrder(c, mods);
+                         for (auto& e : l) e.second = false;
+                         setOrder(l);
+                     },
+                     "Every mod on this page and every Killer Mod (Party Scoreboard too) off"});
     int packs = 0;
     for (const auto& [p, on] : order) packs += p->type == "textures";
     for (size_t i = 0; i < order.size(); ++i) {
