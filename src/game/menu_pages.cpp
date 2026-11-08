@@ -818,50 +818,50 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // Light Gun Edition (user 2026-11-05: "Killer Mods"): the edition's own game modes, each with who made it under
         // its name as the Mods page's mods have (local games; online games are always played as normal)
         // (user 2026-11-08: one at a time, to be safe: turning one on turns the others off; Party Scoreboard aside)
-        r.push_back({"One Killer Mod at a Time", []() { return std::string(); }, nullptr,
-                     "Turning a Killer Mod on turns the others off (Party Scoreboard can stay on with any of them)"});
+        r.push_back({"One Mod at a Time", []() { return std::string(); }, nullptr,
+                     "Turning a mod on turns every other mod off, here and on the Mods page (Party Scoreboard can stay on)"});
         // Weapons
-        r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { { const bool on = !c.shotgun; c.killerSolo(-1); c.shotgun = on; } save(); },
+        r.push_back({"Shotgun Mode", [&c]() { return onOff(c.shotgun); }, [&c, save]() { { const bool on = !c.shotgun; c.killerSolo(-1); c.shotgun = on; if (on) c.modsAllOff(); } save(); },
                      "the whole game with the shotgun (Survival Mode's): a spread of 6 pellets, 6 shells, a slower reload"});
         killerBy(r);
-        r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { { const bool on = !c.freeFire; c.killerSolo(-1); c.freeFire = on; } save(); },
+        r.push_back({"Free Fire", [&c]() { return onOff(c.freeFire); }, [&c, save]() { { const bool on = !c.freeFire; c.killerSolo(-1); c.freeFire = on; if (on) c.modsAllOff(); } save(); },
                      "unlimited ammo, no reloading (for young players and parties)"});
         killerBy(r);
-        r.push_back({"Machine Gun", [&c]() { return onOff(c.machineGun); }, [&c, save]() { { const bool on = !c.machineGun; c.killerSolo(-1); c.machineGun = on; } save(); },
+        r.push_back({"Machine Gun", [&c]() { return onOff(c.machineGun); }, [&c, save]() { { const bool on = !c.machineGun; c.killerSolo(-1); c.machineGun = on; if (on) c.modsAllOff(); } save(); },
                      "the whole game with the machine gun: hold the trigger for automatic fire (recoil on every shot), unlimited ammo"});
         killerBy(r);
-        r.push_back({"Arsenal Mode", [&c]() { return onOff(c.weaponSwitch); }, [&c, save]() { { const bool on = !c.weaponSwitch; c.killerSolo(-1); c.weaponSwitch = on; } save(); },
+        r.push_back({"Arsenal Mode", [&c]() { return onOff(c.weaponSwitch); }, [&c, save]() { { const bool on = !c.weaponSwitch; c.killerSolo(-1); c.weaponSwitch = on; if (on) c.modsAllOff(); } save(); },
                      "middle button: next weapon. Handgun, SMG, Rifle, Double Pistols, Shotgun, Magician's Hand, Machine Gun, Rocket Launcher"});
         killerBy(r);
         // Challenges
-        r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { { const bool on = !c.hardcore; c.killerSolo(-1); c.hardcore = on; } save(); },
+        r.push_back({"Hardcore", [&c]() { return onOff(c.hardcore); }, [&c, save]() { { const bool on = !c.hardcore; c.killerSolo(-1); c.hardcore = on; if (on) c.modsAllOff(); } save(); },
                      "one life each, no continues, no joining back in; its own high scores"});
         killerBy(r);
-        r.push_back({"One Shot Kill", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { { const bool on = !c.suddenDeath; c.killerSolo(-1); c.suddenDeath = on; } save(); },
+        r.push_back({"One Shot Kill", [&c]() { return onOff(c.suddenDeath); }, [&c, save]() { { const bool on = !c.suddenDeath; c.killerSolo(-1); c.suddenDeath = on; if (on) c.modsAllOff(); } save(); },
                      "one shot kills any zombie (bosses fight as normal); lives and continues as a normal game. Its own high scores"});
         killerBy(r);
-        r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { { const bool on = !c.hostageCrisis; c.killerSolo(-1); c.hostageCrisis = on; } save(); },
+        r.push_back({"Hostage Crisis", [&c]() { return onOff(c.hostageCrisis); }, [&c, save]() { { const bool on = !c.hostageCrisis; c.killerSolo(-1); c.hostageCrisis = on; if (on) c.modsAllOff(); } save(); },
                      "shoot a hostage or scientist and it's game over for everyone: no continues. Aim carefully!"});
         killerBy(r);
-        r.push_back({"Weak Point Mode", [&c]() { return onOff(c.roulette); }, [&c, save]() { { const bool on = !c.roulette; c.killerSolo(-1); c.roulette = on; } save(); },
+        r.push_back({"Weak Point Mode", [&c]() { return onOff(c.roulette); }, [&c, save]() { { const bool on = !c.roulette; c.killerSolo(-1); c.roulette = on; if (on) c.modsAllOff(); } save(); },
                      "each zombie has one weak point, marked by a pulsing target: only shots there hurt it (bosses fight as normal)"});
         killerBy(r);
-        r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { { const bool on = !c.exploding; c.killerSolo(-1); c.exploding = on; } save(); },
+        r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { { const bool on = !c.exploding; c.killerSolo(-1); c.exploding = on; if (on) c.modsAllOff(); } save(); },
                      "about one zombie in three glows orange. Head shot: it blows up every zombie on the screen! Anywhere else: only it blows up, and it hurts you"});
         killerBy(r);
-        r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { { const bool on = !c.survival; c.killerSolo(-1); c.survival = on; } save(); },
+        r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { { const bool on = !c.survival; c.killerSolo(-1); c.survival = on; if (on) c.modsAllOff(); } save(); },
                      "a 60 s clock counts down in play: each kill +10 s, each rescue +30 s; time up = game over. Its own high scores"});
         killerBy(r);
         // Looks
-        r.push_back({"Flashlight Mode", [&c]() { return onOff(c.flashlight); }, [&c, save]() { { const bool on = !c.flashlight; c.killerSolo(-1); c.flashlight = on; } save(); },
+        r.push_back({"Flashlight Mode", [&c]() { return onOff(c.flashlight); }, [&c, save]() { { const bool on = !c.flashlight; c.killerSolo(-1); c.flashlight = on; if (on) c.modsAllOff(); } save(); },
                      "the mansion goes dark and each player's gun lights the screen where it aims"});
         killerBy(r);
         r.push_back({"Screen Filter", [&c]() { return std::string(c.funLook == 1 ? "Night Vision" : c.funLook == 2 ? "VHS Camcorder" : c.funLook == 3 ? "Wireframe" : "Off"); },
-                     [&c, save]() { { const int f = (c.funLook + 1) % 4; c.killerSolo(-1); c.funLook = f; } save(); },
+                     [&c, save]() { { const int f = (c.funLook + 1) % 4; c.killerSolo(-1); c.funLook = f; if (f) c.modsAllOff(); } save(); },
                      "Night Vision: green with glowing heat; VHS Camcorder: tracking lines, static, a REC time stamp; Wireframe: 80s neon vector lines"});
         killerBy(r);
         // Co-op
-        r.push_back({"Married Mode", [&c]() { return onOff(c.married); }, [&c, save]() { { const bool on = !c.married; c.killerSolo(-1); c.married = on; } save(); },
+        r.push_back({"Married Mode", [&c]() { return onOff(c.married); }, [&c, save]() { { const bool on = !c.married; c.killerSolo(-1); c.married = on; if (on) c.modsAllOff(); } save(); },
                      "Married? You don't have to play by yourself anymore! You play player 1, computer teammates fill every other seat"});
         killerBy(r);
         r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
@@ -966,6 +966,13 @@ std::vector<X> menuModRows(LaunchConfig& c, const std::vector<ModPack>& mods, st
                          const int k = at(l, id);
                          if (k < 0) return;
                          l[size_t(k)].second = !l[size_t(k)].second;
+                         // Light Gun Edition (user 2026-11-08: "only one mod period"): a mod switched on turns every
+                         // other mod off, and the Killer Mods (Party Scoreboard aside)
+                         if (l[size_t(k)].second) {
+                             for (size_t j = 0; j < l.size(); ++j)
+                                 if (int(j) != k) l[j].second = false;
+                             c.killerSolo(-1);
+                         }
                          setOrder(l);
                      },
                      about(mp)});
@@ -1045,11 +1052,12 @@ int modsPageTest()
     click("HD Pack");
     expect("HD Pack clicked", false, false, true);
     click("Ragdoll");
-    expect("Ragdoll clicked (HD on)", false, true, true);
+    // (Light Gun Edition: one mod at a time: a mod switched on turns the others off)
+    expect("Ragdoll clicked (HD turned off)", false, true, false);
     click("Example: Green Blood");
-    expect("Example clicked", true, true, true);
+    expect("Example clicked (Ragdoll turned off)", true, false, false);
     click("HD Pack");
-    expect("HD Pack clicked (off)", true, true, false);
+    expect("HD Pack clicked (Example turned off)", false, false, true);
     // depthopt: mod.ini depth = switches the mod's items (assets/mods.h modDepthTest: 5 checks)
     checks += 5, failed += modDepthTest();
     std::printf("mods test: %d checks, %d failed\n", checks, failed);
@@ -1081,6 +1089,7 @@ std::vector<X> menuModSettingRows(LaunchConfig& c, const ModPack& mod, std::func
                                                 });
                                      }), l.end());
                          };
+                         if (!on) c.modsAllOff(), c.killerSolo(-1);   // (Light Gun Edition: one mod at a time)
                          drop(c.modsOn), drop(c.modsOff);
                          (on ? c.modsOff : c.modsOn).push_back(id);
                          if (changed) changed();

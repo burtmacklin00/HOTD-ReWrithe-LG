@@ -12,6 +12,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <memory>
@@ -19,6 +20,7 @@
 #include <map>
 #include <mutex>
 #include <functional>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -385,6 +387,14 @@ struct LaunchConfig {
         survival = survival && k == 9, flashlight = flashlight && k == 10, married = married && k == 12;
         if (k != 11) funLook = 0;
         vampire = bossRush = false, turbo = 0;   // (removed modes: never on)
+    }
+    // (user 2026-11-08: "only one mod period": a Killer Mod or one of Options > Mods, never both) every mod of the
+    // Mods page off (a mod in neither list is off too while a Killer Mod is on: main.cpp applyMods)
+    void modsAllOff()
+    {
+        for (const std::string& id : modsOn)
+            if (std::find(modsOff.begin(), modsOff.end(), id) == modsOff.end()) modsOff.push_back(id);
+        modsOn.clear();
     }
     // setup2: the version that last ran with these settings (launcher.ini lastversion=; another one: What's New once)
     std::string lastVersion;
