@@ -390,6 +390,57 @@ struct LaunchConfig {
     }
     // (user 2026-11-08: "only one mod period": a Killer Mod or one of Options > Mods, never both) every mod of the
     // Mods page off (a mod in neither list is off too while a Killer Mod is on: main.cpp applyMods)
+    // (user 2026-11-09: one at a time was too strict: by groups instead) a Killer Mod's group: 0 the guns (Shotgun,
+    // Free Fire, Machine Gun, Arsenal), 1 the challenges (Hardcore .. Coin-Op Survival): one of each on at most; the
+    // looks (Flashlight, Screen Filter) and Married Mode: with anything (-1)
+    static int killerGroup(int k) { return k >= 0 && k <= 3 ? 0 : k >= 4 && k <= 9 ? 1 : -1; }
+    // k switched on: the others of its group off; Weak Point (7) / Exploding Zombies (8): the Big Head mod off (drawn
+    // big, hit where the head really is: a head shot there would miss)
+    void killerPick(int k)
+    {
+        const int g = killerGroup(k);
+        if (g >= 0)
+            for (int j = 0; j < 10; ++j)
+                if (j != k && killerGroup(j) == g) killerSet(j, false);
+        if (k == 7 || k == 8) modOff(kBigHead);
+    }
+    void killerSet(int k, bool on)
+    {
+        switch (k) {
+        case 0: shotgun = on; break;
+        case 1: freeFire = on; break;
+        case 2: machineGun = on; break;
+        case 3: weaponSwitch = on; break;
+        case 4: hardcore = on; break;
+        case 5: suddenDeath = on; break;
+        case 6: hostageCrisis = on; break;
+        case 7: roulette = on; break;
+        case 8: exploding = on; break;
+        case 9: survival = on; break;
+        default: break;
+        }
+    }
+    // a launcher.ini from before: the first of each group kept; Big Head off with Weak Point / Exploding Zombies on
+    void killerTidy()
+    {
+        const bool on[10] = {shotgun, freeFire, machineGun, weaponSwitch, hardcore, suddenDeath, hostageCrisis, roulette,
+                             exploding, survival};
+        bool kept[2] = {false, false};
+        for (int k = 0; k < 10; ++k)
+            if (on[k]) {
+                const int g = killerGroup(k);
+                if (kept[g]) killerSet(k, false);
+                else kept[g] = true;
+            }
+        if (roulette || exploding) modOff(kBigHead);
+    }
+    static constexpr const char* kBigHead = "big-head";
+    bool modIsOn(const std::string& id) const { return std::find(modsOn.begin(), modsOn.end(), id) != modsOn.end(); }
+    void modOff(const std::string& id)
+    {
+        modsOn.erase(std::remove(modsOn.begin(), modsOn.end(), id), modsOn.end());
+        if (std::find(modsOff.begin(), modsOff.end(), id) == modsOff.end()) modsOff.push_back(id);
+    }
     void modsAllOff()
     {
         for (const std::string& id : modsOn)

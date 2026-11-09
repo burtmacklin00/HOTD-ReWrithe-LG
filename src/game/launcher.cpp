@@ -509,7 +509,7 @@ bool LaunchConfig::load(const std::string& file)
     for (int p = 0; p < 4; ++p)
         if (padV < 3 && padStyleRaw[p] >= 4)
             pad[p].style = padStyleRaw[p] == 4 ? 3 : 4;
-    killerSolo(killerOn());   // Light Gun Edition: one Killer Mod at a time (a file from before: the first one kept)
+    killerTidy();   // Light Gun Edition: one gun mode and one challenge at a time (a file from before: the first kept)
     return true;
 }
 

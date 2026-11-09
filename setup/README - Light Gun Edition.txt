@@ -63,8 +63,10 @@ What this edition adds
   transparent, scaled to the window's height). The cut-scene bars stay inside the picture.
 - Killer Mods (Options > Killer Mods tab; local games only, online games play as normal). Each shows "Killer
   Mod, by NF". When a game starts, the names of the mods that are on (Options > Mods and Killer Mods) show for 5 seconds.
-  Only one mod can be on at a time (a Killer Mod or one of Options > Mods; Party Scoreboard aside): turning one on
-  turns the others off. Turn All Mods Off (top of both pages) switches everything off. Each gun's bullets have
+  One gun mode (Shotgun, Free Fire, Machine Gun, Arsenal) and one challenge (Hardcore to Coin-Op Survival) at a
+  time: turning one on turns the others of its group off. The looks, Married Mode, Party Scoreboard and Options >
+  Mods go with anything, except Big Head with Weak Point Mode or Exploding Zombies (its heads are drawn big but hit
+  where they really are). Turn All Mods Off (top of both pages) switches everything off. Each gun's bullets have
   their own colour: handgun gold, SMG blue, assault rifle orange, double pistols purple, shotgun red,
   Magician's Hand pink, machine gun silver, rocket green.
   - Arsenal Mode: the middle button steps through Handgun, SMG, Assault Rifle, Double Pistols, Shotgun, Magician's

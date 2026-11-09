@@ -4800,11 +4800,10 @@ int main(int argc, char* argv[])
                 if (!found) std::fprintf(stderr, "--mod %s: no such mod in data\\mods or the settings folder's mods\n", id.c_str());
             }
         } else {
-            // Light Gun Edition (user 2026-11-08: "only one mod period"): with a Killer Mod on, none of these; else
-            // only the first one on (a launcher.ini from before could have more)
-            if (c.killerOn() < 0)
-                for (const auto& [p, on] : packOrder(c))
-                    if (on && act.empty()) act.push_back(*p);
+            // Light Gun Edition (user 2026-11-09): every one on, but Big Head with Weak Point Mode / Exploding
+            // Zombies (drawn big, hit where the head really is)
+            for (const auto& [p, on] : packOrder(c))
+                if (on && !(p->id == game::LaunchConfig::kBigHead && (c.roulette || c.exploding))) act.push_back(*p);
         }
         // lang (docs/translating.md): the language's own packs (data/mods/lang/<code>/<pack>/: its pictures with words)
         // first, over every other pack, while that language is on
