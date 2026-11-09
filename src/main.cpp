@@ -5488,6 +5488,7 @@ int main(int argc, char* argv[])
                 on(cfg.funLook == 2, "VHS Camcorder");
                 on(cfg.funLook == 3, "Wireframe");
                 on(cfg.married && !gTotd && !bossModeOpt && gSurvivalArena < 0, "Married Mode");
+                on(cfg.partyBoard, "Party Scoreboard");   // (user 2026-11-09: in the banner too)
                 r.lgBannerFrame = 0;
             }
             r.lg_exploding = cfg.exploding;
