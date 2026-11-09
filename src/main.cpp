@@ -11642,7 +11642,7 @@ int main(int argc, char* argv[])
             hooks.modsRows = [&]() { return modsRows(); };
             // Light Gun Edition (user 2026-11-08: "a reset or turn all mods off option"): every Killer Mod (Party
             // Scoreboard too) and every mod of the Mods page off, a new texture pack's default too
-            hooks.allModsOff = [&]() {
+            hooks.allModsOff = [&, saveCfg]() {   // (saveCfg a copy: this block's locals end, as every hook's)
                 menu.cfg.killerSolo(-1);
                 menu.cfg.partyBoard = false;
                 allPacks = findMods(modDirs);
