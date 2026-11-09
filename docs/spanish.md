@@ -1,8 +1,8 @@
-# The Spanish PC version ("Doblaje español")
+# The Spanish PC version: the Castilian Spanish dub ("doblaje en castellano", Spain)
 
 The House of the Dead's PC port had one official dub: a Spanish CD (a 2003 re-release, "MVM 2003" in its files,
-DirectX 8.1 in Spanish on it) whose voices, menus and texts are Spanish. It was never sold outside Spain. ReWrithe
-reads it, from the player's own copy only, for **Options > Audio > Voice: Spanish**.
+DirectX 8.1 in Spanish on it) whose voices, menus and texts are in Castilian Spanish (Spain's Spanish, castellano; not Latin American). It was never sold outside Spain. ReWrithe
+reads it, from the player's own copy only, for **Options > Audio > Voice: Spanish (Spain)**.
 
 Thanks to **3lc3z4r** (YouTube: Cez4rPlay) for the copy, its list of differences and the reference playthrough
 ["The House Of The Dead (PC) - Doblaje español ORIGINAL"](https://youtu.be/OVnjusRO1wk). No Spanish game file is part

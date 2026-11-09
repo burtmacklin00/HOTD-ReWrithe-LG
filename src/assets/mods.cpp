@@ -421,13 +421,20 @@ static ModPack builtinCosmetic(const std::string& type)
     if (type == "rainbowblood") {
         p.id = "rainbow-blood";
         p.name = "Rainbow Blood";
-        p.description = "The blood, the gore and the blood marks cycle through the colours of the rainbow (visual only)";
-        settings = {{"colours", "Colours | Each Splash | Each Splash, Together | Each Splash: every splash and wound its own colour; Together: all blood one colour at a time"},
-                    {"speed", "Speed | Normal | Still, Slow, Normal, Fast | How fast the colours change"},
+        p.description = "The blood, the gore and the blood marks cycle through the colors of the rainbow (visual only)";
+        settings = {{"colours", "Colors | Each Splash | Each Splash, Together | Each Splash: every splash and wound its own color; Together: all blood one color at a time"},
+                    {"speed", "Speed | Normal | Still, Slow, Normal, Fast | How fast the colors change"},
                     // (user 2026-11-03: each creature its own colour for its painted wounds, chosen when it appears)
-                    {"creature", "Creature Blood | Rainbow Cycle | Rainbow Cycle, Own Colour Each, Off | The wounds painted on each creature: cycling with the rest, its own colour for its whole life, or as the game paints them"},
+                    {"creature", "Creature Blood | Rainbow Cycle | Rainbow Cycle, Own Color Each, Off | The wounds painted on each creature: cycling with the rest, its own color for its whole life, or as the game paints them"},
                     // rainbow2 (user 2026-11-03): the players' sights and / or HUD in the rainbow too
-                    {"hud", "HUD & Crosshair | Off | Off, Crosshair, HUD, Both | The players' crosshairs (each player its own phase) and / or HUD (bullets, 1P / 2P, torches, the score) in the rainbow too"}};
+                    {"hud", "HUD & Crosshair | Off | Off, Crosshair, HUD, Both | The players' crosshairs (each player its own phase) and / or HUD (bullets, 1P / 2P, torches, the score) in the rainbow too"},
+                    // (user 2026-11-07, GitHub #54: the Magician's afterimages in the rainbow too, each its own colour, as
+                    // the creatures; or any colour per phase: #RRGGBB in launcher.ini)
+                    {"afterimage1", "Magician Afterimages 1 | Rainbow | Rainbow, Original, Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink, White | The Magician's afterimages as he flies around: each its own color, the game's (blue) or one color"},
+                    {"afterimage2", "Magician Afterimages 2 | Rainbow | Rainbow, Original, Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink, White | His afterimages as he swoops and lunges: each its own color, the game's (red; PC: blue) or one color"},
+                    // (user 2026-11-07: the menu's blood its own setting, Off by default: each color change draws the
+                    // whole menu again)
+                    {"menu", "Menu Blood | Off | Off, Rainbow | The main menu's blood in the rainbow too (it changes color every few seconds: the menu is drawn again each time)"}};
     } else {
         p.id = "big-head";
         p.name = "Big Head";

@@ -10,11 +10,11 @@ v1.3.0: the game offers the update itself (Update / Not now); your settings and 
 
 ## New
 
-- **Spanish dub ("Doblaje español")** from your own copy of the 2003 Spanish PC CD. No Spanish file is included.
+- **Castilian Spanish dub (Spain, "doblaje en castellano")** from your own copy of the 2003 Spanish PC CD. No Spanish file is included.
   - Add it on the setup's new **Extras** page (or Options > System > Repair / Change Files), next to your US / EU
     copy: the installed Spanish game, or the Spanish CD image itself (also in a .rar / .7z / .zip). It also works as
     the PC game on its own. A copy that can't be used is simply left out.
-  - Options > Audio > **Voice**: Auto / Spanish / English, in every mode, with arcade or PC models and either sound
+  - Options > Audio > **Voice**: Auto / Spanish (Spain) / English, in every mode, with arcade or PC models and either sound
     source. Options > Audio > **Reload Voice**: On / Off.
   - With the language **Español**, the Spanish CD's translated pictures: chapter cards, boss cards, CARGA, CONTINUAR,
     the signs, credits and map. All with PC models, most with arcade models; the menu notes say what stays in
@@ -24,6 +24,8 @@ v1.3.0: the game offers the update itself (Update / Not now); your settings and 
     ["The House Of The Dead (PC) - Doblaje español ORIGINAL"](https://youtu.be/OVnjusRO1wk). More in
     [docs/spanish.md](../spanish.md).
 - **Boss Names**, Options > Gameplay: Full / Codenames Only.
+- **Rainbow Blood** now colours the Magician's afterimages too, each its own colour like the creatures, or any colour
+  you pick for each phase (#54).
 
 ## Fixed
 
@@ -33,6 +35,7 @@ v1.3.0: the game offers the update itself (Update / Not now); your settings and 
 - Slash and scratch marks follow Hit Marks (#56); black side bars in the attract's white cuts in 4:3 (#57); smooth
   cut-scene bars (#58).
 - The white fade after the Magician's defeat with PC models (#55, in part).
+- The Magician's afterimages turn red for his swoops and lunges again (#54, arcade models).
 - PC Mode: characters with more hit points than Max Lives keep them (#62, in part).
 - Chapter Retry keeps the rescued researchers count for the last chapter's bonus room (#47).
 - Online: a joiner playing a character 7-19 was refused as a wrong password.
@@ -40,7 +43,7 @@ v1.3.0: the game offers the update itself (Update / Not now); your settings and 
 ## Known issues
 
 - Still open from the issues: the bonus room with PC models (#51), the credits mask with PC models (#53), the
-  Magician's red trail (#54), the clear sky with PC models (#55), the water under the bridge (#59).
+  Magician's afterimage colours with PC models (#54), the clear sky with PC models (#55), the water under the bridge (#59).
 - **The Typing of the Dead 0 is experimental / a proof of concept**, as in v1.3.0.
 - **Windows Defender may flag `hotd.exe`** (a false positive for a new, unsigned program; the full source is public).
   If it was quarantined: Windows Security > Virus & threat protection > **Protection history**, open the entry for

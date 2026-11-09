@@ -5,6 +5,7 @@
 // into the polygon palette entries at the vblank. 0x25310 is the port's now (src/port/palette.cpp, capture-proven, proofs-4); the copy 0x24E90 stays UNVERIFIED (teaser); see docs/teaser_status/render.md
 // "palanim" for the checks against the MAME dumps.
 #include "game/runtime.h"
+#include "game/cosmods.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -29,6 +30,11 @@ void Runtime::palette_anim_copy()
     }
     if (mem.u32(G::texture_area) == 9) next[689] = 0x9854;
     next[211] = 0xEBDF;
+    rainbowTableCache(*this);   // (v1.3.1: the computer screens' colours for the menus' rainbow blood)
+    // GitHub #54: the Magician's colour word (entry 583: his afterimages blue as he flies, red as he swoops / lunges),
+    // from his first write while his area stays loaded (the renderer draws the asset palettes, not palette RAM)
+    if (magicianColourArea_ != 0xFFFFFFFFu && mem.u32(G::texture_area) == magicianColourArea_ && mem.mapped(0x180248E))
+        next[583] = magicianAfterimageWord(uint16_t(mem.at<uint16_t>(0x180248E) | 0x8000u), frameCount);   // (the mod's colours)
     next[959] = mem.at<uint16_t>(0x5206E0);
     // a zero word: work RAM the port never wrote (0x520664 / 0x520666 / 0x52066A come from 0x24D70 at the area palette
     // load, not ported): the loaded value stays. The routine's own colours always carry 0x8000 (rgb555_pack).

@@ -645,7 +645,7 @@ itself (RELOAD, CONTINUE?, the chapter cards) stay as they are. Anyone can make 
 [docs/translating.md](docs/translating.md) (`--export-lang en`, F5 reloads in the menu, `--lang-check <code>` lists
 what does not fit). The bundled Noto Sans fonts (Korean, Japanese, Arabic, Hebrew) are under the SIL OFL.
 
-### Spanish (Doblaje español)
+### Spanish (Castilian, Spain: doblaje en castellano)
 
 The 1998 PC game's only official dub, the 2003 Spanish CD, works from **your own** Spanish copy: give it on the
 setup's **Extras** page (also Options > System > Repair / Change Files), next to your US / EU PC game. Then, with the

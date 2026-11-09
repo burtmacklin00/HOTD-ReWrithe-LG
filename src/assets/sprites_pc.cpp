@@ -408,9 +408,20 @@ void PcSprites::tintTexel(uint8_t* d, int mode, const float rgb[3])
             for (int k = 0; k < 3; ++k)
                 d[k] = uint8_t(std::clamp(float(k == 0 ? m : d[k]) + float(share) * rgb[k] + 0.5f, 0.0f, 255.0f));
     } else {
-        const float v = float(std::max({d[0], d[1], d[2]}));
-        for (int k = 0; k < 3; ++k)
-            d[k] = uint8_t(std::clamp(v * rgb[k] + 0.5f, 0.0f, 255.0f));
+        // v1.3.1 (the HUD's rainbow as P3 / P4's colours): the red texels through a ramp of the colour, shading kept
+        // (flames and label, not the brass: P1's red ones, P2's blue ones)
+        const bool redFlame = d[0] > d[1] + 16 && d[0] > d[2] + 16 && (d[0] >= 230 || d[1] * 2 < d[0]);
+        if (!redFlame && !(d[2] > d[0] + 16 && d[2] > d[1] + 16))
+            return;
+        const float lum = (0.299f * d[0] + 0.587f * d[1] + 0.114f * d[2]) / 255.0f;
+        const float t = std::clamp(0.5f * lum + 0.5f * float(std::max({d[0], d[1], d[2]})) / 255.0f, 0.0f, 1.0f) * 4.0f;
+        const int s = std::min(3, int(t));
+        const float f = t - float(s);
+        for (int k = 0; k < 3; ++k) {
+            const float st[5] = {0.08f * rgb[k], 0.4f * rgb[k], rgb[k], rgb[k] + (1.0f - rgb[k]) * 0.45f,
+                                 rgb[k] + (1.0f - rgb[k]) * 0.85f};
+            d[k] = uint8_t(std::clamp((st[s] + (st[s + 1] - st[s]) * f) * 255.0f + 0.5f, 0.0f, 255.0f));
+        }
     }
 }
 

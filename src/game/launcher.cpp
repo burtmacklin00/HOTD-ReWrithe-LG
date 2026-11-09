@@ -1206,9 +1206,9 @@ void Launcher::checkZone(int which, const std::string& path)
             if (which == 2 && (std::get<0>(v) == 2 || std::get<0>(v) == 3)) {
                 if (!isSpanishRelease(src))
                     v = {4, lang::tr("This is not the Spanish PC release"),
-                         {lang::tr("This box takes the 2003 Spanish CD (Doblaje espa\xC3\xB1ol). Your US / EU PC game goes on the Game files page.")}};
+                         {lang::tr("This box takes the 2003 Spanish CD (Castilian Spanish, Spain). Your US / EU PC game goes on the Game files page.")}};
                 else
-                    v = {2, lang::tr("The Spanish PC release (Doblaje espa\xC3\xB1ol)"),
+                    v = {2, lang::tr("The Spanish PC release (Castilian Spanish, Spain)"),
                          {lang::tr("Spanish voices: yes (Options > Audio > Voice: Auto with Espa\xC3\xB1ol, or Spanish)."),
                           lang::tr("Spanish signs and cards: with the language Espa\xC3\xB1ol and the PC models (the arcade models keep some in English).")}};
             }
@@ -1539,7 +1539,7 @@ void Launcher::render(int ww, int wh)
         title(T("Extras"));
         y = 124;
         para(T("Optional: more of your own game copies for extra features. A box can stay empty."), L, y, CW, 9, kDim);
-        zoneBox(zs, 0, 2, "Spanish PC copy (Doblaje espa\xC3\xB1ol)", "Optional: your installed 2003 Spanish CD", kZoneS, kFolderS, false);
+        zoneBox(zs, 0, 2, "Spanish PC copy (Castilian Spanish, Spain)", "Optional: your installed 2003 Spanish CD", kZoneS, kFolderS, false);
         {
             const float zy = 162, zh = 290, zw = (CW - 24) / 2, x = L + zw + 24;
             field(x, zy, zw, zh);

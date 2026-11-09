@@ -4847,6 +4847,7 @@ int main(int argc, char* argv[])
         game::rainbowBloodConfigure(rainbowOn, rainbowValues);
         const bool bigHeadOn = codeMod("bighead", bigHeadValues);
         game::bigHeadConfigure(bigHeadOn, bigHeadValues);
+        game::magicianAfterimageConfigure(rainbowOn, rainbowValues);   // (GitHub #54: the Magician's afterimages, Rainbow Blood's)
         act.erase(std::remove_if(act.begin(), act.end(), [](const ModPack& p) { return p.type != "textures"; }), act.end());
         texturePacks().setActive(std::move(act));
     };
@@ -5362,7 +5363,7 @@ int main(int argc, char* argv[])
             SDL_Log("[files] the Spanish texture text pages from %s", pcSpanishTextures().c_str());
         audio.setReloadVoice(cfg.reloadVoice);
         if (!audio.voiceDir().empty())
-            SDL_Log("[sound] the Spanish voices (Doblaje espa\xC3\xB1ol) from %s", audio.voiceDir().c_str());
+            SDL_Log("[sound] the Spanish voices (Castilian Spanish, Spain) from %s", audio.voiceDir().c_str());
         if (!audio.init(pc, frames < 0 && !mute && audioWav.empty(), err)) {
             SDL_Log("no sound: %s", err.c_str());
             return;

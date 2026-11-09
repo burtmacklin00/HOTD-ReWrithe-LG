@@ -65,7 +65,11 @@ void Runtime::pc_cells_put(uint32_t layer, int x, int y, uint32_t sprite, int w,
     if (layer >= kTileRam && l < 4) {
         const uint8_t side = uint8_t(hud_side_of(sprite, x, w));
         // (rainbow2; HOLD YOUR FIRE! 0x107 is a warning, not a player's HUD)
-        const uint8_t kind = hud_player_sprite(sprite) && sprite != 0x107 ? 1 : hit_mark_sprite(sprite) ? 2 : 0;
+        // (v1.3.1, user 2026-11-07: Rainbow Blood's HUD only on the player label and the torches: frames 0xE / 0xF, the
+        // torch base 0x14, the lamps 0xA8..0xC5; not the bullets 0x10, PRESS START, RELOAD, CONTINUE?, GAME OVER or the
+        // reload hint, whose cells also took the first letter of a subtitle under them)
+        const bool rainbowHud = sprite == 0xE || sprite == 0xF || sprite == 0x14 || (sprite >= 0xA8 && sprite <= 0xC5);
+        const uint8_t kind = rainbowHud ? 1 : hit_mark_sprite(sprite) ? 2 : 0;
         for (int r = std::max(y, 0); r < std::min(y + h, 64); ++r)
             for (int c = std::max(x, 0); c < std::min(x + w, 64); ++c) {
                 // a subtitle / text cell stays centred (a HUD sprite's transparent cells over it must not take it)

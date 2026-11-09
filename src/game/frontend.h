@@ -23,6 +23,7 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -881,6 +882,11 @@ private:
     // (rPreviewRow_: the preview widget -> its row's widget); the pictures read once per file and maker's number
     void drawRPreview(Widget& w);
     std::map<const Widget*, const Widget*> rPreviewRow_;
+    // v1.3.1 (user 2026-11-07, 2560 x 1440: "the video options seem shorter"): the pictures' strip is kept under the
+    // rows only while a row with pictures has the focus (rPrvFocus_); else every row is shown. rPrvRows_: this page's
+    // rows that would show pictures, rRowWidgets_: all its rows; a change is laid out at the next frame (rPrvPending_)
+    std::set<const Widget*> rPrvRows_, rRowWidgets_;
+    bool rPrvFocus_ = false, rPrvPending_ = false;
     std::vector<Extra>* rPreviewRows_ = nullptr;
     // (relfix2: zoom: the close-ups' spot, by the other pictures' names and the crop's size: where they differ most)
     struct PreviewPic { std::vector<uint8_t> rgba; int w = 0, h = 0; std::map<std::string, std::pair<int, int>> zoom; };

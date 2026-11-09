@@ -7,7 +7,7 @@ Options > System > What's New.
 ## [1.3.1] - 2026-11-07
 
 ### Added
-- **The Spanish PC version's dub** ("Doblaje español"), from your own copy of the 2003 Spanish PC CD (no Spanish file
+- **The Spanish PC version's Castilian Spanish dub** (Spain, "doblaje en castellano"), from your own copy of the 2003 Spanish PC CD (no Spanish file
   is included). Thanks to **3lc3z4r** (YouTube: Cez4rPlay) for the copy, its list of differences and the reference
   playthrough "The House Of The Dead (PC) - Doblaje español ORIGINAL" (https://youtu.be/OVnjusRO1wk). Details in
   `docs/spanish.md`.
@@ -15,13 +15,17 @@ Options > System > What's New.
     your US / EU copy: an installed Spanish copy or the Spanish CD itself (its image, also in a .rar / .7z / .zip:
     the game is unpacked from the CD's cabinet files); the Spanish copy also works as the PC game itself. A copy that
     cannot be used is simply left out (the setup goes on).
-  - Options > Audio > **Voice**: Auto / Spanish / English, in every mode and with both model sets and both sound
+  - Options > Audio > **Voice**: Auto / Spanish (Spain) / English, in every mode and with both model sets and both sound
     sources; Options > Audio > **Reload Voice**: On / Off.
   - With the language Español: the Spanish CD's translated pictures (chapter cards, boss cards, RELOAD -> CARGA,
     CONTINUE, the signs, the credits, the map) with the PC models, and most of them with the arcade models too; the
     menu notes say what stays in English.
   - `es.txt` uses the Spanish CD's own terms (Guerrero, Gárgola, Científica, Ajustes ...).
 - Options > Gameplay > **Boss Names**: Full / Codenames Only (only "TYPE 27" ... on the boss cards).
+- **Rainbow Blood** colours the Magician's afterimages too: each its own colour, as the creatures (both model sets), or
+  any colour per phase, or as the game (#54).
+- Rainbow Blood's HUD option: only 1P and the torches, in the rainbow's shades as players 3 / 4's colors (not the
+  bullets, PRESS START or a subtitle's first letter); the main menu's blood in the rainbow too (Menu Blood, Off by default).
 
 ### Fixed
 - Every character uses only its own head and body parts in the cut-scenes and endings (another character's head on a
@@ -32,6 +36,8 @@ Options > System > What's New.
 - The attract's white cuts keep black side bars in 4:3 (#57).
 - The cut-scene bars slide in smoothly instead of in steps (#58).
 - With PC models, the white fade after the Magician's defeat is drawn (#55, in part).
+- The Magician's afterimages turn red for his swoops and lunges, as in the arcade (they stayed blue) (#54; arcade
+  models).
 - PC Mode: a character with more hit points than Max Lives keeps them (#62, in part).
 - Chapter Retry keeps the count of rescued researchers that the last chapter's bonus room checks (#47).
 - The Spanish 1998 PC release is recognised and named by the files check.

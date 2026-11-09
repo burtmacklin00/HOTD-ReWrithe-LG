@@ -563,7 +563,7 @@ CheckReport checkPc(const std::string& folder, const std::string& cacheFile, std
                 ++differ;
                 std::string what = "a different version of the file";
                 if (isSpanishFile(want->path, head)) {
-                    what = "the Spanish release's version (Doblaje espa\xC3\xB1ol)";
+                    what = "the Spanish release's version (Castilian Spanish, Spain)";
                     ++spanish;
                 } else if (exe)
                     what = "a patched or other version of THOTD.EXE";   // relfix: only its sound cue table and icon are read
@@ -652,7 +652,7 @@ CheckReport checkPc(const std::string& folder, const std::string& cacheFile, std
     // pchotfix: the setup's short notes (yellow under the green OK)
     // spanish: the Spanish release named once (its files not listed one by one): accepted like the US / EU copies
     if (spanish)
-        r.notes.push_back("Spanish release (Doblaje espa\xC3\xB1ol): " + std::to_string(spanish) +
+        r.notes.push_back("Spanish release (Castilian Spanish, Spain): " + std::to_string(spanish) +
                           " file(s) of the 2003 Spanish CD (the Spanish voices, its textures and THOTD.EXE), accepted: "
                           "fully playable (on that CD the reload voice is silent).");
     const size_t firstNote = r.notes.size();

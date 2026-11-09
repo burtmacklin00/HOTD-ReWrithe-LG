@@ -299,10 +299,26 @@ void Hud::rainbow2D(const Runtime& rt, const uint8_t* tiles, bool high, std::vec
                             for (int ch = 0; ch < 3; ++ch)
                                 d[ch] = uint8_t(std::clamp(float(ch == 0 ? g : d[ch]) + float(share) * c[ch] + 0.5f, 0.0f, 255.0f));
                     } else {
+                        // v1.3.1 (user 2026-11-07: "the same way as P3 / P4's custom colours"): the player label and
+                        // the torches' red texels through a colour ramp of the rainbow colour (player_colours.h's way:
+                        // the art's shading kept, dark .. the colour .. near white), the rest as drawn
                         const float* c = col[x < W / 2 ? 0 : 1];
-                        const float v = float(std::max({d[0], d[1], d[2]}));
-                        for (int ch = 0; ch < 3; ++ch)
-                            d[ch] = uint8_t(std::clamp(v * c[ch] + 0.5f, 0.0f, 255.0f));
+                        // (the flames and the label only: red-dominant and bright (red 230+) or deep (green under half);
+                        // the lamp's brass, 144,112,24 / 177,154,24, stays, as P3 / P4's flames-only ramp)
+                        // (P2: its blue flames and label, blue-dominant, as P3 / P4's are made from them)
+                        const bool redFlame = d[0] > d[1] + 16 && d[0] > d[2] + 16 && (d[0] >= 230 || d[1] * 2 < d[0]);
+                        const bool blueFlame = d[2] > d[0] + 16 && d[2] > d[1] + 16;
+                        if (!redFlame && !blueFlame)
+                            continue;
+                        const float lum = (0.299f * d[0] + 0.587f * d[1] + 0.114f * d[2]) / 255.0f;
+                        const float t = std::clamp(0.5f * lum + 0.5f * float(std::max({d[0], d[1], d[2]})) / 255.0f, 0.0f, 1.0f) * 4.0f;
+                        const int k = std::min(3, int(t));
+                        const float f = t - float(k);
+                        for (int ch = 0; ch < 3; ++ch) {
+                            const float st[5] = {0.08f * c[ch], 0.4f * c[ch], c[ch], c[ch] + (1.0f - c[ch]) * 0.45f,
+                                                 c[ch] + (1.0f - c[ch]) * 0.85f};
+                            d[ch] = uint8_t(std::clamp((st[k] + (st[k + 1] - st[k]) * f) * 255.0f + 0.5f, 0.0f, 255.0f));
+                        }
                     }
                 }
         }
@@ -2537,6 +2553,22 @@ void Hud::drawTotdNote(const Runtime& rt, int ww, int wh)
 }
 
 
+// v1.3.1 (user 2026-11-07 "does rainbow account for p2, p3, p4?"): players 3 / 4's HUD colour: with Rainbow Blood's
+// HUD option the same kind of ramp (player 2's blue texels, shadow .. white-hot core) of the rainbow colour (the
+// computer screens' cycle), each seat a quarter of the cycle from players 1 / 2; else their green / yellow
+static Recolour seatHudRecolour(const Runtime& rt, int seat)
+{
+    Recolour r = playerRecolour(seat);
+    float c[3];
+    if (seat >= 2 && rainbowBloodSettings().hud >= 2 && !rt.greyPalette.on && rainbowColour(rt, seat == 2 ? 0.25f : 0.75f, c, true))
+        for (int ch = 0; ch < 3; ++ch) {
+            const float st[5] = {0.06f * c[ch], 0.38f * c[ch], 0.8f * c[ch], c[ch] + (1.0f - c[ch]) * 0.45f, c[ch] + (1.0f - c[ch]) * 0.88f};
+            for (int k = 0; k < 5; ++k)
+                r.ramp[k][ch] = uint8_t(std::clamp(st[k] * 255.0f + 0.5f, 0.0f, 255.0f));
+        }
+    return r;
+}
+
 void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
 {
     port::Mem& mem = rt.mem;
@@ -2757,7 +2789,7 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
                     for (int x = (y & 1); x < W; x += 2)
                         all.px[(size_t(y) * W + x) * 4 + 3] = 0;
             if (kind > 0) {
-                Recolour r = playerRecolour(seat);
+                Recolour r = seatHudRecolour(rt, seat);
                 if (kind == 2)
                     r.select = Recolour::All;
                 recolourRgba(all.px.data(), all.px.size() / 4, r);
@@ -2820,7 +2852,7 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
                         }
                     }
                     paste(lab.px, lab.w, lab.h, pp, dw + 1, 0);
-                    Recolour r = playerRecolour(seat);
+                    Recolour r = seatHudRecolour(rt, seat);
                     r.select = Recolour::All;
                     recolourRgba(lab.px.data(), lab.px.size() / 4, r);
                 }

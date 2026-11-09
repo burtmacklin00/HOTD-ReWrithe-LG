@@ -562,13 +562,13 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // board's voice lines too); offered when a Spanish PC copy is there (the PC game folder or data\pc_spanish)
         // spanish2 (user 2026-11-06): Auto (the default) follows the language: the Spanish dub with Espa\xC3\xB1ol;
         // English / Spanish: always that one (voice= 0 Auto, 1 Spanish, 2 English)
-        r.push_back({"Voice", [&c]() { return std::string(c.voice == 1 ? "Spanish" : c.voice == 2 ? "English" : "Auto"); },
+        r.push_back({"Voice", [&c]() { return std::string(c.voice == 1 ? "Spanish (Spain)" : c.voice == 2 ? "English" : "Auto"); },
                      [&c, save, h]() {
                          c.voice = c.voice == 0 ? 2 : c.voice == 2 ? 1 : 0;
                          save();
                      },
-                     "The voices: Auto (the Spanish dub with the language Espa\xC3\xB1ol, else English), English, or the Spanish dub (Doblaje espa\xC3\xB1ol) of your Spanish PC copy, in every mode"});
-        listed(r, {"Auto", "English", "Spanish"});
+                     "The voices: Auto (the Spanish dub with the language Espa\xC3\xB1ol, else English), English, or the Spanish dub (Castilian Spanish, Spain) of your Spanish PC copy, in every mode"});
+        listed(r, {"Auto", "English", "Spanish (Spain)"});
         r.back().off = [h]() {
             return !(h.spanishVoices && h.spanishVoices())
                        ? std::string("The Spanish voices need your Spanish PC copy (the setup's Extras page: Options > System > Repair / Change Files)")

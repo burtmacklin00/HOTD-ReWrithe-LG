@@ -480,6 +480,10 @@ public:
     uint16_t backdrop555 = 0x8000;
     int paletteWhite_ = -1;
     uint32_t fadeIdSeen_ = 0;
+    // GitHub #54 (v1.3.1): the texture area in which the Magician wrote his colour word (polygon palette entry 583,
+    // 0x180248E: 0xFEC0 blue as he flies, 0x801F red for the swoops and the lunge; his afterimages, model 0x1C20, are
+    // drawn in it); palette_anim_copy hands it to the renderer while that area is loaded. 0xFFFFFFFF: none
+    uint32_t magicianColourArea_ = 0xFFFFFFFFu;
     int paletteWhite() const;
     // PC models: THOTD.EXE's screen fade (pcpolish3). The main 3D view's draw context (0xD5A5C0) has a brightness
     // +0x64 (0x10000 normal, 0 black, 0x20000 white), a target +0x68 and the milliseconds left +0x5C; the view's draw

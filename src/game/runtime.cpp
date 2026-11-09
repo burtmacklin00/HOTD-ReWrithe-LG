@@ -477,8 +477,14 @@ void Runtime::hw_write32(uint32_t addr, uint32_t value)
 {
     if (addr == 0x804000 || (addr >= 0x800000 && addr < 0x800100))
         geo_write(addr, value);
-    if (addr >= 0x1802000 && addr < 0x1802800 && mem.mapped(addr))   // palette bank 2: the Magician's colour word (stos)
+    if (addr >= 0x1802000 && addr < 0x1802800 && mem.mapped(addr)) {   // palette bank 2: the Magician's colour word (stos)
         mem.at<uint16_t>(addr) = uint16_t(value);
+        if (addr == 0x180248E) {   // (#54: drawn from now on, in this area; HOTD_TRACE_MAGCOLOUR: each write)
+            magicianColourArea_ = mem.u32(0x51F9B4);
+            static const bool trace = std::getenv("HOTD_TRACE_MAGCOLOUR") != nullptr;
+            if (trace) std::printf("[magician] frame %u: colour word %04X\n", frameCount, unsigned(value & 0xFFFF));
+        }
+    }
     if (addr == 0x1800124) {
         // flash: palette entry 0x92 (the low half; 0x93 = the high half, 0). A fade step writes (31 - level) grey with
         // bit 15; 0 at a fade-in's end. The PC (THOTD.EXE 0x4D1EE4 state 0x11: 0x41B268, the screen to white over

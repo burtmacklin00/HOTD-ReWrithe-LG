@@ -456,7 +456,7 @@ float galleryRainbowSpeedStep(float s, int dir)
 }
 const char* galleryCreatureBloodName(int c)
 {
-    static const char* const kNames[3] = {"Own Colour Each", "Rainbow Cycle", "Off"};
+    static const char* const kNames[3] = {"Own Color Each", "Rainbow Cycle", "Off"};
     return kNames[std::clamp(c, 0, 2)];
 }
 const char* galleryPartName(int p)

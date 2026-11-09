@@ -39,14 +39,62 @@ void rainbowBloodConfigure(bool on, const std::map<std::string, std::string>& va
     const std::string sp = valueOf(values, "speed", "Normal");
     s.speed = sp == "Still" ? 0.0f : sp == "Slow" ? 0.1f : sp == "Fast" ? 60.0f / 135.0f : 0.2f;
     const std::string cr = valueOf(values, "creature", "Rainbow Cycle");
-    s.creature = cr == "Own Colour Each" ? 0 : cr == "Off" ? 2 : 1;
+    s.creature = cr == "Own Colour Each" || cr == "Own Color Each" ? 0 : cr == "Off" ? 2 : 1;   // (v1.3.1: US spelling; the old value kept)
     const std::string hud = valueOf(values, "hud", "Off");
     s.hud = hud == "Crosshair" ? 1 : hud == "HUD" ? 2 : hud == "Both" ? 3 : 0;
+    s.menu = valueOf(values, "menu", "Off") == "Rainbow";   // (v1.3.1: the menu's blood, Off by default)
     rainbowBloodSettings() = s;
 }
 
 // rainbow2: the renderer's colour on the CPU (the 2D blood, the HUD, the sights): phase from the game's frame, the
 // table 0xAB120 (palette_animation's Chapter 4 screens: RGB555, R in the low bits) blended between its steps
+namespace {
+float (&menuTable())[90][3]
+{
+    static float t[90][3] = {};
+    return t;
+}
+bool& menuTableKnown()
+{
+    static bool k = false;
+    return k;
+}
+} // namespace
+
+void rainbowTableCache(const Runtime& rt)
+{
+    if (menuTableKnown() || !rt.mem.mapped(0xAB120 + 2u * 89u))
+        return;
+    for (int i = 0; i < 90; ++i) {
+        const uint16_t v = rt.mem.at<uint16_t>(0xAB120 + 2u * uint32_t(i));
+        if (!((v & 31) == 31 || (v >> 5 & 31) == 31 || (v >> 10 & 31) == 31))
+            return;   // (not the table: not loaded yet)
+        for (int k = 0; k < 3; ++k) menuTable()[i][k] = float(v >> (5 * k) & 31) / 31.0f;
+    }
+    menuTableKnown() = true;
+}
+
+bool rainbowMenuColour(double seconds, float rgb[3])
+{
+    const RainbowBloodSettings& s = rainbowBloodSettings();
+    if (!s.on || !s.menu)
+        return false;
+    // (user 2026-11-07: "extremely laggy": each change draws the whole Remake menu again, its blood art recoloured
+    // pixel by pixel; so one change every 3 s, 12 colours a cycle)
+    const double h = std::fmod(std::floor(seconds / 3.0) / 12.0, 1.0);
+    if (menuTableKnown()) {
+        const int i = int(h * 90.0) % 90;
+        for (int k = 0; k < 3; ++k) rgb[k] = menuTable()[i][k];
+        return true;
+    }
+    for (int k = 0; k < 3; ++k) {
+        double t = h + (k == 0 ? 0.0 : k == 1 ? 2.0 / 3.0 : 1.0 / 3.0);
+        t = std::fabs((t - std::floor(t)) * 6.0 - 3.0) - 1.0;
+        rgb[k] = float(std::clamp(t, 0.0, 1.0));
+    }
+    return true;
+}
+
 bool rainbowColour(const Runtime& rt, float offset, float rgb[3], bool always)
 {
     const RainbowBloodSettings& s = rainbowBloodSettings();
@@ -63,6 +111,8 @@ bool rainbowColour(const Runtime& rt, float offset, float rgb[3], bool always)
         for (int k = 0; k < 3; ++k) c[i][k] = float(ch[k]) / 31.0f;
     }
     if (table) {
+        std::copy(&c[0][0], &c[0][0] + 90 * 3, &menuTable()[0][0]);   // (v1.3.1: kept for the menus' blood)
+        menuTableKnown() = true;
         const double x = h * 90.0;
         const int i = int(x) % 90, j = (i + 1) % 90;
         const float f = float(x - std::floor(x));
@@ -179,6 +229,90 @@ void bigHeadConfigure(bool on, const std::map<std::string, std::string>& values)
     s.everyone = valueOf(values, "who", "Everyone") != "Enemies";   // (default Everyone: user 2026-11-03)
     s.bosses = valueOf(values, "bosses", "On") != "Off";
     bigHeadSettings() = s;
+}
+
+MagicianAfterimageSettings& magicianAfterimageSettings()
+{
+    static MagicianAfterimageSettings s;
+    return s;
+}
+
+namespace {
+int afterimageColour(const std::string& v)
+{
+    if (v == "Rainbow") return -2;
+    if (v.size() == 7 && v[0] == '#') {
+        char* end = nullptr;
+        const long c = std::strtol(v.c_str() + 1, &end, 16);
+        if (end && *end == 0) return int(c & 0xFFFFFF);
+    }
+    static const std::pair<const char*, int> named[] = {
+        {"Red", 0xFF0000}, {"Orange", 0xFF8000}, {"Yellow", 0xFFFF00}, {"Green", 0x00FF00}, {"Cyan", 0x00FFFF},
+        {"Blue", 0x0040FF}, {"Purple", 0x9000FF}, {"Pink", 0xFF40C0}, {"White", 0xFFFFFF}};
+    for (const auto& [n, c] : named)
+        if (v == n) return c;
+    return -1;   // Original (or anything unknown)
+}
+uint16_t rgb555(int rgb)
+{
+    const int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+    return uint16_t(0x8000 | (r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10));
+}
+} // namespace
+
+void magicianAfterimageConfigure(bool on, const std::map<std::string, std::string>& values)
+{
+    MagicianAfterimageSettings s;
+    s.on = on;
+    // (the Rainbow Blood mod's settings, user 2026-11-07 "this all should be in the rainbow mod": Rainbow by default)
+    s.phase1 = afterimageColour(valueOf(values, "afterimage1", "Rainbow"));
+    s.phase2 = afterimageColour(valueOf(values, "afterimage2", "Rainbow"));
+    const std::string sp = valueOf(values, "speed", "Normal");
+    s.speed = sp == "Slow" ? 0.1f : sp == "Fast" ? 0.6f : 0.25f;
+    magicianAfterimageSettings() = s;
+}
+
+uint16_t magicianAfterimageWord(uint16_t word, uint32_t frame)
+{
+    const MagicianAfterimageSettings& s = magicianAfterimageSettings();
+    if (!s.on) return word;
+    // the game's two words: 0xFEC0 (blue: phase 1, flying) and 0x801F (red: phase 2, swoops / lunges)
+    const int c = (word & 0x7FFF) == 0x7EC0 ? s.phase1 : (word & 0x7FFF) == 0x001F ? s.phase2 : -1;
+    if (c == -1) return word;
+    if (c >= 0) return rgb555(c);
+    // the rainbow: a full-saturation hue from the frame
+    const double h = std::fmod(double(frame) * s.speed / 60.0, 1.0) * 6.0;
+    const int i = int(h);
+    const double f = h - i;
+    const int up = int(255 * f), down = int(255 * (1 - f));
+    const int rgb[6] = {0xFF0000 | (up << 8), (down << 16) | 0xFF00, 0xFF00 | up, (down << 8) | 0xFF, (up << 16) | 0xFF,
+                        0xFF0000 | down};
+    return rgb555(rgb[i % 6]);
+}
+
+uint16_t magicianAfterimageItemWord(const Runtime& rt, uint32_t model, uint32_t task, bool pc)
+{
+    const MagicianAfterimageSettings& s = magicianAfterimageSettings();
+    if (!s.on || model != 0x1C20 || task == 0 || !rt.mem.mapped(0x180248E) || !rt.mem.mapped(task + 0x2E0))
+        return 0;
+    const uint16_t word = rt.mem.at<uint16_t>(0x180248E);
+    const int c = (word & 0x7FFF) == 0x7EC0 ? s.phase1 : (word & 0x7FFF) == 0x001F ? s.phase2 : -1;
+    if (c >= 0 && pc)
+        return rgb555(c);   // (the PC models: no palette entry, the colour per item)
+    if (c != -2)
+        return 0;   // (Original: the game's; one colour, arcade models: the palette entry's)
+    // the frame it appeared: its fade starts at the Magician's (0xFF drawn normally) and drops 5 a frame
+    const int fade = rt.mem.at<int16_t>(task + 0x2E0);
+    const uint32_t age = uint32_t(std::clamp((0xFF - fade) / 5, 0, 60));
+    const uint64_t now = uint64_t(rt.frameCount);
+    const uint32_t born = uint32_t(now - std::min<uint64_t>(age, now));
+    // the computer screens' table steps per frame of its birth (Slow / Normal / Fast): the next afterimage, a few frames
+    // later, a clearly different colour
+    const uint32_t step = s.speed < 0.15f ? 2u : s.speed > 0.5f ? 9u : 5u;
+    const uint32_t i = (born * step) % 90u;
+    if (rt.mem.mapped(0xAB120 + 2u * 89u))
+        return uint16_t(rt.mem.at<uint16_t>(0xAB120 + 2u * i) | 0x8000u);
+    return magicianAfterimageWord(0x801F, born * 7u);   // (no table: a plain hue)
 }
 
 bool bigHeadTypeOn(int type)

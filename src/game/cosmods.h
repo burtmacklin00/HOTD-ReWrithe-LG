@@ -30,12 +30,17 @@ struct RainbowBloodSettings {
     // "HUD & Crosshair" (user 2026-11-03, rainbow2): 0 Off (default), 1 Crosshair (the players' sights cycle, each
     // player a phase of their own), 2 HUD (the player HUD: bullets, 1P / 2P, torches, the score, its prompts), 3 Both
     int hud = 0;
+    bool menu = false;   // v1.3.1 "Menu Blood: Rainbow": the menus' blood too (Off by default: each change redraws the menu)
 };
 RainbowBloodSettings& rainbowBloodSettings();
 // rainbow2: the rainbow colour now (0..1 RGB) at hue offset `offset` (added to the phase; "Together" leaves it out
 // unless `always`), the same as the renderer's (render/renderer.cpp uRainbowTable): the game's 90-colour table 0xAB120
 // blended, a plain hue if it is missing. false: the mod is off (rgb untouched)
 bool rainbowColour(const Runtime& rt, float offset, float rgb[3], bool always = false);
+// v1.3.1 (user 2026-11-07: "the rainbow blood mod to affect the main menu blood"): the colour for the menus' blood at
+// `seconds` (the computer screens' table once a game has read it, else a plain hue; 45 steps a cycle). false: mod off
+bool rainbowMenuColour(double seconds, float rgb[3]);
+void rainbowTableCache(const Runtime& rt);   // (the table read once from a runtime with the game loaded: palette_anim_copy)
 // The custom Blood Color on the arcade models (user 2026-11-03: the Rainbow Blood recolour with one colour): the
 // creatures' painted wounds take it too (RenderOptions::rainbow 3). 0xRRGGBB, -1 none; the view sets it each frame
 int& customWoundBlood();
@@ -64,6 +69,26 @@ struct BigHeadSettings {
 BigHeadSettings& bigHeadSettings();
 // mod.ini [settings] keys size / who / bosses
 void bigHeadConfigure(bool on, const std::map<std::string, std::string>& values);
+
+// Magician Afterimages (user 2026-11-07, GitHub #54): the colour of his afterimages (polygon palette entry 583, which
+// the game sets 0xFEC0 blue as he flies, 0x801F red for the swoops and lunges) per phase: -1 Original, -2 Rainbow,
+// else 0xRRGGBB (a named colour or "#RRGGBB" in the mod.ini / launcher.ini). Draw only
+struct MagicianAfterimageSettings {
+    bool on = false;
+    int phase1 = -1, phase2 = -1;
+    float speed = 0.2f;   // rainbow hue cycles per second
+};
+MagicianAfterimageSettings& magicianAfterimageSettings();
+void magicianAfterimageConfigure(bool on, const std::map<std::string, std::string>& values);
+// the colour word to draw for the game's `word` at `frame` (RGB555 with bit 15, R in the low bits): the game's own
+// unless the mod changes that phase
+uint16_t magicianAfterimageWord(uint16_t word, uint32_t frame);
+// the DrawItem::palOver of a model drawn by the task `task` (v1.3.1: "each afterimage its own colour", user
+// 2026-11-07): the Magician's afterimage (model 0x1C20) in a Rainbow phase: the Chapter 4 computer screens' colours
+// (palette_animation's 90-colour table 0xAB120) by the frame it appeared, so each one keeps its colour and the next one
+// takes the next; 0 none (the palette entry's colour)
+uint16_t magicianAfterimageItemWord(const Runtime& rt, uint32_t model, uint32_t task, bool pc = false);
+// (pc: the PC models, whose afterimages are textured, always blue in the PC game: every colour the mod sets per item)
 // whether a creature type gets a big head with the settings now (the mod on; Heads: the people; Bosses). Also the
 // Gallery's (relfix: it follows the Mods page's Big Head)
 bool bigHeadTypeOn(int type);

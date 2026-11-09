@@ -1287,6 +1287,10 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         // cosmods: Rainbow Blood's creature colour, for the body's own parts only (a splash or a pool drawn with a body
         // took that frame's body: its colour jumped every frame, user's clip 2026-11-03)
         d.bloodHue = dm.shadow ? -1.0f : dm.part != 0 ? creatureBloodHue(dm.body) : creatureBloodKeepsRows(dm.body) ? 6.0f : -1.0f;
+        if (rt.pcModels)   // (v1.3.1: each afterimage its own colour; the PC models: their texels tinted)
+            d.pcTint = magicianAfterimageItemWord(rt, dm.model, dm.task, true);
+        else
+            d.palOver = magicianAfterimageItemWord(rt, dm.model, dm.task);
         // (rainbow2: the Chariot draws its body without parts: its blood rows kept there too, creatureBloodKeepsRows)
         // decals: flat models (the water splashes picha00a-19a, 0x9F2-0xA05, all at the floor height) and squashed ones (the
         // _DD shadows: a zero vertical row) lie coplanar with the ground and with each other; drawn after the opaque pass
