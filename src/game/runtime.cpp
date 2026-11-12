@@ -539,7 +539,7 @@ void Runtime::geo_draw_model(uint32_t model)
     if (coop4_on() && (model == 0x3F6 || model == 0x3BC)) {   // 4P: players 3 / 4's MISS SHOT mark / extra-life gift
         const uint32_t r = mem.u32(d.task);
         const uint8_t who = mem.at<uint8_t>(d.task + 0x2EB);
-        if ((r == F::hostage_shot_effect || r == F::hostage_gift_fly) && (who == 2 || who == 3))
+        if ((r == F::hostage_shot_effect || r == F::hostage_gift_fly) && (who == 2 || who == 3) && look_seat(who) >= 2)   // (charsel4: Rogan / G's as they are)
             d.ramp = int8_t(who - 2);
     }
     if (hideMarks && (model == 0x3F5 || model == 0x3F6))   // trailer: Trailer Mode's no MISS SHOT mark
@@ -641,6 +641,15 @@ bool Runtime::teamFlashDraw(DrawModel& d)
         seat = int(d.model - 0x660);
     } else {
         return true;
+    }
+    // charsel4: the model is the look seat's (Rogan player 1's, G player 2's in any seat, look_seat): the seat with
+    // that look, if only one has it (two with it: drawn as the own one)
+    if (seat >= 0 && d.ramp < 0 && chars_on()) {
+        int found = -1, n = 0;
+        for (int p = 0; p < seat_count(); ++p)
+            if (look_seat(p) == seat)
+                found = p, ++n;
+        seat = n == 1 ? found : n > 1 ? ownSeat : seat;
     }
     if (d.ramp >= 0)
         seat = d.ramp + 2;   // 4P: players 3 / 4's flash / spark (the kFlashes / kSparks rings, above)
@@ -768,10 +777,46 @@ void Runtime::geo_matrix_position(uint32_t model, uint32_t out)
             mem.set32(out + 4 * k, port::fbits(tgp.matrix()[9 + k]));
 }
 
+// vr4 (runtime.h VrLeftGun): the left VR gun's magazine in the player's record for this tick's left shot / reload
+void Runtime::vrLeftBefore()
+{
+    vrLeft.swapped = false;
+    if (!vrLeft.on) {
+        vrLeft.use = false;
+        return;
+    }
+    port::a::Player& pl = mem.at<port::a::Player>(player_rec(0));
+    if (pl.state != 5 || mem.at<int16_t>(G::game_mode) != 4) {   // (out of play: full again, as the game's next start)
+        vrLeft.rounds = uint8_t(pm_full_rounds(0)), vrLeft.empty = 0, vrLeft.use = false;
+        return;
+    }
+    if (!vrLeft.use)
+        return;
+    vrLeft.use = false;
+    std::swap(pl.rounds, vrLeft.rounds);
+    std::swap(pl.empty, vrLeft.empty);
+    vrLeft.swapped = true;
+    vrLeft.start = pl.rounds;
+}
+
+void Runtime::vrLeftAfter()
+{
+    if (!vrLeft.swapped)
+        return;
+    vrLeft.swapped = false;
+    port::a::Player& pl = mem.at<port::a::Player>(player_rec(0));
+    if (pl.rounds < vrLeft.start) ++vrLeft.shots;   // (the left magazine: a round spent / refilled this tick)
+    if (pl.rounds > vrLeft.start) ++vrLeft.reloads;
+    std::swap(pl.rounds, vrLeft.rounds);   // (back: the right gun's in the record, the left one's kept here)
+    std::swap(pl.empty, vrLeft.empty);
+}
+
 // one frame: mode 4 (the game: mode4_game, game_frame: the port's) or 5 (game over)
 void Runtime::frame()
 {
+    vrLeftBefore();   // vr4: the left VR gun's tick (nothing otherwise)
     frame_one();
+    vrLeftAfter();
     // Boss Mode's walk-up (THOTD.EXE pc_main_loop 0x419168: `while (pc_boss_next) frame_tick();` before the frame it
     // draws): the frames up to the boss's entrance (0x412BC4 clears it) run at once, undrawn and silent
     for (int n = 0; boss_next_on() && mem.at<int16_t>(G::game_mode) == 4 && !chapterDone && n < 40000; ++n)
@@ -787,6 +832,11 @@ void Runtime::frame()
             frame_one();
         survival.tick(*this);
     }
+#if HOTD_HORDE
+    static const bool hordeTrace = HordeMode::testing();   // (feel, the wall test: testing, the plain game's too)
+    if (horde.on() || hordeTrace)   // Horde Mode (game/horde.h): its peaks (the log, the test line)
+        horde.tick(*this);
+#endif
     if (weapons.on()) {   // the weapons (game/weapons.h): Survival's once the arena is held, the other modes' in play
         weapons.live = weapons.mode == Weapons::Survival ? survival.frozen && survival.phase != SurvivalMode::Over
                                                          : mem.at<int16_t>(G::game_mode) == 4;

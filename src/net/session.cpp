@@ -128,7 +128,9 @@ std::vector<uint8_t> encodeRoster(const RosterSeat r[4])
             v.push_back(i < n.size() ? uint8_t(n[i]) : 0);
         v.push_back(r[s].pcChar >= 0 && r[s].pcChar <= kPmCharMax ? uint8_t(r[s].pcChar) : 0xFF);   // (protocol 16; 20: to 19)
     }
-    v.push_back(r[0].boss >= 2 && r[0].boss <= 6 ? uint8_t(r[0].boss) : 0);   // the host's Boss Mode (protocol 18)
+    // the host's Boss Mode (protocol 18); 0x10 + arena: its Survival game (protocol 22)
+    v.push_back(r[0].survival >= 1 && r[0].survival <= 16 ? uint8_t(0x10 + r[0].survival - 1)
+                : r[0].boss >= 2 && r[0].boss <= 6 ? uint8_t(r[0].boss) : 0);
     return v;
 }
 
@@ -136,8 +138,8 @@ bool decodeRoster(const uint8_t* p, size_t n, RosterSeat out[4])
 {
     if (n != 4 * kRosterSeat + 1)
         return false;
-    const uint8_t boss = p[4 * kRosterSeat];   // (protocol 18: 0, or 2-6)
-    if (boss == 1 || boss > 6)
+    const uint8_t boss = p[4 * kRosterSeat];   // (protocol 18: 0, or 2-6; protocol 22: 0x10-0x1F Survival)
+    if (boss == 1 || (boss > 6 && boss < 0x10) || boss > 0x1F)
         return false;
     RosterSeat t[4];
     for (int s = 0; s < 4; ++s) {
@@ -158,7 +160,8 @@ bool decodeRoster(const uint8_t* p, size_t n, RosterSeat out[4])
             return false;
         t[s].pcChar = ch == 0xFF ? -1 : ch;
     }
-    t[0].boss = boss;
+    t[0].boss = boss <= 6 ? boss : 0;
+    t[0].survival = boss >= 0x10 ? boss - 0x10 + 1 : 0;
     for (int s = 0; s < 4; ++s)
         out[s] = t[s];
     return true;
@@ -195,6 +198,10 @@ std::vector<uint8_t> encodeSettings(const Settings& s)
     v.push_back(s.pmContinues);
     v.push_back(s.pmFreePlay);
     v.push_back(s.bossMode);    // Boss Mode (protocol 18): 0, or 2-6
+    v.push_back(s.survival);    // Survival Mode (protocol 22): 0, or the arena + 1; its seed, cap, cut, testing
+    put32(v, s.survivalSeed);
+    for (uint8_t b : {s.survivalCap, s.survivalCut, s.survivalSmgWave, s.survivalWeaponsWave, s.survivalTest})
+        v.push_back(b);
     return v;
 }
 
@@ -202,11 +209,12 @@ bool decodeSettings(const uint8_t* p, size_t n, Settings& s)
 {
     // protocol 7: 2 version, 14 bytes, 2 hashEvery, 4 joinFrame, 4 logBytes, 1 routes + 3 each, 1 sonic, 1 gameSpeed,
     // 1 seats; protocol 8: 1 pcs, 1 seat; protocol 11: 1 autoReload; protocol 12: 1 gameText; protocol 14: 1 boss4p, 1 enemy4p;
-    // protocol 16: 1 pcMode, 4 pmChar, 1 pmContinues, 1 pmFreePlay; protocol 18: 1 bossMode
-    if (n < 44 || get16(p) != kProtocol)
+    // protocol 16: 1 pcMode, 4 pmChar, 1 pmContinues, 1 pmFreePlay; protocol 18: 1 bossMode; protocol 22: 1 survival,
+    // 4 survivalSeed, 1 survivalCap, 1 survivalCut, 1 survivalSmgWave, 1 survivalWeaponsWave, 1 survivalTest
+    if (n < 54 || get16(p) != kProtocol)
         return false;
     const size_t routes = p[26];
-    if (routes > 32 || n != 44 + 3 * routes)
+    if (routes > 32 || n != 54 + 3 * routes)
         return false;
     Settings t;
     uint8_t* f[] = {&t.chapter, &t.event, &t.players, &t.models, &t.difficulty, &t.lives, &t.blood, &t.sound, &t.livesKept,
@@ -243,6 +251,17 @@ bool decodeSettings(const uint8_t* p, size_t n, Settings& s)
     t.pmContinues = p[41 + 3 * routes];
     t.pmFreePlay = p[42 + 3 * routes];
     t.bossMode = p[43 + 3 * routes];
+    t.survival = p[44 + 3 * routes];
+    t.survivalSeed = get32(p + 45 + 3 * routes);
+    t.survivalCap = p[49 + 3 * routes];
+    t.survivalCut = p[50 + 3 * routes];
+    t.survivalSmgWave = p[51 + 3 * routes];
+    t.survivalWeaponsWave = p[52 + 3 * routes];
+    t.survivalTest = p[53 + 3 * routes];
+    // (Survival: an arena 1-16, never with PC Mode / Boss Mode; a cap 1-64)
+    if (t.survival > 16 || (t.survival && (t.pcMode || t.bossMode)) || t.survivalCap < 1 || t.survivalCap > 64 ||
+        t.survivalCut > 1 || t.survivalTest > 3)
+        return false;
     if (t.pcMode > 1 || t.pmContinues > 9 || t.pmFreePlay > 1)
         return false;
     if (t.bossMode == 1 || t.bossMode > 6 || (t.bossMode && t.pcMode))   // (Boss Mode: 2-6, never PC Mode)
@@ -621,6 +640,8 @@ void Session::receiveAll(int waitMs)
         const int n = sock_.recv(buf, sizeof buf, from, k == 0 ? waitMs : 0);
         if (n <= 0)
             return;
+        if (opt_.raw && opt_.raw(from, buf, size_t(n)))   // (the join code's hole punching: STUN, punch packets)
+            continue;
         if (size_t(n) > kMaxPacket) { ++dropped[kMalformed]; continue; }
         handle(from, buf, size_t(n), hsSettings_);
     }
@@ -1198,6 +1219,17 @@ void Session::pump(int waitMs)
     }
     if (opt_.fuzz > 0 && readySet_ && peerReady_)
         fuzz();
+}
+
+bool Session::retarget(const Address& a)
+{
+    if (opt_.host || connected_ || gotAck_ || !a.ip)
+        return false;
+    if (a != peer_) {
+        peer_ = a;
+        lastHello_ = {};   // (the HELLO there at once)
+    }
+    return true;
 }
 
 bool Session::rejoinHello(const Address& from, const uint8_t* hello)

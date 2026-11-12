@@ -8,7 +8,7 @@
 //   The defaults (today's keys): player 1: 1 start, P pause (Esc always pauses); player 2: arrows aim, Space / Right
 //   Ctrl fire, Right Shift / Enter reload, 2 start; player 3: W A S D, F, R, 3; player 4: I K J L (keypad 8 5 4 6),
 //   H (keypad 0), Y (keypad .), 4. A pad's defaults follow its control style (pads.h); "Auto" until one is changed.
-// Fixed (not bindable): Esc (the pause, the capture's cancel), F1, F3, F9, F11, F12, the Windows keys, Print Screen.
+// Fixed (not bindable): Esc (the pause, the capture's cancel), F1, F3, F8 (Photo Mode), F9, F11, F12, the Windows keys, Print Screen.
 #pragma once
 
 #include <SDL3/SDL.h>

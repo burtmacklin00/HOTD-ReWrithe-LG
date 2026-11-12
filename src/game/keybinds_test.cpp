@@ -332,6 +332,17 @@ void BindTest::after(int i, Ctx& c)
                      promptChoiceStyle(14) < 0 && padIcon(kPackXelu, SDL_GAMEPAD_TYPE_PS4, kPiBack) == "xelu/ps4/PS4_Share" && padIcon(kPackXelu, kPsGameCube, kPiSouth).empty() && keyIcon(kPackXelu, "Esc") == "xelu/keyboard/Esc_Key_Dark" &&
                      padIcon(kPackKenney, kPsGameCube, kPiSouth) == "kenney/gamecube/gamecube_button_a" && padIcon(kPackKenney, kPsN64, kPiSouth).empty(),
                  "prompts: Button Icons Auto / Xbox Series / PS5 / Steam Deck / Keyboard, the icons by model (Xelu PS4 Share, Esc; GameCube: Kenney A; N64 none)");
+        // vrprompts: a VR controller's style from its OpenXR profile, its buttons' names, no pack icons (Simple caps),
+        // the translated controls lines' key words replaced (German's "Rücktaste/B", Japanese) and others untouched
+        c.expect(vrStyleOfProfile("/interaction_profiles/oculus/touch_controller") == kPsVrTouch && vrStyleOfProfile("/interaction_profiles/valve/index_controller") == kPsVrIndex &&
+                     vrStyleOfProfile("/interaction_profiles/htc/vive_controller") == kPsVrVive && vrStyleOfProfile("") == kPsVrTouch && isVrStyle(kPsVrSimple) && !isVrStyle(kPsXboxSeries) &&
+                     promptFamily(kPsVrIndex) == kPfVr && padInputName(kPiSouth, kPsVrTouch) == "Trigger" && padInputName(kPiEast, kPsVrTouch) == "B" &&
+                     padInputName(kPiStart, kPsVrTouch) == "Menu" && padInputName(kPiEast, kPsVrVive) == "Menu" && padInputName(kPiL1, kPsVrIndex) == "Grip" &&
+                     padIcon(kPackXelu, kPsVrTouch, kPiSouth).empty() && padIcon(kPackKenney, kPsVrIndex, kPiSouth).empty() && packFor(kPackXelu, kPsVrTouch) == kPackSimple &&
+                     vrPromptLine("Enter/A Choose    Esc/B Back", kPsVrTouch) == "Trigger Choose    B Back" &&
+                     vrPromptLine("Namen tippen    R\xC3\xBC" "cktaste/B L\xC3\xB6schen    Enter Fertig", kPsVrVive) == "Namen tippen    Menu L\xC3\xB6schen    Trackpad Fertig" &&
+                     vrPromptLine("Enter/A \xE6\xB1\xBA\xE5\xAE\x9A", kPsVrIndex) == "Trigger \xE6\xB1\xBA\xE5\xAE\x9A" && vrPromptLine("Up/Down Pick", kPsVrTouch) == "Up/Down Pick",
+                 "prompts: VR controllers (Touch / Index / Vive from the OpenXR profile): their buttons' names, drawn caps, the controls lines in any language");
         // padglyphs: the menus' pad cursor (menu_cursor.h) from SDL's events: a touchpad stroke right moves it right,
         // its click clicks; the gyro moves it only while ZL / L2 / LT is held (While Holding); Touchpad Off: not used
         {

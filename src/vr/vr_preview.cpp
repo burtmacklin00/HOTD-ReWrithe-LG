@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace hotd::vr {
@@ -78,6 +80,7 @@ public:
     }
 
     void setOutputSize(int w, int h) override { outW_ = std::max(2, w), outH_ = std::max(2, h); }
+    void setQuestSim(float scale) override { questScale_ = std::clamp(scale, 0.5f, 1.5f); }
     void setCursor(int eye, float u, float v) override
     {
         cursorEye_ = std::clamp(eye, 0, 1);
@@ -109,6 +112,29 @@ public:
         }
         normalize3(d);
         return true;
+    }
+
+    // questsim: HOTD_QUEST_LIFECYCLE=F (the test): from the preview's frame F the Quest's lifecycle scripted: 300
+    // frames (5 s) VISIBLE not FOCUSED (the Meta menu over the game), FOCUSED 300, then STOPPING 300 (the headset off:
+    // nothing shown, READY -> FOCUSED again after), FOCUSED 300, then the app paused 2 s (SDL's Android activity blocks
+    // the loop in onPause) and resumed
+    bool focused() const override { return phase_ != 1 && phase_ != 3; }
+    void lifecycle(FrameState& fs)
+    {
+        static const char* env = std::getenv("HOTD_QUEST_LIFECYCLE");
+        if (!env || questScale_ <= 0.0f) return;
+        const long long f = (long long)frameNo_++ - std::atoll(env);
+        const int phase = f < 0 ? 0 : f < 300 ? 1 : f < 600 ? 2 : f < 900 ? 3 : f < 1200 ? 4 : f == 1200 ? 5 : 6;
+        if (phase != phase_) {
+            static const char* names[] = {"FOCUSED", "VISIBLE (the Meta menu)", "FOCUSED", "STOPPING (headset off)",
+                                          "READY -> FOCUSED", "the app paused 2 s", "resumed, FOCUSED"};
+            SDL_Log("quest-sim lifecycle: preview frame %llu: %s", (unsigned long long)frameNo_ - 1, names[phase]);
+            std::printf("quest-sim lifecycle: %s\n", names[phase]);
+            phase_ = phase;
+            if (phase == 5) SDL_Delay(2000);
+        }
+        if (phase_ == 3) fs.shouldRender = false;
+        if (phase_ == 1 || phase_ == 3) { trigger_[0] = trigger_[1] = 0.0f; }   // (OpenXR: no input unless FOCUSED)
     }
 
     bool beginFrame(FrameState& fs) override
@@ -150,7 +176,18 @@ public:
             e.fov.tanUp = tanV;
             e.fov.tanDown = -tanV;
             e.width = ew, e.height = eh;
-            ensureTarget(eyes_[i], ew, eh);
+            if (questScale_ > 0.0f) {
+                // questsim: the Quest 3 (docs/quest.md "Simulating the Quest 3"): Meta's default eye buffer 1680 x 1760
+                // (x resolution_scale), its per-eye frustum (about 52 degrees to the temple, 44 to the nose, 48 up and
+                // down: ~110 x 96 for the pair)
+                const float t52 = std::tan(52.0f * kPi / 180.0f), t44 = std::tan(44.0f * kPi / 180.0f),
+                            t48 = std::tan(48.0f * kPi / 180.0f);
+                e.fov.tanLeft = i == 0 ? -t52 : -t44;
+                e.fov.tanRight = i == 0 ? t44 : t52;
+                e.fov.tanUp = t48, e.fov.tanDown = -t48;
+                e.width = int(1680 * questScale_ + 0.5f) & ~1, e.height = int(1760 * questScale_ + 0.5f) & ~1;
+            }
+            ensureTarget(eyes_[i], e.width, e.height);
         }
         // the right hand's gun: below and right of the head (turned with its heading only), pointing at what the
         // cursor shows (cursorDist_: the scene's depth along the cursor ray); without a cursor: straight ahead
@@ -193,6 +230,9 @@ public:
             c.grip.valid = true;
             c.aim = c.grip;
         }
+        scriptedButtons(fs);
+        lifecycle(fs);
+        if (!focused()) fs.hand[0] = fs.hand[1] = Controller{};   // (questsim: as OpenXR outside FOCUSED)
         last_ = fs;
         return true;
     }
@@ -226,6 +266,46 @@ public:
     }
 
 private:
+    // vrflow (tests): HOTD_VR_BUTTONS="<frame>:<hand><button> ..." presses a controller button for 4 preview frames
+    // from that frame (beginFrame calls: the game's and the big screen's frames alike). hand l / r; button t trigger,
+    // a primary (A / X), b secondary (B), y the left Y (OpenXR: bound to Pause, as the menu button), m menu, g grip, < / > the stick left / right (vrweapon);
+    // x: the runtime asks the app to quit (OpenXR EXITING: lost() + exitAsked(), the game closes).
+    // E.g. "200:rt 400:ra 1500:ly 1700:ly": the attract's trigger, A on the menu, pause, Continue
+    void scriptedButtons(FrameState& fs)
+    {
+        static const char* env = std::getenv("HOTD_VR_BUTTONS");
+        if (!env) return;
+        const uint64_t n = btnFrame_++;
+        for (const char* s = env; *s;) {
+            char* end = nullptr;
+            const unsigned long long at = std::strtoull(s, &end, 10);
+            if (end == s || *end != ':' || !end[1] || !end[2]) break;
+            const int h = end[1] == 'l' ? 0 : 1;
+            const char b = end[2];
+            if (n >= at && n < at + 4) {
+                Controller& c = fs.hand[h];
+                if (b == 't') c.trigger = 1.0f;
+                else if (b == 'a') c.primary = true;
+                else if (b == 'b') c.secondary = true;
+                else if (b == 'y' || b == 'm') c.menu = true;   // (the left Y: OpenXR's Pause action, as the menu)
+                else if (b == 'g') c.squeeze = 1.0f;
+                else if (b == '<') c.stick[0] = -1.0f;   // (vrweapon: the stick flicked left / right)
+                else if (b == '>') c.stick[0] = 1.0f;
+                else if (b == 'x') exit_ = true;   // (the runtime asks the app to quit: OpenXR EXITING)
+                if (n == at) SDL_Log("vr preview: scripted %s %c at frame %llu", h ? "right" : "left", b, at);
+            }
+            s = end + 3;
+            while (*s == ' ') ++s;
+        }
+    }
+    uint64_t btnFrame_ = 0;
+    bool exit_ = false;
+
+public:
+    bool lost() const override { return exit_; }
+    bool exitAsked() const override { return exit_; }
+
+private:
     struct Target {
         unsigned fbo = 0, color = 0, depth = 0;
         int w = 0, h = 0;
@@ -233,6 +313,9 @@ private:
     Target eyes_[2];
     float ipd_ = 0.064f;
     int outW_ = 1280, outH_ = 720;
+    float questScale_ = 0.0f;   // questsim: > 0 the Quest 3's eyes (setQuestSim)
+    uint64_t frameNo_ = 0;      // questsim: HOTD_QUEST_LIFECYCLE's clock (beginFrame calls)
+    int phase_ = 0;
     float ypr_[3] = {0, 0, 0}, lean_[3] = {0, 0, 0};
     bool keys_[8] = {};
     bool scripted_ = false;

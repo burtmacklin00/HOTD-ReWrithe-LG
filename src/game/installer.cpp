@@ -219,7 +219,7 @@ std::vector<std::string> programFiles(const fs::path& root)
             continue;
         }
         if (!it->is_regular_file(ec)) continue;
-        if (lr == lower(util::kGameExeName) || lr == lower(kInstallMarker)) continue;
+        if (lr == lower(util::kGameExeName) || lr == lower(util::kGameVrExeName) || lr == lower(kInstallMarker)) continue;
         const bool player = lr.rfind("data/arcade/", 0) == 0 || lr.rfind("data/pc/", 0) == 0 || lr.rfind("data/music/", 0) == 0 || lr.rfind("data/pc_spanish/", 0) == 0 ||
                             lr.rfind("data/steam/", 0) == 0 || lr == "data/hotd.zip";
         if (player && lower(it->path().extension().string()) != ".txt") continue;   // (the "put ... here" notes come along)
@@ -657,6 +657,9 @@ InstallResult installGame(const InstallOptions& o, const std::function<void(floa
     if (util::makeGameExe(dest.string(), (dest / "data" / "pc").string(), msg)) {
         r.gameExe = game.string();
         m.files.push_back(util::kGameExeName);
+        if (fs::exists(dest / util::kGameVrExeName, ec) &&   // vrship: the VR exe made with it (game_exe.h)
+            std::find(m.files.begin(), m.files.end(), util::kGameVrExeName) == m.files.end())
+            m.files.push_back(util::kGameVrExeName);
     } else {
         r.gameExe = programExe(dest).string();
     }
@@ -676,15 +679,24 @@ InstallResult installGame(const InstallOptions& o, const std::function<void(floa
 #endif
     const std::string sb = sandbox();
     for (int which = 0; which < 2; ++which) {
-        if (which == 0 ? !o.desktop : !o.startMenu) continue;
+        // vr3 (2026-11-09): "Create a VR shortcut" (o.vrShortcut): "<kLinkName> (VR)" beside each of them, the game in
+        // VR (--vr openxr: a headset through the PC's OpenXR runtime; README "How to play in VR"); on the Desktop when
+        // neither is ticked
+        const bool vrHere = o.vrShortcut && (which == 0 ? o.desktop || !o.startMenu : o.startMenu);
+        if ((which == 0 ? !o.desktop : !o.startMenu) && !vrHere) continue;
         const std::string folder = !sb.empty() ? (fs::path(sb) / (which == 0 ? "Desktop" : "Start Menu")).string()
                                                : which == 0 ? winshell::desktopFolder() : winshell::startMenuFolder();
         if (folder.empty()) continue;
-        std::string made;
-        if (winshell::createShortcutTo(folder, kLinkName, r.gameExe, icon, made, msg) == winshell::ShortcutResult::Created) {
-            if (std::find(m.shortcuts.begin(), m.shortcuts.end(), made) == m.shortcuts.end()) m.shortcuts.push_back(made);
+        for (int vr = 0; vr < 2; ++vr) {
+            if (vr == 0 ? (which == 0 ? !o.desktop : !o.startMenu) : !vrHere) continue;
+            std::string made;
+            const std::string name = vr ? std::string(kLinkName) + " (VR)" : std::string(kLinkName);
+            if (winshell::createShortcutTo(folder, name, r.gameExe, icon, made, msg, vr ? "--vr openxr" : "") ==
+                winshell::ShortcutResult::Created) {
+                if (std::find(m.shortcuts.begin(), m.shortcuts.end(), made) == m.shortcuts.end()) m.shortcuts.push_back(made);
+            }
+            log(msg);
         }
-        log(msg);
     }
     if (o.steam) {
         steam::Options so;
@@ -740,7 +752,9 @@ int uninstallGame(const std::string& rootIn, bool yes, int removeSettings)
     for (const std::string& s : m.shortcuts) {
         const fs::path p(s);
         const std::string ext = lower(p.extension().string());   // (Linux: the .desktop entries)
-        if ((ext == ".lnk" || ext == ".desktop") && lower(p.stem().string()) == lower(kLinkName)) fs::remove(p, ec);
+        const std::string stem = lower(p.stem().string());   // (vr3: and the VR shortcut, "<kLinkName> (VR)")
+        if ((ext == ".lnk" || ext == ".desktop") && (stem == lower(kLinkName) || stem == lower(std::string(kLinkName) + " (VR)")))
+            fs::remove(p, ec);
     }
     if (m.steam) {
         steam::Options so;

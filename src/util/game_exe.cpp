@@ -57,7 +57,22 @@ bool makeGameExe(const std::string& packageRoot, const std::string& pcDir, std::
     const fs::path root = fs::u8path(packageRoot), stub = root / "bin" / "hotd_launch.exe", out = root / kGameExeName;
     std::error_code ec;
     if (!fs::exists(stub, ec)) { msg = "no bin\\hotd_launch.exe"; return false; }
-    if (fs::exists(out, ec) && fs::last_write_time(out, ec) >= fs::last_write_time(stub, ec)) { msg = "already made"; return true; }
+    // vrship (user 2026-11-09): the VR exe = a copy of the game exe (the stub with its icon) under kGameVrExeName (the
+    // stub adds --vr openxr for that name); made again with it, or when missing
+    const auto vrCopy = [&](std::string& m) {
+        const fs::path vr = root / kGameVrExeName;
+        std::error_code e;
+        if (fs::exists(vr, e) && fs::last_write_time(vr, e) >= fs::last_write_time(out, e)) return;
+        const fs::path vtmp = root / "bin" / "hotd_launch_vr.tmp";
+        if (fs::copy_file(out, vtmp, fs::copy_options::overwrite_existing, e)) fs::rename(vtmp, vr, e);
+        if (e) fs::remove(vtmp, e), m += "; the VR exe not written";
+        else m += "; made " + vr.string();
+    };
+    if (fs::exists(out, ec) && fs::last_write_time(out, ec) >= fs::last_write_time(stub, ec)) {
+        msg = "already made";
+        vrCopy(msg);
+        return true;
+    }
     const fs::path tmp = root / "bin" / "hotd_launch.tmp";
     if (!fs::copy_file(stub, tmp, fs::copy_options::overwrite_existing, ec)) { msg = "cannot copy: " + ec.message(); return false; }
     // the icon: the player's THOTD.EXE (folder or zip), else this program's own
@@ -68,6 +83,7 @@ bool makeGameExe(const std::string& packageRoot, const std::string& pcDir, std::
     fs::rename(tmp, out, ec);
     if (ec) { fs::remove(tmp, ec); msg += "cannot write " + out.string(); return false; }
     msg += "made " + out.string();
+    vrCopy(msg);
     return true;
 #else
     (void)packageRoot;

@@ -1,4 +1,4 @@
-// Light guns (pads.h LightGuns): absolute pointer devices per player through Windows' raw input, calibration. Ours.
+// Light guns (pads.h LightGuns): absolute pointer devices per player through Windows' raw input (Linux: evdev), calibration. Ours.
 #include "game/pads.h"
 
 #include "game/runtime.h"
@@ -16,6 +16,15 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#endif
+#ifdef __linux__
+#include <dirent.h>
+#include <fcntl.h>
+#include <linux/input.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#include <cerrno>
 #endif
 
 namespace hotd::game {
@@ -57,6 +66,8 @@ void LightGuns::configure(const LaunchConfig& c)
 bool LightGuns::active() const
 {
     if (mouseWant[2] || mouseWant[3])   // the 4P mode: players 3 / 4's own mice need raw input too
+        return true;
+    if (evdevMice_)   // (linuxmice: Linux's second mouse used: both mice through evdev)
         return true;
     for (bool w : want)
         if (w) return true;
@@ -312,8 +323,241 @@ bool LightGuns::connected(const std::string& key)
         }
     }
     return std::find(listed_.begin(), listed_.end(), key) != listed_.end();
+#elif defined(__linux__)
+    for (const EvNode& n : evNodes_)
+        if (n.key == key) return true;
+    const uint64_t now = SDL_GetTicks();   // (as Windows': the pointer devices listed, each second)
+    if (!listedOnce_ || now - listedAt_ >= 1000) {
+        listedOnce_ = true;
+        listedAt_ = now;
+        listed_.clear();
+        evdevScan(nullptr, &listed_);
+    }
+    return std::find(listed_.begin(), listed_.end(), key) != listed_.end();
 #else
     return false;
+#endif
+}
+
+// linuxmice (GitHub #67): evdev, portable part. Relative counts move a mouse player's crosshair as Windows' raw
+// mickeys do; an absolute device's range is the window (0, 0: off the screen, as several guns report on Windows)
+LightGuns::Evd& LightGuns::evd(uint64_t id)
+{
+    for (Evd& e : evd_)
+        if (e.id == id) return e;
+    evd_.push_back(Evd{});
+    evd_.back().id = id;
+    return evd_.back();
+}
+
+void LightGuns::evdevRange(uint64_t id, int minX, int maxX, int minY, int maxY)
+{
+    Evd& e = evd(id);
+    e.minX = minX, e.maxX = maxX, e.minY = minY, e.maxY = maxY;
+    e.x = minX, e.y = minY;
+}
+
+void LightGuns::evdevEvent(uint64_t id, unsigned type, unsigned code, int value)
+{
+    // (linux/input.h's numbers, here so that the input test runs anywhere)
+    constexpr unsigned kSyn = 0x00, kKey = 0x01, kRel = 0x02, kAbs = 0x03;
+    constexpr unsigned kSynReport = 0, kSynDropped = 3;
+    constexpr unsigned kBtnLeft = 0x110, kBtnRight = 0x111, kBtnMiddle = 0x112;
+    Evd& e = evd(id);
+    if (e.dropping) {   // (after SYN_DROPPED: everything up to the next SYN_REPORT is skipped, as the kernel asks)
+        if (type == kSyn && code == kSynReport)
+            e.dropping = false;
+        return;
+    }
+    if (type == kRel) {
+        if (code == 0) e.dx += float(value);        // REL_X
+        else if (code == 1) e.dy += float(value);   // REL_Y
+    } else if (type == kAbs) {
+        if (code == 0) e.x = value, e.absMoved = true;        // ABS_X
+        else if (code == 1) e.y = value, e.absMoved = true;   // ABS_Y
+    } else if (type == kKey && value != 2) {   // (2: the key's auto-repeat)
+        const bool down = value != 0;
+        if (code == kBtnLeft) e.flags |= down ? 0x1u : 0x2u;
+        else if (code == kBtnRight) e.flags |= down ? 0x4u : 0x8u;
+        else if (code == kBtnMiddle) e.flags |= down ? 0x10u : 0x20u;
+    } else if (type == kSyn && code == kSynDropped) {   // the kernel's buffer ran over: this packet is incomplete
+        e.dx = e.dy = 0;
+        e.flags = 0;
+        e.absMoved = false;
+        e.dropping = true;
+    } else if (type == kSyn && code == kSynReport) {
+        const bool feed = active() || assignSeat_ >= 0;   // (else no player reads raw input: counted only)
+        if (e.absMoved) {
+            float u = -0.05f, v = -0.05f;
+            if (e.maxX > e.minX && e.maxY > e.minY && (e.x != e.minX || e.y != e.minY)) {
+                u = float(e.x - e.minX) / float(e.maxX - e.minX);
+                v = float(e.y - e.minY) / float(e.maxY - e.minY);
+            }
+            if (feed) absolute(id, u, v);
+        } else if ((e.dx != 0 || e.dy != 0) && feed) {
+            relative(id, e.dx, e.dy);
+        }
+        if (e.flags && feed)
+            buttons(id, e.flags);
+        if (!feed && (e.dx != 0 || e.dy != 0 || (e.flags & 0x15)) && std::find(seen_.begin(), seen_.end(), id) == seen_.end())
+            seen_.push_back(id);   // (not active: only counted, for evdevMiceSeen)
+        e.dx = e.dy = 0;
+        e.flags = 0;
+        e.absMoved = false;
+    }
+}
+
+void LightGuns::evdevMiceOn()
+{
+    if (evdevMice_)
+        return;
+    evdevMice_ = true;
+    for (Dev& d : devs_)   // (nothing old: the counted motion was the desktop cursor's)
+        d.dx = d.dy = 0, d.eTrigger = d.eReload = d.eStart = false;
+    for (uint64_t id : seen_)   // the order used: player 1, player 2
+        place(dev(id));
+}
+
+#ifdef __linux__
+namespace {
+bool bitOn(const unsigned long* bits, unsigned n)
+{
+    constexpr unsigned kLong = unsigned(sizeof(unsigned long) * 8);
+    return (bits[n / kLong] >> (n % kLong)) & 1ul;
+}
+// a stable 64-bit number for a device's lasting name (FNV-1a; never 0)
+uint64_t evdevId(const std::string& key)
+{
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : key) h = (h ^ c) * 1099511628211ull;
+    return h ? h : 1;
+}
+}
+
+// every /dev/input/event* that is a mouse or a light gun (a left button and X / Y motion, relative or absolute; a
+// touchpad's finger tool and the pads' sticks are no gun): open: kept open (its id, name and range told), else only
+// its lasting name listed. The note: why none can be read
+void LightGuns::evdevScan(std::vector<EvNode>* open, std::vector<std::string>* keys)
+{
+    DIR* dir = opendir("/dev/input");
+    int denied = 0, pointers = 0;
+    if (dir) {
+        for (dirent* de; (de = readdir(dir)) != nullptr;) {
+            if (std::strncmp(de->d_name, "event", 5) != 0)
+                continue;
+            const std::string path = std::string("/dev/input/") + de->d_name;
+            bool known = false;
+            for (const EvNode& n : evNodes_)
+                known = known || n.path == path;
+            if (known) {
+                ++pointers;
+                continue;
+            }
+            const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            if (fd < 0) {
+                if (errno == EACCES || errno == EPERM) ++denied;
+                continue;
+            }
+            constexpr size_t kLongs = (KEY_MAX + 1 + sizeof(unsigned long) * 8 - 1) / (sizeof(unsigned long) * 8);
+            unsigned long ev[kLongs] = {}, key[kLongs] = {}, rel[kLongs] = {}, abs[kLongs] = {};
+            ioctl(fd, EVIOCGBIT(0, sizeof ev), ev);
+            ioctl(fd, EVIOCGBIT(EV_KEY, sizeof key), key);
+            ioctl(fd, EVIOCGBIT(EV_REL, sizeof rel), rel);
+            ioctl(fd, EVIOCGBIT(EV_ABS, sizeof abs), abs);
+            const bool relXY = bitOn(ev, EV_REL) && bitOn(rel, REL_X) && bitOn(rel, REL_Y);
+            const bool absXY = bitOn(ev, EV_ABS) && bitOn(abs, ABS_X) && bitOn(abs, ABS_Y) && !bitOn(key, BTN_TOOL_FINGER);
+            if (!bitOn(ev, EV_KEY) || !bitOn(key, BTN_LEFT) || !(relXY || absXY)) {
+                ::close(fd);
+                continue;
+            }
+            ++pointers;
+            char name[256] = {}, phys[256] = {};
+            ioctl(fd, EVIOCGNAME(sizeof name - 1), name);
+            ioctl(fd, EVIOCGPHYS(sizeof phys - 1), phys);
+            input_id iid{};
+            ioctl(fd, EVIOCGID, &iid);
+            char vp[32];
+            std::snprintf(vp, sizeof vp, "%04x:%04x", unsigned(iid.vendor), unsigned(iid.product));
+            // its lasting name: vendor:product and where it is plugged in (the same port: the same seat next time)
+            const std::string k = std::string("evdev:") + vp + ":" + (*phys ? std::string(phys) : path);
+            if (keys)
+                keys->push_back(k);
+            if (!open) {
+                ::close(fd);
+                continue;
+            }
+            EvNode n;
+            n.fd = fd;
+            n.path = path;
+            n.key = k;
+            n.id = evdevId(k);
+            n.name = *name ? std::string(name) : std::string("Mouse");
+            describe(n.id, k, n.name);
+            if (absXY && !relXY) {
+                input_absinfo ax{}, ay{};
+                ioctl(fd, EVIOCGABS(ABS_X), &ax);
+                ioctl(fd, EVIOCGABS(ABS_Y), &ay);
+                evdevRange(n.id, ax.minimum, ax.maximum, ay.minimum, ay.maximum);
+            }
+            SDL_Log("light guns (evdev): %s: %s, %s (%s)", path.c_str(), *name ? name : "(no name)",
+                    absXY && !relXY ? "absolute (gun)" : "relative (mouse)", k.c_str());
+            open->push_back(n);
+        }
+        closedir(dir);
+    }
+    std::string note;
+    if (pointers == 0)
+        note = denied > 0 ? "Linux: no access to the mice: add yourself to the input group (sudo usermod -aG input $USER), "
+                            "then log out and in"
+                          : "Linux: no mouse or light gun found in /dev/input";
+    if (open && note != evdevNote_) {
+        if (!note.empty())
+            SDL_Log("light guns (evdev): %s (%d device(s) in /dev/input could not be opened)", note.c_str(), denied);
+        evdevNote_ = note;
+    }
+}
+#endif
+
+void LightGuns::evdevPoll(bool on)
+{
+#ifdef __linux__
+    if (!on) {
+        for (EvNode& n : evNodes_) ::close(n.fd);
+        evNodes_.clear();
+        evd_.clear();
+        evScanAt_ = 0;
+        return;
+    }
+    const uint64_t now = SDL_GetTicks();
+    if (evScanAt_ == 0 || now - evScanAt_ >= 2000) {   // (first: at once; then new devices every 2 s)
+        evScanAt_ = now ? now : 1;
+        evdevScan(&evNodes_, nullptr);
+    }
+    for (size_t i = 0; i < evNodes_.size();) {
+        EvNode& n = evNodes_[i];
+        input_event buf[64];
+        bool gone = false;
+        for (;;) {
+            const ssize_t got = ::read(n.fd, buf, sizeof buf);
+            if (got <= 0) {
+                gone = got == 0 || (errno != EAGAIN && errno != EINTR);   // (ENODEV: unplugged)
+                break;
+            }
+            if (dev(n.id).key.empty())   // (reset() forgot it: a new game; as Windows' raw input, named again)
+                describe(n.id, n.key, n.name);
+            for (size_t k = 0; k < size_t(got) / sizeof buf[0]; ++k)
+                evdevEvent(n.id, buf[k].type, buf[k].code, buf[k].value);
+        }
+        if (gone) {
+            SDL_Log("light guns (evdev): %s gone", n.path.c_str());
+            ::close(n.fd);
+            evNodes_.erase(evNodes_.begin() + std::ptrdiff_t(i));
+        } else {
+            ++i;
+        }
+    }
+#else
+    (void)on;
 #endif
 }
 
@@ -326,6 +570,8 @@ void LightGuns::reset()
     }
     devs_.clear();   // assigned again in the order used
     calPlayer_ = -1;
+    evdevMice_ = false;   // (linuxmice: the desktop cursor again until a second mouse is used)
+    seen_.clear();
 }
 
 void LightGuns::apply(Runtime& rt, GunState guns[], bool paused, int lw, int lh)

@@ -26,7 +26,11 @@
 #else
 #include <cstdint>
 #include <dlfcn.h>
+#include <pthread.h>
 #include <signal.h>
+#if defined(__ANDROID__)   // (questcrash's registers only; macOS refuses <ucontext.h> without _XOPEN_SOURCE)
+#include <ucontext.h>
+#endif
 #include <unistd.h>
 #include <vector>
 #if defined(__ANDROID__) && __ANDROID_API__ < 33
@@ -336,8 +340,54 @@ std::string hereStack()
     return stackOf(frames, backtrace(frames, 48));
 }
 
+#if defined(__ANDROID__) && defined(__aarch64__)
+// questcrash (2026-11-10): on the headset the report also has the registers (pc / sp / lr), the crashed thread's stack
+// and the memory maps around the fault, the stack pointer and libmain.so (no tombstones without root)
+std::string signalContext(const siginfo_t* info, const void* ucv)
+{
+    std::string out;
+    char line[512];
+    uintptr_t pc = 0, sp = 0, lr = 0;
+    if (const auto* uc = static_cast<const ucontext_t*>(ucv)) {
+        pc = uintptr_t(uc->uc_mcontext.pc), sp = uintptr_t(uc->uc_mcontext.sp), lr = uintptr_t(uc->uc_mcontext.regs[30]);
+        std::snprintf(line, sizeof line, "pc 0x%llx  sp 0x%llx  lr 0x%llx\n", (unsigned long long)pc,
+                      (unsigned long long)sp, (unsigned long long)lr);
+        out += line;
+    }
+    pthread_attr_t a;
+    if (pthread_getattr_np(pthread_self(), &a) == 0) {
+        void* base = nullptr;
+        size_t size = 0, guard = 0;
+        pthread_attr_getstack(&a, &base, &size);
+        pthread_attr_getguardsize(&a, &guard);
+        pthread_attr_destroy(&a);
+        std::snprintf(line, sizeof line, "thread stack %p..%p (%zu KB, guard %zu KB)\n", base,
+                      static_cast<void*>(static_cast<char*>(base) + size), size / 1024, guard / 1024);
+        out += line;
+    }
+    const uintptr_t fault = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
+    if (FILE* f = std::fopen("/proc/self/maps", "r")) {
+        out += "maps (fault / sp / pc / libmain.so):\n";
+        while (std::fgets(line, sizeof line, f)) {
+            unsigned long long lo = 0, hi = 0;
+            if (std::sscanf(line, "%llx-%llx", &lo, &hi) != 2) continue;
+            auto in = [&](uintptr_t x) { return x >= lo && x < hi; };
+            // (the fault's neighbours too: a guard page sits next to what overflowed)
+            const bool near = fault && fault + 0x10000 >= lo && fault < hi + 0x10000;
+            if (near || in(sp) || in(pc) || std::strstr(line, "libmain.so")) {
+                out += "  ";
+                out += line;
+                if (out.back() != '\n') out += '\n';
+            }
+        }
+        std::fclose(f);
+    }
+    return out;
+}
+#endif
+
 // a fatal signal (on its own stack: a stack overflow too): the report, then the default action (the exit code / core)
-void crashSignal(int sig, siginfo_t* info, void*)
+void crashSignal(int sig, siginfo_t* info, void* uc)
 {
     static volatile sig_atomic_t once = 0;
     if (!once) {
@@ -347,9 +397,14 @@ void crashSignal(int sig, siginfo_t* info, void*)
                       sig == SIGSEGV ? " (segmentation fault)" : sig == SIGBUS ? " (bus error)"
                       : sig == SIGILL ? " (illegal instruction)" : sig == SIGFPE ? " (arithmetic error)" : "",
                       info ? info->si_addr : nullptr);
-        tellPlayer(writeReport(what, [] {
+        tellPlayer(writeReport(what, [&] {
             void* frames[48];
+#if defined(__ANDROID__) && defined(__aarch64__)
+            return signalContext(info, uc) + stackOf(frames, backtrace(frames, 48));
+#else
+            (void)uc;
             return stackOf(frames, backtrace(frames, 48));
+#endif
         }));
     }
     std::signal(sig, SIG_DFL);

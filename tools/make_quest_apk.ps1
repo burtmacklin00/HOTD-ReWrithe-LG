@@ -60,6 +60,17 @@ $cmakeBin = Join-Path (Newest (Join-Path $sdk 'cmake')) 'bin'
 $bt = Newest (Join-Path $sdk 'build-tools')
 $androidJar = Join-Path $sdk 'platforms\android-34\android.jar'
 $llvm = Join-Path $ndk 'toolchains\llvm\prebuilt\windows-x86_64\bin'
+# questaudio3 (user 2026-11-11, the Quest 3's "audio crackling"; its log: SDL's audio thread sometimes not run for
+# 22-29 ms with AAudio's 10 ms bursts): SDL 3.2's AAudio output keeps 3 bursts (20 ms of work ahead); 8 here (70 ms).
+# SDL has no setting for it: its source (Android only: src/audio/aaudio) is patched before the build, once
+$aaudio = Join-Path $SdlSrc 'src\audio\aaudio\SDL_aaudio.c'
+if (Test-Path $aaudio) {
+    $t = [IO.File]::ReadAllText($aaudio)
+    if ($t.Contains('hidden->num_buffers = 3;')) {
+        [IO.File]::WriteAllText($aaudio, $t.Replace('hidden->num_buffers = 3;', 'hidden->num_buffers = 8;   // (HOTD ReWrithe, make_quest_apk.ps1: was 3)'))
+        Say "SDL's AAudio output: 8 buffers (patched)"
+    }
+}
 foreach ($p in @($androidJar, (Join-Path $SdlSrc 'android-project'), (Join-Path $bt 'aapt2.exe'))) {
     if (-not (Test-Path $p)) { throw "missing: $p" }
 }

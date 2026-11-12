@@ -37,6 +37,23 @@ std::string sizeKey(Size s);                  // "auto" / "1920x1080" (launcher.
 Size parseSize(const std::string& v);         // "1920x1080" -> 1920 x 1080; anything else: Auto
 std::string sizeName(Size s);                 // "Auto" / "1920 x 1080" (the menu)
 
+// deckfs (GitHub #74, a Steam Deck: "Fullscreen ... remains in borderless", shots near the edges reloaded): the game
+// runs under gamescope (Steam Deck Game Mode / Big Picture on SteamOS): the compositor shows the focused window scaled
+// to its screen, whatever the window's size and place, so a display mode of our own means nothing there and the
+// display's bounds do not say which part of the window is seen (all of it is). XDG_CURRENT_DESKTOP=gamescope or
+// GAMESCOPE_WAYLAND_DISPLAY; HOTD_GAMESCOPE=1 / 0 (testing) over them. Windows: never
+bool underGamescope();
+// deckfs: Fullscreen without a display mode of our own (the window manager's / compositor's fullscreen at the desktop's
+// size: under gamescope, or no display mode of the chosen size on Linux / macOS)
+bool windowFullscreenDesktop(SDL_Window* w);
+// deckfs: one log line of the window's state (the video driver, gamescope, the window's size and place, its pixels,
+// the display's bounds and desktop mode, the fullscreen flags): at the start and on a Display Mode change
+void logWindowState(SDL_Window* w, const char* when);
+// deckfs: the part of a window (lw x lh at wx, wy) its display (d) shows, in window coordinates: the window's
+// intersection with the display, unless `whole` (fullscreen / gamescope: the whole window is the picture) or the
+// window is mostly off its display (then the window's own edges)
+SDL_Rect visibleArea(const SDL_Rect& d, int wx, int wy, int lw, int lh, bool whole);
+
 bool windowExclusive(SDL_Window* w);          // exclusive fullscreen (a display mode)
 bool windowFullscreen(SDL_Window* w);         // borderless or exclusive fullscreen
 // the display's fullscreen modes (SDL_GetFullscreenDisplayModes), one per size (the refresh rates folded), at least

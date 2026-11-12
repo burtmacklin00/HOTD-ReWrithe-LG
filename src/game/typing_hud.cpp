@@ -354,8 +354,56 @@ void TypingHud::shutdown()
     if (lineReady_) line_.shutdown();
     if (resultsReady_) results_.shutdown();
     if (perfectReady_) perfect_.shutdown();
+    if (liveReady_) live_.shutdown();
+    if (drillReady_) drill_.shutdown();
+    drillReady_ = false;
+    drillKey_.clear();
+    liveReady_ = false;
+    liveKey_.clear();
     lineReady_ = resultsReady_ = perfectReady_ = false;
     perfectKey_.clear();
+}
+
+void TypingHud::drawDrill(const Typing& t, int ww, int wh)
+{
+    shadow = t.config().boxShadow;
+    const int scale = wh >= 1800 ? 5 : wh >= 1000 ? 4 : wh >= 600 ? 3 : 2;
+    const float s = std::min(float(ww) / 496.0f, float(wh) / 384.0f);
+    for (size_t k = 0; k < t.labels.size(); ++k) {
+        const Typing::Label& l = t.labels[k];
+        Slot* sl = slot(k);
+        if (!sl) return;
+        char key[64];
+        std::snprintf(key, sizeof key, "%zu|%d|%d|%d|%d|", l.typed, int(l.locked), int(l.danger), int(l.hitAge < 5), scale);
+        const std::string k2 = key + l.text;
+        if (sl->key != k2) {
+            const std::vector<uint8_t> img = labelImage(l, scale, sl->w, sl->h);
+            sl->ov.setImage(img, sl->w, sl->h);
+            sl->key = k2;
+        }
+    }
+    for (size_t k = t.labels.size(); k-- > 0;) {   // (the locked one first in the list: drawn last, on top)
+        const Typing::Label& l = t.labels[k];
+        slot(k)->ov.drawAnchored(ww, wh, float(ww) * 0.5f + l.x * s, float(wh) * 0.5f - l.y * s, 0.5f, 0.5f);
+    }
+    if (!drillReady_) {
+        std::string err;
+        drillReady_ = drill_.init(err);
+    }
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "PRACTICE %u / %d   WPM %d   ACCURACY %d%%", std::min<uint32_t>(t.drillShown, uint32_t(t.drillTotal)),
+                  t.drillTotal, int(t.game.wpm() + 0.5f), int(t.game.accuracy() + 0.5f));
+    const int ps = std::max(2, scale - 1);
+    const std::string key = std::string(buf) + "|" + std::to_string(ps);
+    if (drillReady_ && key != drillKey_) {
+        const uint8_t white[3] = {235, 235, 225};
+        int w = 0, h = 0;
+        const std::vector<uint8_t> img = textImage(buf, white, ps, w, h);
+        drill_.setImage(img, w, h);
+        drillKey_ = key;
+    }
+    if (drillReady_)
+        drill_.drawAnchored(ww, wh, float(ww) * 0.5f, float(wh) * 0.5f - 150.0f * s, 0.5f, 0.5f);
 }
 
 void TypingHud::draw(const Runtime& rt, const Typing& t, int ww, int wh,
@@ -589,6 +637,36 @@ void TypingHud::draw(const Runtime& rt, const Typing& t, int ww, int wh,
         // (the PC TotD's place: the top left, under its gauge at ~15 % of the height; ours has no gauge: a little higher)
         if (perfectReady_)
             perfect_.drawAnchored(ww, wh, float(ww) * 0.03f, float(wh) * 0.13f, 0.0f, 0.0f);
+        // totdex (user 2026-11-09, after Tenome's Typing of the Dead EX: "a live WPM / accuracy line, off by default"):
+        // the game's WPM and accuracy so far under PERFECT, white, one step smaller; whole numbers (no flicker of tenths)
+        if (liveLine) {
+            if (!liveReady_) {
+                std::string err;
+                liveReady_ = live_.init(err);
+                live_.translate = false;
+            }
+            const int ls = std::max(1, ps - 1);
+            const std::string wpmT = lang::tr("WPM"), accT = lang::tr("Accuracy");
+            char lb[128];
+            std::snprintf(lb, sizeof lb, "%s %d  %s %d%%", wpmT.c_str(), int(t.game.wpm() + 0.5f), accT.c_str(), int(t.game.accuracy() + 0.5f));
+            const std::string key = std::string(lb) + "|" + std::to_string(ls);
+            bool ascii = true;
+            for (const char c : std::string(lb)) ascii = ascii && uint8_t(c) < 0x80;
+            if (liveReady_ && key != liveKey_) {
+                if (ascii) {
+                    std::string up = lb;   // (capitals: the font's small letters read badly)
+                    for (char& c : up) c = char(std::toupper(uint8_t(c)));
+                    static const uint8_t white[3] = {235, 235, 235};
+                    int w = 0, h = 0;
+                    const std::vector<uint8_t> img = textImage(up, white, ls, w, h);
+                    live_.setImage(img, w, h);
+                } else
+                    live_.setText({std::string(lb)}, scale);
+                liveKey_ = key;
+            }
+            if (liveReady_)
+                live_.drawAnchored(ww, wh, float(ww) * 0.03f, float(wh) * 0.13f + float(ps * 11), 0.0f, 0.0f);
+        }
     }
     // the chapter's typing results, while the clear's results are up
     if (rt.clear.active && t.resultsShown && !t.chapters.empty()) {

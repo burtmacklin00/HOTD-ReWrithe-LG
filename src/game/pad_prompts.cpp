@@ -1,5 +1,6 @@
 // padglyphs: the pads' prompt styles (pad_prompts.h)
 #include "game/pad_prompts.h"
+#include "game/keybinds.h"
 
 #include <algorithm>
 #include <cctype>
@@ -36,6 +37,12 @@ const struct { int style; const char* key; const char* name; } kStyles[] = {
     {kPsSteamDeck, "steamdeck", "Steam Deck"},
     {kPsXboxSeries, "xboxseries", "Xbox Series X|S"},
     {kPsGeneric, "generic", "Generic"},
+    {kPsVrTouch, "vrtouch", "Meta Quest Touch (VR)"},
+    {kPsVrIndex, "vrindex", "Valve Index (VR)"},
+    {kPsVrVive, "vrvive", "HTC Vive (VR)"},
+    {kPsVrWmr, "vrwmr", "Windows Mixed Reality (VR)"},
+    {kPsVrHp, "vrhp", "HP Reverb G2 (VR)"},
+    {kPsVrSimple, "vrsimple", "Simple controller (VR)"},
     {SDL_GAMEPAD_TYPE_STANDARD, "standard", "Standard (Xbox names)"},
 };
 
@@ -108,6 +115,8 @@ int promptFamily(int style)
         return kPfSteam;
     case kPsGeneric:
         return kPfGeneric;
+    case kPsVrTouch: case kPsVrIndex: case kPsVrVive: case kPsVrWmr: case kPsVrHp: case kPsVrSimple:
+        return kPfVr;
     default:
         return kPfXbox;
     }
@@ -236,6 +245,7 @@ static std::string kenneyIconRaw(int style, int in)
     case kPsSteamController: return kSc[in];
     case kPsSteamDeck: return kDeck[in];
     case kPsN64: case kPsGeneric: return {};
+    case kPsVrTouch: case kPsVrIndex: case kPsVrVive: case kPsVrWmr: case kPsVrHp: case kPsVrSimple: return {};   // (no VR icons)
     default: return kXbox[in];   // Xbox One / Series, STANDARD, UNKNOWN
     }
 }
@@ -290,6 +300,7 @@ static std::string xeluIconRaw(int style, int in)
     case kPsSteamController: s = &kSc; break;
     case kPsSteamDeck: s = &kDeck; break;
     case kPsSwitch2Pro: case kPsGameCube: case kPsN64: case kPsGeneric: return {};
+    case kPsVrTouch: case kPsVrIndex: case kPsVrVive: case kPsVrWmr: case kPsVrHp: case kPsVrSimple: return {};   // (no VR icons)
     default: s = &kSeries; break;   // Xbox Series, STANDARD, UNKNOWN
     }
     return *s->n[in] ? std::string(s->dir) + "/" + s->pre + s->n[in] : std::string();
@@ -353,6 +364,47 @@ int promptChoiceStyle(int choice)
                                    SDL_GAMEPAD_TYPE_PS4, SDL_GAMEPAD_TYPE_PS3, SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, kPsSwitch2Pro,
                                    kPsWiiRemote, kPsWiiUPro, kPsGameCube, kPsSteamDeck, kPsSteamController, -1};
     return choice > 0 && choice < 15 ? kStyle[choice] : 0;
+}
+
+int vrStyleOfProfile(const std::string& p)
+{
+    auto has = [&p](const char* s) { return p.find(s) != std::string::npos; };
+    if (has("valve/index") || p == "index") return kPsVrIndex;
+    if (has("htc/vive") || p == "vive") return kPsVrVive;
+    if (has("microsoft/motion") || p == "wmr") return kPsVrWmr;
+    if (has("hp/mixed_reality") || p == "hp") return kPsVrHp;
+    if (has("khr/simple") || p == "simple") return kPsVrSimple;
+    return kPsVrTouch;   // oculus/touch_controller, meta/touch_*, none reported yet, unknown
+}
+
+bool isVrStyle(int style) { return style >= kPsVrTouch && style <= kPsVrSimple; }
+
+std::string vrPromptLine(const std::string& line, int style)
+{
+    // the button that is Enter on the big screen (vr_scene.cpp panelFrame: A / X; Vive / WMR: the trackpad); the
+    // simple controller has none (its select clicks)
+    const char* enter = style == kPsVrVive || style == kPsVrWmr ? "Trackpad" : style == kPsVrSimple ? "Select" : "A";
+    std::string out;
+    size_t at = 0;
+    while (at < line.size()) {
+        // one word at a time (between spaces / brackets; a UTF-8 letter never holds those bytes)
+        const size_t end = std::min(line.find_first_of(" ()", at), line.size());
+        if (end == at) {
+            out += line[at++];
+            continue;
+        }
+        const std::string w = line.substr(at, end - at);
+        if (w.size() > 2 && w.compare(w.size() - 2, 2, "/A") == 0)
+            out += padInputName(kPiSouth, style);   // "Enter/A": Choose
+        else if (w.size() > 2 && w.compare(w.size() - 2, 2, "/B") == 0)
+            out += padInputName(kPiEast, style);    // "Esc/B", "Backspace/B", "Rücktaste/B": Back / Delete
+        else if (w == "Enter")
+            out += enter;
+        else
+            out += w;
+        at = end;
+    }
+    return out;
 }
 
 } // namespace hotd::game

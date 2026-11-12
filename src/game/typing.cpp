@@ -4,6 +4,7 @@
 
 #include "game/audio.h"
 #include "game/bot.h"
+#include "game/typing_packs.h"
 
 #include <algorithm>
 #include <cctype>
@@ -110,7 +111,8 @@ size_t Typing::promptCount() const
     return n;
 }
 
-bool Typing::load(const std::vector<std::string>& dataDirs, std::string& err, const std::string& dictionary)
+bool Typing::load(const std::vector<std::string>& dataDirs, std::string& err, const std::string& dictionary,
+                  const std::vector<std::string>& packs)
 {
     std::error_code ec;
     const auto str = [](const std::string& s) { return s; };
@@ -124,11 +126,33 @@ bool Typing::load(const std::vector<std::string>& dataDirs, std::string& err, co
             if (eq == std::string::npos) continue;
             const std::string k = trim(line.substr(0, eq)), v = trim(line.substr(eq + 1));
             const int i = std::atoi(v.c_str());
+            if (k.rfind("drill_", 0) == 0) {   // totdpacks: Practice (its own if: the chain below is long for MSVC)
+                if (k == "drill_words") cfg_.drillWords = std::max(1, i);
+                else if (k == "drill_on_screen") cfg_.drillMax = std::clamp(i, 1, 7);
+                else if (k == "drill_gap") perDifficulty(v, cfg_.drillGap, flt);
+                else if (k == "drill_seconds") perDifficulty(v, cfg_.drillSeconds, flt);
+                else if (k == "drill_per_letter") perDifficulty(v, cfg_.drillPerLetter, flt);
+                continue;
+            }
             if (k == "dictionary") cfg_.dictionary = v;
             else if (k == "auto_skip_punctuation") cfg_.autoSkipPunct = i != 0;
             else if (k == "drop_lock_keys") cfg_.dropLockKeys = std::clamp(i, 0, 2);
             else if (k == "case_from_difficulty") cfg_.caseFromDifficulty = i;
             else if (k == "combo_bonus") cfg_.comboBonus = i;
+            else if (k == "recent_words") cfg_.recentWords = std::max(0, i);   // (totdex: SEGA's rules)
+            else if (k == "shift_grace") cfg_.shiftGrace = i != 0;
+            else if (k == "practice_share") cfg_.practiceShare = std::clamp(flt(v), 0.0f, 1.0f);   // (totdrec: Practice Your Misses)
+            else if (k == "practice_words") cfg_.practiceWords = std::max(0, i);
+            else if (k == "practice_keys") cfg_.practiceKeys = std::clamp(i, 0, 26);
+            else if (k == "word_level_hit") cfg_.wordLevelHit = std::max(0, i);
+            else if (k == "word_level_min") cfg_.wordLevelMin = std::min(0, i);
+            else if (k == "word_level_words") cfg_.wordLevelWords = std::max(1, i);
+            else if (k == "key_cost_grade") cfg_.keyCostGrade = i != 0;
+            else if (k == "rank_points") {
+                std::vector<int> p;
+                for (const std::string& s : splitList(v)) p.push_back(std::atoi(s.c_str()));
+                if (!p.empty()) cfg_.rankPoints = p;
+            }
             else if (k == "combo_cap") cfg_.comboCap = i;
             else if (k == "tough_list") perDifficulty(v, cfg_.toughList, str);
             else if (k == "item_list") perDifficulty(v, cfg_.itemList, str);
@@ -157,6 +181,8 @@ bool Typing::load(const std::vector<std::string>& dataDirs, std::string& err, co
             else if (k == "attack_wait") perDifficulty(v, cfg_.attackWait, flt);
             else if (k == "attack_per_letter") perDifficulty(v, cfg_.attackPerLetter, flt);
             else if (k == "attack_gap") perDifficulty(v, cfg_.attackGap, flt);
+            else if (k == "offscreen_hold") cfg_.offscreenHold = std::max(0.0f, flt(v));   // (totdrec)
+            else if (k == "strike_seen") perDifficulty(v, cfg_.strikeSeen, flt);
             else if (k == "attack_queue") perDifficulty(v, cfg_.attackQueue, flt);
             else if (k == "hit_reset") perDifficulty(v, cfg_.hitReset, flt);
             else if (k == "rescue_wait") perDifficulty(v, cfg_.rescueWait, flt);
@@ -255,6 +281,50 @@ bool Typing::load(const std::vector<std::string>& dataDirs, std::string& err, co
         }
     for (const std::string& d : dataDirs)
         looked += (looked.empty() ? "" : ", ") + d + "/data/typing/" + cfg_.dictionary;
+    // totdpacks (after Tenome's Typing of the Dead EX word packs, MIT, ideas only): the packs chosen, mixed: each list
+    // the union of theirs (pick() pools the lists and takes each prompt once); the built-in lists only when "builtin" is
+    // one of them. A list none of them has: the nearest one they have (pick(): the longest list), but the bosses'
+    // sentences from the built-in lists when no chosen pack has any (as Tenome's packs fall back to the game's words)
+    packsInfo.clear(), packsMissing.clear();
+    text_.clear(), textKey.clear();
+    textPos = 0;
+    if (!packs.empty() && !(packs.size() == 1 && packs[0] == kBuiltinPack)) {
+        const auto builtinLists = lists_;
+        const bool builtin = std::find(packs.begin(), packs.end(), kBuiltinPack) != packs.end();
+        if (!builtin) lists_.clear();
+        const std::vector<TypingPack> all = typingPacksScan(dataDirs);
+        std::string took = builtin ? std::string(kBuiltinPack) : std::string();
+        for (const std::string& id : packs) {
+            if (id == kBuiltinPack) continue;
+            const auto pk = std::find_if(all.begin(), all.end(), [&](const TypingPack& p) { return p.id == id; });
+            if (pk == all.end()) {
+                packsMissing += (packsMissing.empty() ? "" : ", ") + id;
+                continue;
+            }
+            for (const auto& [name, l] : pk->lists)
+                lists_[name].insert(lists_[name].end(), l.begin(), l.end());
+            took += (took.empty() ? "" : " + ") + id;
+            if (pk->text && !pk->pieces.empty()) {   // (order = text: its pieces in order, the packs' in their order)
+                text_.insert(text_.end(), pk->pieces.begin(), pk->pieces.end());
+                textKey += (textKey.empty() ? "" : "+") + id;
+                took += " (a text, " + std::to_string(pk->pieces.size()) + " pieces)";
+            }
+        }
+        bool bossAny = false;
+        for (const std::string& b : cfg_.bossLists) bossAny = bossAny || !lists_[b].empty();
+        if (!bossAny)
+            for (const std::string& b : cfg_.bossLists)
+                if (auto it = builtinLists.find(b); it != builtinLists.end()) lists_[b] = it->second;
+        for (auto it = lists_.begin(); it != lists_.end();)   // (no empty lists: pick()'s fallback looks for the longest)
+            it = it->second.empty() ? lists_.erase(it) : std::next(it);
+        if (promptCount() == 0) {   // (none of the packs found / usable: the built-in lists)
+            lists_ = builtinLists;
+            took = kBuiltinPack;
+            text_.clear(), textKey.clear();
+        }
+        if (!textKey.empty()) textKey += ":" + std::to_string(text_.size());
+        packsInfo = took + (bossAny ? "" : " (the built-in boss sentences)");
+    }
     if (promptCount() == 0) {
         err = "no prompts in data/typing/" + cfg_.dictionary + " (looked in " + looked + ")";
         return false;
@@ -287,6 +357,11 @@ void Typing::start(int difficulty, uint64_t seed)
     bossLanded_ = true;
     lastBossFinish_ = 0;
     bossDownUntil_ = 0;
+    recent_.clear();
+    textServed = textLoops = 0;   // (totdpacks: textPos stays: main.cpp sets the saved place)
+    altGoal_.clear();
+    lastShifted_ = false;
+    wordLevel = levelRun_ = 0;
     attacks = hits = smallTyped = smallKilled = smallMissed = letterKills = 0;
     attackGapMin = UINT32_MAX;
     given.clear();
@@ -304,8 +379,32 @@ void Typing::start(int difficulty, uint64_t seed)
     quickTyped = quickIgnored = ignoredKeys = groupsMade = groupKills = pickupsAuto = 0;
 }
 
+// totdpacks: the mutators' ids in launcher.ini (totd_mutators=)
+std::string TypingMutators::csv() const
+{
+    std::string s;
+    const auto add = [&](bool on, const char* id) { if (on) s += (s.empty() ? "" : ",") + std::string(id); };
+    add(longWords, "long"), add(shortWords, "short"), add(oneLife, "onelife"), add(noBackspace, "nobackspace");
+    add(doubleSpeed, "double"), add(reversed, "reverse");
+    return s;
+}
+TypingMutators TypingMutators::parse(const std::string& csv)
+{
+    TypingMutators m;
+    for (const std::string& id : splitList(csv)) {
+        if (id == "long") m.longWords = true, m.shortWords = false;
+        else if (id == "short") m.shortWords = true, m.longWords = false;
+        else if (id == "onelife") m.oneLife = true;
+        else if (id == "nobackspace") m.noBackspace = true;
+        else if (id == "double") m.doubleSpeed = true;
+        else if (id == "reverse") m.reversed = true;
+    }
+    return m;
+}
+
 bool Typing::cancel()
 {
+    if (mutators.noBackspace) return false;   // (totdpacks: No Backspace: a word begun stays locked)
     if (!lock_) return false;
     if (auto it = targets_.find(lock_); it != targets_.end())   // the prompt from its start again
         it->second.typed = 0, it->second.startMs = -1;
@@ -342,6 +441,28 @@ bool Typing::same(char want, uint32_t key) const
     return caseSensitive() ? char(key) == want : low(key) == low(uint8_t(want));
 }
 
+// totdex (SEGA's judge, Tod.exe: a key that misses is judged again as its shifted character when Shift was down
+// for the key before it: Shift let go a moment early in "Run!" or "Help?"): US key pairs
+uint32_t Typing::shiftOf(uint32_t k)
+{
+    static const char* from = "1234567890-=[]\\;',./`";
+    static const char* to = "!@#$%^&*()_+{}|:\"<>?~";
+    if (k >= 'a' && k <= 'z') return k - 'a' + 'A';
+    if (k > 0 && k < 128)
+        if (const char* p = std::strchr(from, int(k))) return uint32_t(uint8_t(to[p - from]));
+    return k;
+}
+
+bool Typing::shiftedKey(uint32_t k)
+{
+    return (k >= 'A' && k <= 'Z') || (k > 0 && k < 128 && std::strchr("!@#$%^&*()_+{}|:\"<>?~", int(k)));
+}
+
+bool Typing::keyMatches(char want, uint32_t k, bool prevShift) const
+{
+    return same(want, k) || (cfg_.shiftGrace && prevShift && shiftOf(k) != k && same(want, shiftOf(k)));
+}
+
 bool Typing::isSmall(Runtime& rt, uint32_t obj) const
 {
     const std::string n = nameOf(rt, rt.mem.u32(obj));
@@ -353,29 +474,55 @@ bool Typing::isSmall(Runtime& rt, uint32_t obj) const
 
 // a prompt whose first letter no other target has now (TotD: the first key picks one enemy; totd1: all the targets
 // held, seen or not, so one coming back from behind something keeps its letter apart too) and that no other shows
-bool Typing::pick(const std::vector<std::string>& lists, int minLen, int maxLen, uint32_t self, std::string& out)
+bool Typing::pick(const std::vector<std::string>& lists, int minLen, int maxLen, uint32_t self, std::string& out,
+                  const std::vector<std::string>* onlyWords, const std::string* onlyKeys)
 {
+    const bool only = onlyWords || onlyKeys;   // (totdrec: Practice Your Misses)
     // totd2: the lists pooled (each prompt once), then by length
     std::vector<std::string> pool;
     std::set<std::string> have;
-    for (const std::string& list : lists)
-        if (auto it = lists_.find(list); it != lists_.end())
-            for (const std::string& s : it->second)
-                if (have.insert(s).second) pool.push_back(s);
-    if (pool.empty())   // (lists missing from the dictionary: the longest one it has)
+    if (onlyWords) {
+        for (const std::string& s : *onlyWords)
+            if (have.insert(s).second) pool.push_back(s);
+    } else
+        for (const std::string& list : lists)
+            if (auto it = lists_.find(list); it != lists_.end())
+                for (const std::string& s : it->second)
+                    if (have.insert(s).second) pool.push_back(s);
+    // (lists missing from the dictionary: totdpacks: every list it has but the bosses' (a pack of words only gave its
+    // tough zombies boss sentences), by length as always; were: the longest one it has)
+    const bool bossPick = !lists.empty() && std::find(cfg_.bossLists.begin(), cfg_.bossLists.end(), lists[0]) != cfg_.bossLists.end();
+    if (pool.empty() && !only)
+        for (const auto& [k, l] : lists_)
+            if (bossPick || std::find(cfg_.bossLists.begin(), cfg_.bossLists.end(), k) == cfg_.bossLists.end())
+                for (const std::string& s : l)
+                    if (have.insert(s).second) pool.push_back(s);
+    if (pool.empty() && !only)
         for (const auto& [k, l] : lists_)
             if (l.size() > pool.size()) pool = l;
     if (pool.empty()) {
+        if (only) return false;
         out = "zombie";
         return false;
     }
+    if (mutators.reversed)   // (totdpacks: the Reversed mutator: every prompt backwards; the rules on what is shown)
+        for (std::string& s : pool) std::reverse(s.begin(), s.end());
     const std::vector<std::string>* v = &pool;
+    // (totdrec: a practice word has one of the missed keys)
+    const auto keyed = [&](const std::string& s) {
+        if (!onlyKeys) return true;
+        for (const char c : s)
+            if (onlyKeys->find(char(low(uint8_t(c)))) != std::string::npos) return true;
+        return false;
+    };
     std::vector<size_t> cand;
-    for (int widen = 0; cand.empty() && widen < 20; ++widen)   // (none that long: the nearest lengths)
+    for (int widen = 0; cand.empty() && widen < (only ? 3 : 20); ++widen)   // (none that long: the nearest lengths)
         for (size_t i = 0; i < v->size(); ++i) {
             const int n = int((*v)[i].size());
-            if ((minLen <= 0 || n >= minLen - widen) && (maxLen <= 0 || n <= maxLen + widen)) cand.push_back(i);
+            if ((minLen <= 0 || n >= minLen - widen) && (maxLen <= 0 || n <= maxLen + widen) && keyed((*v)[i])) cand.push_back(i);
         }
+    if (cand.empty() && only)
+        return false;
     if (cand.empty())
         for (size_t i = 0; i < v->size(); ++i) cand.push_back(i);
     bool firstUsed[128] = {};
@@ -395,21 +542,98 @@ bool Typing::pick(const std::vector<std::string>& lists, int minLen, int maxLen,
     const auto quickFirst = [&](const std::string& s) {
         return cfg_.quickKeys && !s.empty() && (low(uint8_t(s[0])) == cfg_.quickLeft || low(uint8_t(s[0])) == cfg_.quickRight);
     };
-    const auto ok = [&](const std::string& s) { return !s.empty() && !firstUsed[uint8_t(low(uint8_t(s[0]))) & 127] && !shown.count(s) && !quickFirst(s); };
-    // a few at random, then the whole list from a random place (a short list nearly used up)
-    for (int tries = 0; tries < 12; ++tries) {
-        const std::string& s = (*v)[cand[size_t(rng_() % cand.size())]];
-        if (ok(s)) { out = s; return true; }
+    // totdex (SEGA's rule, Tod.exe's picker: never one of its last 16 picks): first without the recent_words last
+    // prompts, then (a short list) with them
+    bool strict = cfg_.recentWords > 0;
+    const auto ok = [&](const std::string& s) {
+        if (s.empty() || firstUsed[uint8_t(low(uint8_t(s[0]))) & 127] || shown.count(s) || quickFirst(s)) return false;
+        return !strict || std::find(recent_.begin(), recent_.end(), s) == recent_.end();
+    };
+    const auto took = [&](const std::string& s) {
+        out = s;
+        if (cfg_.recentWords > 0 && maxLen != 1) {   // (the one-letter quick / small ones repeat by nature)
+            recent_.push_back(s);
+            while (int(recent_.size()) > cfg_.recentWords) recent_.pop_front();
+        }
+        return true;
+    };
+    size_t at = 0;
+    for (int pass = 0; pass < 2; ++pass, strict = false) {
+        if (pass == 1 && (!cfg_.recentWords || only)) break;   // (a practice word: never a recent one)
+        // a few at random, then the whole list from a random place (a short list nearly used up)
+        for (int tries = 0; tries < 12; ++tries) {
+            const std::string& s = (*v)[cand[size_t(rng_() % cand.size())]];
+            if (ok(s)) return took(s);
+        }
+        at = size_t(rng_() % cand.size());
+        for (size_t i = 0; i < cand.size(); ++i) {
+            const std::string& s = (*v)[cand[(at + i) % cand.size()]];
+            if (ok(s)) return took(s);
+        }
     }
-    const size_t at = size_t(rng_() % cand.size());
-    for (size_t i = 0; i < cand.size(); ++i) {
-        const std::string& s = (*v)[cand[(at + i) % cand.size()]];
-        if (ok(s)) { out = s; return true; }
-    }
+    if (only)
+        return false;
     out = (*v)[cand[at]];
     for (size_t i = 0; i < cand.size() && quickFirst(out); ++i)
         out = (*v)[cand[(at + i) % cand.size()]];
     return false;
+}
+
+// totdrec (step 3 of docs/typing.md's Tenome plan: "practice from your misses", user 2026-11-08; Tenome's Typing of
+// the Dead EX keeps the same statistics): Practice Your Misses (off by default) gives practice_share of the creature
+// words from your misses: half of them (when there are any of about that length) one of the words you missed most,
+// the rest a word of the lists with one of the letters you missed most. The same rules as every pick (first letters,
+// no two alike on the screen, not one of the last recent_words)
+void Typing::setPractice(std::vector<std::string> words, std::string keys)
+{
+    practiceWords_.clear();
+    for (std::string& w : words)
+        if (!w.empty() && int(practiceWords_.size()) < std::max(0, cfg_.practiceWords)) practiceWords_.push_back(std::move(w));
+    practiceKeys_.clear();
+    for (const char c : keys)
+        if (c >= 'a' && c <= 'z' && practiceKeys_.find(c) == std::string::npos && int(practiceKeys_.size()) < std::max(0, cfg_.practiceKeys))
+            practiceKeys_ += c;
+    practicePicks = practiceFromWords = practiceFromKeys = 0;
+}
+
+bool Typing::practicePick(const std::vector<std::string>& lists, int minLen, int maxLen, uint32_t self, std::string& out)
+{
+    if (!practiceOn() || cfg_.practiceShare <= 0.0f || float(rng_() % 1000) >= cfg_.practiceShare * 1000.0f)
+        return false;
+    const bool wordsFirst = !practiceWords_.empty() && (practiceKeys_.empty() || rng_() % 2 == 0);
+    for (int k = 0; k < 2; ++k) {
+        const bool words = (k == 0) == wordsFirst;
+        if (words && !practiceWords_.empty() && pick(lists, minLen, maxLen, self, out, &practiceWords_, nullptr)) {
+            ++practiceFromWords;
+            return true;
+        }
+        if (!words && !practiceKeys_.empty() && pick(lists, minLen, maxLen, self, out, nullptr, &practiceKeys_)) {
+            ++practiceFromKeys;
+            return true;
+        }
+    }
+    return false;
+}
+
+// totdpacks (Tenome's Typing of the Dead EX types a pack in file order; here a pack's order = text): the text's next
+// piece when its first letter is free now (no other word on the screen starts with it, not shown); else false and the
+// piece waits (the creature gets a word of the lists). The last piece: the text from its start. A piece may start
+// with a quick key's letter (G / H: "he", "gone"): that key goes to a quick target on its side first, else it locks
+// the word (the key handler below)
+bool Typing::textPick(uint32_t self, std::string& out)
+{
+    if (text_.empty()) return false;
+    if (textPos >= text_.size()) textPos = 0;
+    std::string s = text_[textPos];
+    if (mutators.reversed) std::reverse(s.begin(), s.end());   // (the Reversed mutator)
+    const char f = low(uint8_t(s[0]));
+    for (const auto& [o, t] : targets_)
+        if (o != self && !t.text.empty() && t.finishing == 0 && (low(uint8_t(t.text[0])) == f || t.text == s))
+            return false;
+    out = s;
+    ++textServed;
+    if (++textPos >= text_.size()) textPos = 0, ++textLoops;
+    return true;
 }
 
 // totd2 (user 2026-11-03: "each enemy's word length should depend on how far away it spawns and how soon it would hit
@@ -465,11 +689,38 @@ std::string Typing::newPrompt(Runtime& rt, Target& t)
         lists = cfg_.wordLists, minLen = cfg_.wordMin[dc][b], maxLen = cfg_.wordMax[dc][b];
         t.cls = b == 0 ? "zombie near" : b == 1 ? "zombie mid" : "zombie far";
     }
+    // totdpacks (the Long Words / Short Words mutators): the creatures' words (and a fireball's) from the far band's
+    // longest lengths up (a tough one's phrase from its longest), or the near band's shortest (a tough one a word)
+    if (!t.quick && (mutators.longWords || mutators.shortWords) &&
+        (t.cls == "tough" || t.cls == "captor" || t.cls == "rescue scene" || t.cls == "fireball" || t.cls.rfind("zombie", 0) == 0)) {
+        if (mutators.longWords && t.cls == "tough")
+            minLen = cfg_.toughMax[dc], maxLen = cfg_.toughMax[dc] + 4;
+        else if (mutators.longWords)
+            lists = cfg_.wordLists, minLen = cfg_.wordMax[dc][2], maxLen = cfg_.wordMax[dc][2] + 3;
+        else
+            lists = cfg_.wordLists, minLen = maxLen = cfg_.wordMin[d][0];
+    }
+    // totdex (SEGA's word level: Tod.exe's words get easier after a hit and harder again while you do well): below 0 a
+    // creature's word is one letter shorter a level (a tough one's phrase two), never under 2 letters
+    if (wordLevel < 0 && !t.quick && (t.cls == "tough" || t.cls == "captor" || t.cls == "rescue scene" || t.cls.rfind("zombie", 0) == 0)) {
+        const int k = t.cls == "tough" ? 2 : 1;
+        const int floor = std::min(minLen, 2);
+        minLen = std::max(floor, minLen + wordLevel * k);
+        maxLen = std::max(minLen, maxLen + wordLevel * k);
+    }
     std::string s;
     if (t.quick)   // (totd7: one key by screen side, no word)
         s = std::string(1, t.x < 0 ? cfg_.quickLeft : cfg_.quickRight), lists = {"quick"}, minLen = maxLen = 1;
-    else
-        pick(lists, minLen, maxLen, t.obj, s);
+    else {
+        // (totdrec: Practice Your Misses: the creatures' words, a fireball's)
+        const bool creature = t.cls == "tough" || t.cls == "captor" || t.cls == "rescue scene" || t.cls == "fireball" ||
+                              t.cls.rfind("zombie", 0) == 0;
+        if (creature && practiceOn()) ++practicePicks;
+        if (creature && textPick(t.obj, s))   // (totdpacks: a text in order: its next piece, whatever its length)
+            t.cls += " text", lists = {"text"};
+        else if (!(creature && practicePick(lists, minLen, maxLen, t.obj, s)))
+            pick(lists, minLen, maxLen, t.obj, s);
+    }
     t.pickLists = lists, t.pickMin = minLen, t.pickMax = maxLen;
     t.list = lists.size() == 1 ? lists[0] : t.cls;
     auto& g = given[t.list];
@@ -521,6 +772,114 @@ char Typing::killGrade(float accuracy, float wpm) const
     return 'F';
 }
 
+// totdex: Tod.exe's key costs (Tenome's fit of the word files' difficulty numbers, 99.9 % of them: re/NOTES.md
+// "Difficulty model"): a s t h 3, most letters 4, c m n x z 5, p q 6, v 8, space 2, digits 10, symbols 13, a capital
+// +4 when case counts; in letters (/ 4). factor: Tod.exe's rank scales a word under 20 by 1.1 (stricter), from 61 by
+// 0.8 (easier): the WPM's factor 1 / that
+float Typing::keyEffort(const std::string& s, bool caseCounts, float& factor)
+{
+    int d = 0;
+    for (const char ch : s) {
+        const unsigned char c = uint8_t(ch);
+        const char l = low(c);
+        if (c == ' ') d += 2;
+        else if (std::isdigit(c)) d += 10;
+        else if (l >= 'a' && l <= 'z') {
+            d += std::strchr("asth", l) ? 3 : std::strchr("cmnxz", l) ? 5 : std::strchr("pq", l) ? 6 : l == 'v' ? 8 : 4;
+            if (caseCounts && std::isupper(c)) d += 4;
+        } else d += 13;
+    }
+    factor = d < 20 ? 1.0f / 1.1f : d >= 61 ? 1.0f / 0.8f : 1.0f;
+    return float(d) / 4.0f;
+}
+
+void TypingRecord::add(const TypingStats& now, TypingStats& last)
+{
+    const auto diff = [](uint32_t a, uint32_t b) { return a >= b ? a - b : a; };   // (a new game's stats: all of it)
+    const bool fresh = now.letters < last.letters || now.words < last.words || now.typingMs < last.typingMs;
+    const TypingStats zero;
+    const TypingStats& l = fresh ? zero : last;
+    letters += diff(now.letters, l.letters);
+    misses += diff(now.misses, l.misses);
+    words += diff(now.words, l.words);
+    typingMs += std::max(0.0, now.typingMs - l.typingMs);
+    for (int i = 0; i < 128; ++i) keyMiss[i] += diff(now.keyMiss[i], l.keyMiss[i]);
+    for (const auto& [w, n] : now.wordMiss) {
+        const auto it = l.wordMiss.find(w);
+        const uint32_t d = diff(n, it == l.wordMiss.end() ? 0 : it->second);
+        if (d) wordMiss[w] += d;
+    }
+    last = now;
+}
+
+bool TypingRecord::load(const std::string& path)
+{
+    std::ifstream f(path);
+    if (!f) return false;
+    for (std::string line; std::getline(f, line);) {
+        if (line.empty() || line[0] == '#') continue;
+        if (line.rfind("word\t", 0) == 0) {   // word<TAB>prompt<TAB>misses
+            const size_t tab = line.rfind('\t');
+            if (tab > 5) wordMiss[line.substr(5, tab - 5)] += uint32_t(std::strtoul(line.c_str() + tab + 1, nullptr, 10));
+            continue;
+        }
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = trim(line.substr(0, eq)), v = trim(line.substr(eq + 1));
+        const uint32_t n = uint32_t(std::strtoul(v.c_str(), nullptr, 10));
+        if (k == "games") games = n;
+        else if (k == "letters") letters = n;
+        else if (k == "misses") misses = n;
+        else if (k == "words") words = n;
+        else if (k == "typing_ms") typingMs = std::atof(v.c_str());
+        else if (k.size() == 9 && k.rfind("key_miss_", 0) == 0) {}   // (an empty key name)
+        else if (k.size() == 10 && k.rfind("key_miss_", 0) == 0) keyMiss[uint8_t(k[9]) & 127] = n;
+    }
+    return true;
+}
+
+bool TypingRecord::save(const std::string& path) const
+{
+    std::ofstream f(path, std::ios::trunc);
+    if (!f) return false;
+    f << "# The Typing of the Dead 0: your typing over all games (Options > Gameplay > Typing of the Dead 0 > Statistics)\n";
+    f << "games=" << games << "\nletters=" << letters << "\nmisses=" << misses << "\nwords=" << words << "\ntyping_ms="
+      << uint64_t(typingMs) << "\n";
+    for (int i = 33; i < 127; ++i)
+        if (keyMiss[i] && i != '=' && i != '#') f << "key_miss_" << char(i) << "=" << keyMiss[i] << "\n";
+    // the 200 most missed prompts (the file stays small)
+    std::vector<std::pair<uint32_t, std::string>> w;
+    for (const auto& [s, n] : wordMiss) w.push_back({n, s});
+    std::sort(w.begin(), w.end(), [](const auto& a, const auto& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
+    for (size_t i = 0; i < w.size() && i < 200; ++i)
+        if (w[i].second.find('\t') == std::string::npos && w[i].second.find('\n') == std::string::npos)
+            f << "word\t" << w[i].second << "\t" << w[i].first << "\n";
+    return bool(f);
+}
+
+std::string TypingRecord::topKeys(int n) const
+{
+    std::vector<std::pair<uint32_t, int>> k;
+    for (int i = 33; i < 127; ++i)
+        if (keyMiss[i]) k.push_back({keyMiss[i], i});
+    std::sort(k.begin(), k.end(), [](const auto& a, const auto& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
+    std::string s;
+    for (size_t i = 0; i < k.size() && int(i) < n; ++i)
+        s += (s.empty() ? "" : ", ") + std::string(1, char(std::toupper(k[i].second))) + " " + std::to_string(k[i].first);
+    return s;
+}
+
+std::string TypingRecord::topWords(int n) const
+{
+    std::vector<std::pair<uint32_t, std::string>> w;
+    for (const auto& [s, c] : wordMiss) w.push_back({c, s});
+    std::sort(w.begin(), w.end(), [](const auto& a, const auto& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
+    std::string s;
+    for (size_t i = 0; i < w.size() && int(i) < n; ++i)
+        s += (s.empty() ? "" : ", ") + w[i].second + " " + std::to_string(w[i].first);
+    return s;
+}
+
 void Typing::finished(Runtime& rt, Target& t)
 {
     const double ms = t.startMs >= 0 ? nowMs_ - t.startMs : 0;
@@ -544,6 +903,10 @@ void Typing::finished(Runtime& rt, Target& t)
     // typed"): the kill's letters (all its prompts) and misses, over the time from when it could be typed (its prompt
     // shown, or the last prompt done if later: the reaction counts, waiting on another word does not); a boss: each
     // sentence (one attack)
+    // totdex (SEGA's word level): creature words typed since the last hit raise it again, one level every
+    // word_level_words
+    if (wordLevel < 0 && t.kind == 0 && !t.quick && ++levelRun_ >= cfg_.wordLevelWords)
+        ++wordLevel, levelRun_ = 0;
     char g = 0;
     if (t.kind == 2 || t.left == 0) {
         const double from = std::max(t.bornMs, freeSinceMs_);
@@ -551,11 +914,22 @@ void Typing::finished(Runtime& rt, Target& t)
         const float acc = t.lettersAll + t.missesAll ? 100.0f * float(t.lettersAll) / float(t.lettersAll + t.missesAll) : 100.0f;
         // (totd5, the feel report: a thrown axe typed at once graded C: one letter is no measure of speed; a small one
         // or a thrown thing counts as 3 letters: S within 0.7 s, A within 1 s)
-        const uint32_t n = t.kind == 1 || t.small ? std::max<uint32_t>(t.lettersAll, 3) : t.lettersAll;
-        const float wpm = float(n) / 5.0f / float(gms / 60000.0);
+        float n = float(t.kind == 1 || t.small ? std::max<uint32_t>(t.lettersAll, 3) : t.lettersAll);
+        float factor = 1.0f;
+        // totdex (SEGA's rank, Tod.exe's word finish: the time against the word's key costs): the letters as key
+        // costs (v slower than a, digits and symbols slow), short words a little stricter, long ones easier; a tough
+        // one's earlier prompts count by their letters
+        if (cfg_.keyCostGrade && !t.quick && t.lettersAll > 0) {
+            const float e = keyEffort(t.text, caseSensitive(), factor);
+            n = std::max(n - float(t.text.size()) + e, t.kind == 1 || t.small ? 3.0f : 1.0f);
+        }
+        const float wpm = n / 5.0f / float(gms / 60000.0) * factor;
         g = killGrade(acc, wpm);
         for (TypingStats* s : {&game, &chapter})
             ++s->killGrade[gradeIndex(g)];
+        // totdex (Tod.exe's speed bonus by grade): the kill's rank points
+        if (const int gi = gradeIndex(g); gi < int(cfg_.rankPoints.size()) && cfg_.rankPoints[size_t(gi)] > 0)
+            rt.mem.at<Player>(G::players, 0).score += cfg_.rankPoints[size_t(gi)];
         Popup p;
         p.x = t.x, p.y = t.y, p.grade = g, p.frame = frame_, p.boss = t.kind == 2;
         popups.push_back(p);
@@ -592,8 +966,34 @@ void Typing::finished(Runtime& rt, Target& t)
             t.bossShotsLeft += t.bossGoal > 0 ? 1 : cfg_.bossShots;
             if (trace_)
                 std::printf("frame %llu: TOTD boss %X sentence: hp %d -> %d (of %d, %d sentences)\n", (unsigned long long)frame_, t.obj, hp, t.bossGoal, hpMax, n);
-        } else
-            t.bossShotsLeft += cfg_.bossShots;
+        } else {
+            // totdex (found while checking SEGA's rules: Chapter 1's Chariot never died in some runs, base build too,
+            // Hard 75 WPM seed 2; Normal 55 seed 1 with recent_words): its sentences sat on its hit box (no hit points
+            // of its own), whose shots stopped landing once the armour broke, so the frame's bar (480) stayed at 320 /
+            // 144 and the event waited for ever. The boss part with a bar on the screen takes the sentence instead (the
+            // rule above), and the shots go at it
+            uint32_t alt = 0;
+            for (uint32_t o : rt.shootable) {
+                const int k = classify_->targetKind(rt, o);
+                const int16_t h = rt.mem.at<int16_t>(o + 0x70), hm = rt.mem.at<int16_t>(o + 0x72);
+                if (o != t.obj && (k == 2 || k == 4) && hm > 0 && h > 0 && h <= hm) { alt = o; break; }
+            }
+            if (alt) {
+                const int16_t ahp = rt.mem.at<int16_t>(alt + 0x70), amax = rt.mem.at<int16_t>(alt + 0x72);
+                const int n = bossSentencesFor(rt, alt);
+                const int dmg = (int(amax) + n - 1) / n;
+                const int goal = std::max(0, int(ahp) - dmg - (int(ahp) - dmg < dmg / 3 ? dmg : 0));
+                rt.mem.at<int16_t>(alt + 0x70) = int16_t(std::max(1, goal));
+                altGoal_[alt] = goal;
+                t.bossAlt = alt, t.bossAltSerial = int32_t(rt.mem.u32(alt + 8));
+                t.bossShotsLeft += goal > 0 ? 1 : cfg_.bossShots;
+                t.bossGoal = goal > 0 ? -1 : 0;   // (0: the killing shots go on until they land, below)
+                if (trace_)
+                    std::printf("frame %llu: TOTD boss %X sentence on %X: hp %d -> %d (of %d, %d sentences)\n", (unsigned long long)frame_, t.obj,
+                                alt, ahp, goal, amax, n);
+            } else
+                t.bossShotsLeft += cfg_.bossShots;
+        }
         // totd1: an attack whose shots did no damage (the boss turning away, in its own attack or hit reaction: the
         // Chariot took 25 sentences instead of 7) goes on, a shot every boss_shot_gap, until one does (3 s at most)
         bossLanded_ = false;
@@ -806,12 +1206,39 @@ bool Typing::holds(uint32_t obj)
     static const bool old6 = std::getenv("HOTD_TOTD_HOLD6") != nullptr;   // (testing: round 6's rule, the comparison)
     if (cfg_.attackHold == 2 && old6)
         return t.finishing > 0;
+    // totdrec (the user's recording 2026-11-05, 14:33-14:34 and 15:12-15:13: an agile one went off the picture's edge,
+    // its box with it, then leapt in from there and bit before a word could be read; Chapter 2 headless, Normal 55: a
+    // kind 70 on a wall out of the picture, its box gone 12 frames, struck, hit 32 frames later): with its box off the
+    // screen it waits as one with no word, up to offscreen_hold seconds since its box went (an event never waits on it
+    // for ever)
+    static const bool oldFresh = std::getenv("HOTD_TOTD_OLDFRESH") != nullptr;   // (testing: before totdrec)
+    if (cfg_.attackHold == 2 && !oldFresh && t.finishing == 0 && boxUpFor(it->first) == 0) {
+        const auto sh = shown_.find(it->first);
+        const uint64_t went = sh != shown_.end() && sh->second.serial == t.serial ? sh->second.last : t.born;
+        if (frame_ < went + ticks(cfg_.offscreenHold)) {
+            ++offscreenHeld;
+            return true;
+        }
+    }
     if (cfg_.attackHold == 2)
         return t.finishing > 0 || t.readyAt == 0 || frame_ < t.readyAt ||
                (lastAttack_ && frame_ < lastAttack_ + ticks(cfg_.attackGap[difficulty_]));
     if (lastAttack_ && frame_ < lastAttack_ + ticks(cfg_.attackGap[difficulty_]))
         return true;
     return t.finishing > 0 || t.readyAt == 0 || frame_ < t.readyAt;
+}
+
+// totdrec: frames in a row a target's box has been on the screen up to this tick (0: not up now). The boxes of a tick
+// are made in before(); the attack / hit hooks ask during the tick, so a box up now was last drawn at frame_
+uint64_t Typing::boxUpFor(uint32_t obj) const
+{
+    const auto t = targets_.find(obj);
+    if (t != targets_.end() && t->second.leader && targets_.count(t->second.leader))
+        obj = t->second.leader;
+    const auto sh = shown_.find(obj);
+    if (sh == shown_.end() || sh->second.last + 1 < frame_ || (rt_ && int32_t(rt_->mem.u32(obj + 8)) != sh->second.serial))
+        return 0;
+    return frame_ - sh->second.since + 1;
 }
 
 // totd2 (user 2026-11-03: "the locked-up / grabbed researchers can't be saved ... using the game's own rescue logic"):
@@ -1004,6 +1431,17 @@ bool Typing::graceHolds(const char* via) const
                 return true;
             }
             // (totd7: no attack_gap here any more: an attack that began after its grace (holds()) lands as it shows)
+            // totdrec (the user's recording 2026-11-05): ... but only once its box has been on the screen strike_seen
+            // in a row: one that leapt in from outside the picture (its box new, or gone) bites for nothing (HOTD_TOTD_OLDFRESH:
+            // before)
+            static const bool oldFresh = std::getenv("HOTD_TOTD_OLDFRESH") != nullptr;
+            if (!oldFresh && !t.small && boxUpFor(it->first) < ticks(cfg_.strikeSeen[difficulty_])) {
+                ++heldFresh;
+                if (trace_)
+                    std::printf("frame %llu: TOTD held fresh strike %X %s (box up %llu frames)\n", (unsigned long long)frame_, task,
+                                nameOf(*rt_, rt_->mem.u32(task)).c_str(), (unsigned long long)boxUpFor(it->first));
+                return true;
+            }
             return allowed();
         }
         return allowed();
@@ -1057,6 +1495,7 @@ void Typing::noteHit(const char* via) const
         n = b;
     }
     tickHitVia_ = n + " (" + via + ")";
+    tickHitObj_ = task;
 }
 
 // totd6: an iron ball in its throw at the player (iron_ball_follow, its owner's motion 0x279 in the ball's extra
@@ -1601,7 +2040,12 @@ void Typing::before(Runtime& rt, double tickMs)
         float best = -1;
         for (auto& [o, t] : targets_) {
             if (t.kind != 2 || t.text.empty() || (!t.seen && !(t.lastSeen && frame_ <= t.lastSeen + kSeenLatch) && o != lock_ && t.typed == 0)) continue;   // (begun: shown off the screen too)
-            const float sc = t.threat + (o == lock_ ? 1e7f : 0.0f) + (t.typed > 0 ? 1e6f : 0.0f);
+            // totdex (found by the recent_words runs: Chapter 1's Chariot never died): its frame part (the bar's hit
+            // points) came back as a new target after its armour-break routine with a lower threat than its hit box
+            // (no hit points), and every sentence after went to the hit box for nothing (152 sentences, the event
+            // waiting on it). A part whose hit points a sentence takes goes first
+            const int16_t php = mem.at<int16_t>(o + 0x70), pmax = mem.at<int16_t>(o + 0x72);
+            const float sc = t.threat + (o == lock_ ? 1e7f : 0.0f) + (t.typed > 0 ? 1e6f : 0.0f) + (pmax > 0 && php > 0 ? 1e5f : 0.0f);
             if (sc > best) best = sc, bossPrimary_ = o;
         }
         for (auto& [o, t] : targets_)
@@ -1659,12 +2103,23 @@ void Typing::before(Runtime& rt, double tickMs)
         combo = 0;
         lastMissFrame = uint32_t(frame_);
         if (t) t->missedThis = true, ++t->missesAll;
+        if (t && t->typed < t->text.size())   // totdex (the Statistics page): the letter that should have come, the prompt
+            for (TypingStats* s : {&game, &chapter}) {
+                ++s->keyMiss[uint8_t(low(uint8_t(t->text[t->typed]))) & 127];
+                ++s->wordMiss[t->text];
+            }
         if (t || !labels.empty())   // (totd4: a wrong letter's sound; none for keys with no prompt up)
             sound(rt, "miss");
     };
+    // totdex (SEGA's judge): keyMatches (tests: tests/unit/test_typing.cpp)
+    const auto isShifted = [](uint32_t k) { return shiftedKey(k); };
+    bool prevShift = false;
+    const auto matches = [&](char want, uint32_t k) { return keyMatches(want, k, prevShift); };
     // (totd7: a box on the screen this tick, its target seen now or within kSeenLatch frames: what is shown is typable)
     const auto shownNow = [&](const Target& x) { return (x.seen || (!noLatch_ && x.lastSeen && frame_ <= x.lastSeen + kSeenLatch)) && (noLatch_ || frame_ >= x.hiddenUntil); };
     for (uint32_t key : queue_) {
+        prevShift = lastShifted_;
+        lastShifted_ = isShifted(key);
         // totd7 (user 2026-11-05: "typing during cut-scenes or when no word is up ruins the PERFECT streak"): a key with
         // nothing up to type (no box: an empty screen, between waves; cut-scenes never queue keys) is ignored entirely:
         // no miss, no streak reset, no shot
@@ -1692,25 +2147,33 @@ void Typing::before(Runtime& rt, double tickMs)
                 const float th = x.threat + (x.kind == 1 ? 10000.0f : 0.0f);
                 if (th > best) best = th, q = &x;
             }
-            if (!q) {
+            // totdpacks: none on that side but a word that starts with the key (a text's "he" / "gone": the lists have
+            // none): the key locks it as any first letter
+            bool word = false;
+            for (const auto& [o, x] : targets_)
+                word = word || (!t && !q && !x.quick && shownNow(x) && !x.finishing && x.typed == 0 && !x.text.empty() &&
+                                x.kind != 2 && same(x.text[0], key));
+            if (!q && !word) {
                 ++quickIgnored;
                 if (trace_)
                     std::printf("frame %llu: TOTD quick %c: nothing on that side (ignored)\n", (unsigned long long)frame_, char(key));
                 continue;
             }
-            ++q->lettersAll;
-            ++game.letters, ++chapter.letters;
-            q->startMs = nowMs_;
-            q->typed = q->text.size();
-            ++quickTyped;
-            sound(rt, "key");   // (its killing shot fires below: the gun's own sound)
-            lastHitFrame = frame_, lastHitObj = q->obj;
-            const uint32_t keep = t ? t->obj : 0;
-            if (trace_)
-                std::printf("frame %llu: TOTD quick %c: %X %s\n", (unsigned long long)frame_, char(key), q->obj, nameOf(rt, mem.u32(q->obj)).c_str());
-            finished(rt, *q);
-            lock_ = keep;   // (the word being typed stays locked)
-            continue;
+            if (q) {
+                ++q->lettersAll;
+                ++game.letters, ++chapter.letters;
+                q->startMs = nowMs_;
+                q->typed = q->text.size();
+                ++quickTyped;
+                sound(rt, "key");   // (its killing shot fires below: the gun's own sound)
+                lastHitFrame = frame_, lastHitObj = q->obj;
+                const uint32_t keep = t ? t->obj : 0;
+                if (trace_)
+                    std::printf("frame %llu: TOTD quick %c: %X %s\n", (unsigned long long)frame_, char(key), q->obj, nameOf(rt, mem.u32(q->obj)).c_str());
+                finished(rt, *q);
+                lock_ = keep;   // (the word being typed stays locked)
+                continue;
+            }
         }
         if (!t) {
             // the lock: the prompts on the screen whose next letter is this one; the most dangerous of them
@@ -1728,7 +2191,7 @@ void Typing::before(Runtime& rt, double tickMs)
                 continue;
             }
             lock_ = t->obj;
-        } else if (!same(t->text[t->typed], key)) {
+        } else if (!matches(t->text[t->typed], key)) {
             // totd2 (user 2026-11-03: "no bats and no projectiles: they still don't work in real play"): a thrown axe
             // or a bat came while a word was locked, so its letters were misses until that word was done, and it hit
             // first (the self-test's typist always finished its word first, so it never saw this). A letter that is
@@ -1783,7 +2246,8 @@ void Typing::before(Runtime& rt, double tickMs)
     bool shot = false;
     for (auto& [o, t] : targets_)
         if ((t.bossShotsLeft > 0 || (!bossLanded_ && frame_ < t.bossPendingUntil)) && frame_ >= t.nextBossShot &&
-            fire(rt, {t.obj, t.serial, false})) {
+            fire(rt, t.bossAlt && mem.u32(t.bossAlt) && int32_t(mem.u32(t.bossAlt + 8)) == t.bossAltSerial ? Shot{t.bossAlt, t.bossAltSerial, false}
+                                                                                                         : Shot{t.obj, t.serial, false})) {
             if (t.bossShotsLeft == 0) ++t.bossShotsLeft;   // (an extra round of a pending attack)
             --t.bossShotsLeft;
             t.nextBossShot = frame_ + uint64_t(std::max(1, cfg_.bossShotGap));
@@ -1883,7 +2347,7 @@ void Typing::before(Runtime& rt, double tickMs)
     static const bool boss7 = std::getenv("HOTD_TOTD_BOSS7") != nullptr;   // (testing: round 7, the strikes not held)
     port::gBossHold = cfg_.attackHold && !boss7 ? bossHook : nullptr;   // (totd8: a boss strike waits for a missed window)
     gTotdProjectileHold = projHook;
-    tickHitVia_.clear();
+    tickHitVia_.clear(), tickHitObj_ = 0;
     for (auto& [o, t] : targets_) {
         if (t.kind != 0 || !t.seen || !cfg_.attackHold) continue;
         const std::string n = nameOf(rt, mem.u32(o));
@@ -2001,6 +2465,7 @@ void Typing::before(Runtime& rt, double tickMs)
         if (it != shown_.end() && it->second.serial == serial) {
             Shown& s = it->second;
             const uint64_t gap = frame_ - s.last;
+            if (gap > 1) s.since = frame_;   // (totdrec: a new showing)
             if (gap > 1 && gap <= 60) {
                 ++blinks;
                 if (trace_ || std::getenv("HOTD_TOTD_FLICKER"))
@@ -2020,7 +2485,7 @@ void Typing::before(Runtime& rt, double tickMs)
             }
             s.last = frame_, s.text = l.text;
         } else
-            shown_[l.obj] = {serial, frame_, l.text};
+            shown_[l.obj] = {serial, frame_, l.text, 0, frame_};
     }
     if (frame_ % 600 == 0)
         std::erase_if(shown_, [&](const auto& e) { return frame_ > e.second.last + 600; });
@@ -2136,9 +2601,23 @@ void Typing::after(Runtime& rt)
         if (hit) {
             ++hits, ++game.hits, ++chapter.hits, bossPunish_ = false;
             lastHit_ = rt.frameCount;
+            if (cfg_.wordLevelHit > 0) {   // totdex (SEGA's word level: down after a hit)
+                wordLevel = std::max(cfg_.wordLevelMin, wordLevel - cfg_.wordLevelHit);
+                levelRun_ = 0;
+            }
             ++hitFrom[tickHitVia_.empty() ? std::string("(other)") : tickHitVia_];
-            if (trace_)
-                std::printf("frame %llu: TOTD hit by %s\n", (unsigned long long)rt.frameCount, tickHitVia_.c_str());
+            // totdrec (the user's recording 2026-11-05, 14:34 / 15:13: an agile one leapt in with no box and hit): a
+            // creature's hit with its box on the screen (up within the last 20 frames) or not
+            long long boxAge = -1;
+            if (auto ht = targets_.find(tickHitObj_); ht != targets_.end() && ht->second.kind == 0) {
+                uint32_t bo = tickHitObj_;
+                if (ht->second.leader && targets_.count(ht->second.leader)) bo = ht->second.leader;
+                const auto sh = shown_.find(bo);
+                boxAge = sh == shown_.end() ? 100000 : (long long)(frame_ - sh->second.last);
+                ++(boxAge > 20 ? hitsUnshown : hitsShown);
+            }
+            if (trace_ || (boxAge > 20 && std::getenv("HOTD_TOTD_UNSHOWN")))
+                std::printf("frame %llu: TOTD hit by %s (box age %lld)\n", (unsigned long long)rt.frameCount, tickHitVia_.c_str(), boxAge);
             if (strikeLanded_)   // (totd8: the boss's strike landed: its next one waits for the next missed window)
                 bossStrikeUntil_ = 0, ++bossStrikesLanded;
         }
@@ -2155,8 +2634,14 @@ void Typing::after(Runtime& rt)
                     t.arrive = rt.frameCount;
                     t.readyAt = rt.frameCount + std::max<uint64_t>(1, ticks(cfg_.attackHold == 1 ? cfg_.attackWait[difficulty_] : cfg_.hitReset[difficulty_]));
                 }
-            if (trace_)
+            if (trace_) {
                 std::printf("frame %llu: TOTD attack%s%s\n", (unsigned long long)rt.frameCount, began ? " began" : "", hit ? " hit" : "");
+                for (const auto& [o, t] : targets_)   // (totdrec: who: the near creatures' state / step, grace left)
+                    if (t.kind == 0 && mem.f32(o + 0x40) < 40.0f)
+                        std::printf("frame %llu: TOTD   near %X %s state %d step %d z %.0f grace %lld \"%s\"\n", (unsigned long long)rt.frameCount, o,
+                                    nameOf(rt, mem.u32(o)).c_str(), int(mem.at<int16_t>(o + 0x5C)), int(mem.at<int16_t>(o + 0x60)),
+                                    mem.f32(o + 0x40), t.readyAt ? (long long)t.readyAt - (long long)rt.frameCount : -1LL, t.text.c_str());
+            }
         }
     }
     // a boss attack's hit: the bosses stagger at the first hit and take no more for a while (the Chariot: 40 a hit), so
@@ -2170,8 +2655,18 @@ void Typing::after(Runtime& rt)
         if (hp < b.hp)
             bossLanded_ = true;   // (the attack did damage: a pending one ends)
         if (hp <= 0 && hp < b.hp)   // (totd3: a boss killed: its other parts' prompts go, before()
-            if (auto it = targets_.find(b.obj); it != targets_.end() && (it->second.bossGoal == 0 || mem.at<int16_t>(b.obj + 0x72) > 0))
+            if (auto it = targets_.find(b.obj); (it != targets_.end() && (it->second.bossGoal == 0 || mem.at<int16_t>(b.obj + 0x72) > 0)) ||
+                                                altGoal_.count(b.obj))
                 bossDownUntil_ = rt.frameCount + 600;
+        // totdex: a part taking another part's sentences: its bar is set by them; a landed shot's damage taken back
+        // (the last sentence's goal 0: the shot kills it the game's own way)
+        if (auto ag = altGoal_.find(b.obj); ag != altGoal_.end() && targets_.find(b.obj) == targets_.end()) {
+            if (hp <= 0)
+                altGoal_.erase(ag);
+            else if (ag->second > 0 && hp < b.hp)
+                mem.at<int16_t>(b.obj + 0x70) = int16_t(std::max<int>(ag->second, 1));
+            continue;
+        }
         if (hp > 0 && hp < b.hp && frame_ < blockShotUntil_ && lastBossFinish_ < blockShotFrom_) {   // (totd8: a block's stagger shot: no damage)
             mem.at<int16_t>(b.obj + 0x70) = b.hp;
             continue;
@@ -2275,14 +2770,21 @@ void Typing::giveUp(Runtime& rt, Target& t)
 // game's cue (TypingConfig key_cue / miss_cue / ding_cue): a bank sample through Audio::playExtra (its volume), a file
 // cue (the ding's O_LIFEUP) as the PC plays it. Straight to the mixer, never through the game's sound queue: the game's
 // memory and frames stay as without the sounds (a muted / headless run plays the same)
-void Typing::sound(Runtime& rt, const char* name)
+void Typing::sound(Runtime& rt, const char* name) { soundTo(rt.audio, name); }
+// (totdpacks: Practice has no Runtime: the menu's audio)
+void Typing::soundTo(Audio* audio, const char* name)
 {
+    struct { Audio* audio; } rt{audio};   // (the body below as it was, rt.audio)
     static const bool off = std::getenv("HOTD_TOTD_NOSOUND") != nullptr;   // (testing: the same run without them)
     if (!cfg_.sounds || !rt.audio || off)
         return;
     const std::string n = name;
     const int cue = n == "key" ? cfg_.keyCue : n == "miss" ? cfg_.missCue : cfg_.dingCue;
     const float vol = n == "key" ? cfg_.keyVolume : n == "miss" ? cfg_.missVolume : cfg_.dingVolume;
+    if (static const bool list = std::getenv("HOTD_TOTD_SOUNDLIST") != nullptr; list && !soundSaid_.count("#list")) {   // (testing: smallfix2)
+        soundSaid_.insert("#list");
+        rt.audio->reportCues(cfg_.soundPeak);
+    }
     const auto dir = soundDir_.find(n);
     // (playExtra's stand-in: a bank sample, totd5: or a file cue's one-shot (the ding's O_LIFEUP), brought to
     // sound_peak of full scale: totd4's played at the bank's own level, 1.5 dB under the game's sounds, masked)
@@ -2295,6 +2797,175 @@ void Typing::sound(Runtime& rt, const char* name)
     if (soundSaid_.insert(n).second)   // (once each: where the sound comes from)
         std::printf("TOTD sound %s: %s\n", name, ok ? (rt.audio->extraSource(n) == "file" ? (dir->second + "/" + n + ".wav").c_str() : ("PC cue " + std::to_string(cue)).c_str())
                                                     : cue >= 0 ? ("PC cue " + std::to_string(cue) + " (" + rt.audio->describe(cue) + ")").c_str() : "none");
+}
+
+// totdpacks: Practice (typing.h): words float across a fixed screen from one side to the other in lanes, at most
+// drill_on_screen at once, a new one every drill_gap seconds (at once when none is up), drill_words in all; a word that
+// reaches the far side untyped is lost (no attack, no lives). The keys are judged as in play (the first letter locks
+// the word furthest along that starts with it, a wrong key a miss with the lock kept, Shift grace, case as the
+// difficulty, Escape / Backspace by drop_lock_keys); the words picked by pick()'s rules (unique first letters on the
+// screen, none of the last recent_words)
+void Typing::drillStart(bool fromMisses)
+{
+    drill_ = true;
+    drillFromMisses = fromMisses && !practiceWords_.empty();
+    drillTotal = std::max(1, cfg_.drillWords);
+    drillShown = drillTyped = drillLost = drillSameFirst = drillRepeats = 0;
+    drillLostWords.clear();
+    drillNextId_ = 0, drillNextAt_ = 0;
+    drillSpeed_.clear();
+    drillRecent_.clear();
+    targets_.clear();
+    labels.clear();
+    lock_ = 0;
+}
+
+void Typing::drillTick(Audio* audio, double tickMs)
+{
+    if (!drill_) return;
+    ++frame_;
+    nowMs_ += tickMs;
+    const int d = difficulty_;
+    constexpr float kOut = 200.0f;   // (a word's centre starts / ends this far from the middle: its box at the 496-wide picture's edge)
+    // a new word: from the side, in a lane no word near its start is in
+    if (drillShown < uint32_t(drillTotal) && int(targets_.size()) < std::max(1, cfg_.drillMax) &&
+        (targets_.empty() || frame_ >= drillNextAt_)) {
+        const uint32_t id = ++drillNextId_;
+        Target& t = targets_[id];
+        t.obj = id;
+        std::string s;
+        bool got = false;
+        if (drillFromMisses) {
+            got = pick(cfg_.wordLists, 0, 0, id, s, &practiceWords_, nullptr);
+            if (!got) {   // (a short list of misses: they come again, the recent rule set aside)
+                const std::deque<std::string> keep = recent_;
+                recent_.clear();
+                got = pick(cfg_.wordLists, 0, 0, id, s, &practiceWords_, nullptr);
+                recent_ = keep;
+            }
+        }
+        if (!got && !textPick(id, s)) {
+            if (drillShown % 5 == 4) pick({cfg_.toughList[d]}, cfg_.toughMin[d], cfg_.toughMax[d], id, s);
+            else pick(cfg_.wordLists, cfg_.wordMin[d][1], cfg_.wordMax[d][2], id, s);
+            // (the check counts the lists' words only: a short list of misses and a text repeat by nature)
+            if (std::find(drillRecent_.begin(), drillRecent_.end(), s) != drillRecent_.end()) ++drillRepeats;
+            drillRecent_.push_back(s);
+            while (int(drillRecent_.size()) > std::max(1, cfg_.recentWords)) drillRecent_.pop_front();
+        }
+        t.text = s;
+        t.cls = "practice";
+        const bool fromLeft = rng_() % 2 == 0;
+        bool used[7] = {};
+        for (const auto& [o, x] : targets_)
+            if (o != id && std::abs(x.x) > 120.0f) used[std::clamp(int(std::lround((110.0f - x.y) / 36.0f)), 0, 6)] = true;
+        int lane = int(rng_() % 7);
+        for (int k = 0; k < 7 && used[lane]; ++k) lane = (lane + 1) % 7;
+        t.x = fromLeft ? -kOut : kOut, t.y = 110.0f - 36.0f * float(lane);
+        const float seconds = cfg_.drillSeconds[d] + cfg_.drillPerLetter[d] * float(s.size());
+        drillSpeed_[id] = (fromLeft ? 1.0f : -1.0f) * 2.0f * kOut / std::max(1.0f, seconds * 60.0f);
+        t.born = frame_, t.bornMs = nowMs_;
+        ++drillShown;
+        drillNextAt_ = frame_ + ticks(cfg_.drillGap[d]);
+    }
+    // the keys (as before()'s judge, without the game: no shots, no quick keys)
+    const auto shiftOf = [](uint32_t k) -> uint32_t {
+        static const char* from = "1234567890-=[]\\;',./`";
+        static const char* to = "!@#$%^&*()_+{}|:\"<>?~";
+        if (k >= 'a' && k <= 'z') return k - 'a' + 'A';
+        if (k > 0 && k < 128)
+            if (const char* p = std::strchr(from, int(k))) return uint32_t(uint8_t(to[p - from]));
+        return k;
+    };
+    const auto isShifted = [](uint32_t k) { return (k >= 'A' && k <= 'Z') || (k > 0 && k < 128 && std::strchr("!@#$%^&*()_+{}|:\"<>?~", int(k))); };
+    for (uint32_t key : queue_) {
+        const bool prevShift = lastShifted_;
+        lastShifted_ = isShifted(key);
+        if (targets_.empty()) { ++ignoredKeys; continue; }
+        Target* t = nullptr;
+        if (lock_)
+            if (auto it = targets_.find(lock_); it != targets_.end()) t = &it->second;
+        const auto miss = [&](Target* m) {
+            ++game.misses, ++chapter.misses;
+            combo = 0;
+            lastMissFrame = uint32_t(frame_);
+            if (m && m->typed < m->text.size())
+                for (TypingStats* st : {&game, &chapter}) {
+                    ++st->keyMiss[uint8_t(low(uint8_t(m->text[m->typed]))) & 127];
+                    ++st->wordMiss[m->text];
+                }
+            soundTo(audio, "miss");
+        };
+        if (!t) {
+            float best = -1;
+            for (auto& [o, x] : targets_) {
+                if (x.text.empty() || !same(x.text[0], key)) continue;
+                const float along = std::abs(x.x - (drillSpeed_[o] > 0 ? -kOut : kOut));
+                if (along > best) best = along, t = &x;
+            }
+            if (!t) { miss(nullptr); continue; }
+            lock_ = t->obj;
+            lockFrame_ = frame_;
+        } else if (!(same(t->text[t->typed], key) || (cfg_.shiftGrace && prevShift && shiftOf(key) != key && same(t->text[t->typed], shiftOf(key))))) {
+            miss(t);
+            t->missedThis = true;
+            continue;
+        }
+        ++game.letters, ++chapter.letters;
+        if (t->startMs < 0) t->startMs = nowMs_;
+        ++t->typed;
+        skipPunct(*t);
+        soundTo(audio, "key");
+        lastHitFrame = frame_, lastHitObj = t->obj;
+        if (t->typed >= t->text.size()) {
+            ++game.words, ++chapter.words, ++drillTyped;
+            if (!t->missedThis) game.maxCombo = std::max(game.maxCombo, ++combo);
+            soundTo(audio, "ding");
+            drillSpeed_.erase(t->obj);
+            targets_.erase(t->obj);
+            lock_ = 0;
+        }
+    }
+    queue_.clear();
+    if (lock_) game.typingMs += tickMs, chapter.typingMs += tickMs;
+    // the words float on; past the far side: lost
+    for (auto it = targets_.begin(); it != targets_.end();) {
+        Target& t = it->second;
+        t.x += drillSpeed_[t.obj];
+        if (std::abs(t.x) > kOut + 1.0f && (drillSpeed_[t.obj] > 0) == (t.x > 0)) {
+            ++drillLost;
+            ++drillLostWords[t.text];
+            combo = 0;
+            if (lock_ == t.obj) lock_ = 0;
+            soundTo(audio, "miss");
+            drillSpeed_.erase(t.obj);
+            it = targets_.erase(it);
+        } else
+            ++it;
+    }
+    // the rule check: no two words up with the same first letter
+    bool first[128] = {};
+    for (const auto& [o, t] : targets_) {
+        const uint8_t f = uint8_t(low(uint8_t(t.text.empty() ? ' ' : t.text[0]))) & 127;
+        drillSameFirst += first[f];
+        first[f] = true;
+    }
+    // what the HUD draws: each word in its lane; yellow on the last fifth of its way
+    labels.clear();
+    for (const auto& [o, t] : targets_) {
+        Label l;
+        l.obj = o;
+        l.x = t.x, l.y = t.y;
+        l.text = t.text;
+        l.typed = t.typed;
+        l.locked = o == lock_;
+        const float along = std::abs(t.x - (drillSpeed_.at(o) > 0 ? -kOut : kOut)) / (2.0f * kOut);
+        l.danger = along > 0.8f;
+        l.lockAge = l.locked ? int(frame_ - lockFrame_) : 1000;
+        l.hitAge = lastHitObj == o ? int(frame_ - lastHitFrame) : 1000;
+        l.z = 50.0f;
+        labels.push_back(l);
+    }
+    std::stable_sort(labels.begin(), labels.end(), [](const Label& a, const Label& b) { return a.locked > b.locked; });
 }
 
 // a held enemy let go (the prompt dropped, cancelled, a cut-scene): its real hit points back

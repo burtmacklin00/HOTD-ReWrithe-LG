@@ -210,26 +210,29 @@ package's `hotd.sh` loaded its own SDL and played Chapter 1 to 16695.
 The user (2026-11-03): **the unreleased modes stay out of the public releases until they are polished.** Survival Mode ships
 (v1.2.0 labelled it "Very Experimental / Proof of Concept"; removed since, user 2026-11-05). **The Typing of the Dead 0
 ships since v1.3.0** (user 2026-11-05, rel130), labelled "Experimental / Proof of Concept": its More Modes item's tag
-line, its help line, a notice at a game's start (`Hud::drawTotdNote`). Three CMake options:
+line, its help line, a notice at a game's start (`Hud::drawTotdNote`). **Horde Mode ships too** (user 2026-11-09,
+hordepub), labelled the same way. Four CMake options:
 
 - **`HOTD_EXPERIMENTAL_MODES`** (default **ON**: every development build, `build\Release` and the private portable):
   the unreleased modes (and The Typing of the Dead 0, Survival and all Survival arenas with them).
 - **`HOTD_TOTD_MODE`** (default **ON**): The Typing of the Dead 0 in a build with the experimental modes OFF (the
   release packages). OFF as well: it is left out.
-- **`HOTD_SURVIVAL_MODE`** (default **ON**): Survival Mode (Chapter 1's courtyard only) in a build with the experimental
+- **`HOTD_SURVIVAL_MODE`** (default **ON**): Survival Mode (all three arenas since v1.4.0, survpub) in a build with the experimental
   modes OFF. OFF as well: Survival is left out.
+- **`HOTD_HORDE_MODE`** (default **ON**): Horde Mode (`src/game/horde.*`, its `#if HOTD_HORDE` blocks) in a build with
+  the experimental modes OFF. OFF as well: Horde is left out (no code, options or table).
 
-| | ON (development) | OFF + `HOTD_TOTD_MODE=ON` + `HOTD_SURVIVAL_MODE=ON` (every release package) |
+| | ON (development) | OFF + `HOTD_TOTD_MODE=ON` + `HOTD_SURVIVAL_MODE=ON` + `HOTD_HORDE_MODE=ON` (every release package) |
 |---|---|---|
-| More Modes | The Typing of the Dead 0, Survival, Survival Arena (all arenas), the unreleased modes | Chapter Select, Co-op, Sonic Mode, The Typing of the Dead 0 (labelled), Survival, Survival Arena (the courtyard) |
-| High Scores | the Typing of the Dead 0 tables, Survival, the unreleased modes' | the Typing of the Dead 0 tables, Survival |
-| Command line | `--totd*`, `--typing`, `--survival*`, the unreleased modes' | `--totd*`, `--typing`, `--survival*` |
+| More Modes | The Typing of the Dead 0, Survival, Survival Arena (all arenas), the unreleased modes | Chapter Select, Co-op, Sonic Mode, The Typing of the Dead 0 (labelled), Survival, Survival Arena (all arenas, v1.4.0), Horde (labelled), Horde Size |
+| High Scores | the Typing of the Dead 0 tables, Survival, Horde | the Typing of the Dead 0 tables, Survival, Horde |
+| Command line | `--totd*`, `--typing`, `--survival*`, `--horde-mode`, Survival's old `--horde*` names | `--totd*`, `--typing`, `--survival*`, `--horde-mode` / `--horde-size` |
 
 The unreleased modes' code is not compiled at all with the experimental modes OFF (user 2026-11-05): it lives in
-`src/unreleased/` and every use of it is inside `#if HOTD_UNRELEASED` (CMake: ON only with the experimental modes ON
-and that folder present); their options are unknown options there. Their language lines are each file's
+`src/unreleased/` (empty since Horde left it, 2026-11-09) and every use of it is inside `#if HOTD_UNRELEASED` (CMake: ON with the experimental modes ON;
+what is left there is Survival's old "Horde" names); their options are unknown options there. Their language lines are each file's
 `# [unreleased]` .. `# [/unreleased]` section; `tools\export_public.ps1` leaves out the folder, those blocks and
-sections (the public source builds without them). Built OFF (TotD 0 and Survival ON) by:
+sections (the public source builds without them). Built OFF (TotD 0, Survival and Horde ON) by:
 `tools\make_portable_hotd.ps1 -Release` (its own `build-release`; it checks that nothing of `src/unreleased` is
 compiled and `--totd-test` is accepted), `.github/workflows/release.yml` (Windows, Linux, macOS),
 `tools/make_linux_package.sh` (stops on a build folder configured ON unless `--experimental`),

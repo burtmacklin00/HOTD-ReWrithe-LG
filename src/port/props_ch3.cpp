@@ -140,6 +140,7 @@ template <class P> void Game<P>::prop121_kikai_item_run(uint32_t obj)
         of<uint32_t>(obj, 0x40) = v.w[2];
         prop_bullet_impact(obj);
         prop_break_pieces(obj);
+        prop_broken(obj);   // (ours: Horde Mode's drops; nothing in a normal game)
         if ((of<uint8_t>(obj, 0x58) >> 5) & 1) {
             prop_drop_life_item(obj);
             mem.at<uint8_t>(0x51E995) = 1;

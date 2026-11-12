@@ -78,6 +78,7 @@ public:
     // Continue / Exit. fxux: with the PC's sprites they are drawn in the PC's menu font (SPR.RBH's white / yellow 24:
     // the pause font has no S / g / R / y), else as text
     std::vector<std::string> pauseLines;
+    int pauseGrey = -1;   // photomode: the item drawn greyed (online: Photo Mode), -1 none (the PC sprites' rows only)
     // fxux: the pause item under a point of the PC's 640 x 480 screen fitted to the window's height (x from the 4:3
     // part's left, y from the top), as the last drawPause laid them out; -1 none
     // Light Gun Edition: easier to shoot: each item owns the whole band up to halfway to its neighbours (the first and
@@ -101,6 +102,24 @@ public:
     bool clean = false;
     // trailer (ours): no subtitles / captions (the cut-scene viewer's Subtitles Off, Trailer Mode). Draw-only
     bool noText = false;
+    // vr3 (docs/vr.md "Cut-scenes"): no cut-scene bars (VR's world cut-scenes: the scene is all around the player, the
+    // bars on the HUD's screen plane only cut a band out of the view). Draw-only, set by the VR frame; false otherwise
+    bool noBars = false;
+    // vrfade (user 2026-11-10: "the white flash doesn't account for the whole eye"): the full-screen fades as the flat
+    // picture shows them now, for VR to draw over each eye's whole view (the HUD panel is only the 4:3 screen's
+    // rectangle). white: kind 104's / the palette's fade from white, the alpha of the white over the 3D (under the 2D
+    // layer); cover: the 2D layer's full-screen cover (chapter_screen_reset's 0xA1 black, the 0x8D white cut), 0 none,
+    // 1 black, 2 white (opaque, under the panel: the panel's own cover cells are the same colour); pcLevel: the PC's
+    // screen fade (Runtime::PcFade, over the 3D and the 2D: 1 none, below black, above brighter)
+    struct ScreenFade {
+        float white = 0.0f;
+        int cover = 0;
+        float pcLevel = 1.0f;
+    };
+    static ScreenFade screenFade(const Runtime& rt);
+    // vrfade: draw() leaves the white fade and the PC fade out (the VR frame draws them over the eyes and the cinema /
+    // spectator picture: Hud::screenFade). Draw-only, set by the VR frame; false otherwise
+    bool vrFades = false;
     // qa2: the place (0-based) the Survival game's points take in the Survival table at its end (-1: none / not known)
     int survivalRank = -1;
     // rel130: The Typing of the Dead 0's start notice ("EXPERIMENTAL / PROOF OF CONCEPT", the host's 6 s), as
@@ -159,6 +178,14 @@ public:
     // the cover over the whole screen now: 0xA1 (black), 0x8D (white) or 0 (galfix4: the live background holds its
     // picture under one, main.cpp liveFrame)
     static uint32_t coverShown(const Runtime& rt);
+    // vrend (user 2026-11-10: "the end credit scene does not account for VR"): a full-screen 2D screen is up (the
+    // chapter's title card, the GAME OVER card / route map, the ending's staff roll): VR shows the flat picture on the
+    // cinema screen in a dark room (vr_scene.cpp), not the 4:3 panel floating in the lit world
+    static bool vrScreen2D(const Runtime& rt);
+    // vrend: the same in the attract / title flow (modes other than 4 / 5): the title with its logo (mode 2 from the
+    // logo's frame 184), or the 2D just drawn opaque at the 4:3 screen's left and right edges (a whole-screen card:
+    // the date card, the ranking); after draw
+    bool vrAttract2D(const Runtime& rt) const;
 
 private:
     Overlay player_[2], centre_, debug_, cross_[4], bar_, boss_, title_, clear_, label_;
@@ -166,6 +193,9 @@ private:
     Overlay survivalSign_[SurvivalMode::kItems];   // Survival's shop signs (between the rounds)
     bool signLit_[SurvivalMode::kItems] = {};
     void drawSurvival(const Runtime& rt, int ww, int wh, int scale);   // (and the weapons' lines)
+#if HOTD_HORDE
+    void drawHorde(const Runtime& rt, int ww, int wh);   // horde2: Horde's score pops, kill chains, multi-kill banner
+#endif
     void drawTotdNote(const Runtime& rt, int ww, int wh);   // rel130: totdNote's two lines
     // a line in the font of the game's score line (Score Display; the PC's with PC models) on a canvas of the 2D
     // picture's size, at an integer scale, with its shadow: its width
@@ -194,7 +224,7 @@ private:
     std::vector<uint8_t> markMask_, markLayer_;   // (translucent2D: the marks' cells alone; drawPc2D: one PC mark)
     // blood2 (drawRemake): the backdrop's program and textures (backdrop, widgets now / before a new splatter, hand)
     unsigned bgProg_ = 0, fgProg_ = 0, bgTex_ = 0, fgTex_ = 0, splatTex_[2] = {}, handTex_ = 0;
-    int uFgRect_ = -1, uFgAlpha_ = -1, uFgShadow_ = -1, uBgRect_ = -1, uBgUV_ = -1, uBgGrey_ = -1, uBgMul_ = -1, uBgAdd_ = -1, uBgFade_ = -1, uBgAlpha_ = -1;
+    int uFgRect_ = -1, uFgAlpha_ = -1, uFgShadow_ = -1, uFgTint_ = -1, uFgTintOn_ = -1, uBgRect_ = -1, uBgUV_ = -1, uBgGrey_ = -1, uBgMul_ = -1, uBgAdd_ = -1, uBgFade_ = -1, uBgAlpha_ = -1;
     uint64_t bgGen_ = ~0ull, fgGen_ = ~0ull;
     int fgW_ = 0, fgH_ = 0;   // leftovers: fgTex_'s size (a redrawn part of the same size: only that part uploaded)
     const uint8_t* bgSrc_ = nullptr;
@@ -232,10 +262,14 @@ private:
     // GitHub #25: players 1 / 2 with more than 5 lives: "x N" beside their one torch (the name entry's X 0x1AC and the
     // results' digits 0x181.., drawn as drawSeatHud draws its pieces: no game banks used)
     void drawLivesCount(const Runtime& rt, int ww, int wh);
+    // vr4 (user 2026-11-09): VR dual pistols with a magazine each (Runtime::VrLeftGun): the left gun's rounds as a second
+    // row of player 1's bullets (0x10) right above the first, the same x places and spacing
+    void drawVrLeftRounds(const Runtime& rt, int ww, int wh);
     std::vector<uint8_t> seatTiles_, seatRgba_;
-    SeatImg seatLabel_[2][2];   // "3P" / "4P" [seat - 2][arcade, PC], built once from the art
+    SeatImg seatLabel_[2][2][2];   // "3P" / "4P" [seat - 2][arcade, PC][from "2P", from "1P" (charsel4: Rogan)], built once from the art
     uint64_t seatEmptySince_[2] = {};   // players 3 / 4's RELOAD! prompt: the game frame (+ 1) their gun went empty, 0 none
     Overlay seatText_[2];
+    int tagLook_[4] = {0, 1, 2, 3};   // charsel4: the colour seat cpuTag_ / cross_ are styled in (drawSights)
     Overlay cpuTag_[4];   // "CPU" under a computer teammate's crosshair, in its colour   // players 3 / 4's CONTINUE? when its sprite bank is not loaded (no one continued yet)
     // dx: window pixels to the right (the anchored corners)
     void upload(const std::vector<uint8_t>& rgba, int w, int h, int ww, int wh, float dx = 0.0f, bool fit = false,
@@ -261,12 +295,36 @@ private:
     // lang (docs/translating.md): the cut-scene subtitles with a translation (sub.<event>.<line>): the game's own line
     // hidden (its text cells / the PC's line), the translation drawn in the language's font over the 4:3 screen
     std::vector<std::string> subLines(const Runtime& rt);   // the translations shown now (empty: none)
-    void drawSubtitles(const std::vector<std::string>& lines, int ww, int wh);
+    // subs (game/subtitles.h, docs/subtitles.md): a caption line drawn in our font: its text, size (percent of the
+    // lang line's), place (subs::Place) and, for kPlaceY, its centre (percent of the 4:3 screen's height)
+    struct SubDraw {
+        std::string text;
+        int size = 100, place = 0;
+        float y = 0.0f;
+        bool operator==(const SubDraw& o) const { return text == o.text && size == o.size && place == o.place && y == o.y; }
+    };
+    // what the captions show now (Options > Gameplay > Subtitles, the subtitle file, a language): hide: the game's own
+    // caption hidden (its text cells / the PC's line); lines: drawn instead (Original, English, Size 100 %: none)
+    struct SubPlan {
+        bool hide = false;
+        std::vector<SubDraw> lines;
+    };
+    SubPlan subPlan(const Runtime& rt);
+    // a voice message's lines as the game timed them (Runtime::pcTextIds): its start (line 1's frame), and its end once
+    // its lines are gone (a skip: before the table's frames)
+    struct SubEvent {
+        uint64_t start = 0, end = 0;
+        bool done = false;
+    };
+    void subTrack(const Runtime& rt);
+    std::map<int, SubEvent> subEvents_;
+    uint64_t subTrackFrame_ = 0;
+    void drawSubtitles(const std::vector<SubDraw>& lines, int ww, int wh);
     std::map<std::string, std::vector<int>> subIndex_;      // an English line -> its keys (event * 2 + line - 1)
     bool subIndexed_ = false;
     bool subHide_ = false;                                   // this frame: the game's own line hidden
     std::vector<uint8_t> subRgba_;
-    std::vector<std::string> subShown_;
+    std::vector<SubDraw> subShown_;
     void drawBossClock(const Runtime& rt, int ww, int wh);   // Boss Mode's clock (THOTD.EXE 0x418CC8)   // THOTD.EXE 0x41AB7C
     Overlay langPc_[2];                               // lang: the PC font's words (Continues, Press SPACE) in the language
     Overlay pause_;                                   // drawPause without the PC sprites: the same lines as text   // PC models: the PC's screen fade (Runtime::PcFade)
@@ -279,8 +337,16 @@ private:
     // arcade's splash is see-through, a blue copy over the red one came out purple); `tiles` itself when none shows
     const uint8_t* withoutP2Notice(const Runtime& rt, const uint8_t* tiles);
     std::vector<uint8_t> tilesNoP2_;
-    // player 2's hit notice now (kPopups record 1): its sprite and top-left cell; false: none
-    static bool p2Notice(const Runtime& rt, uint32_t& sprite, int& x, int& y);
+    // player p's (0 / 1) hit notice now if it is drawn blue (blueNotice; kPopups record p): its sprite and top-left
+    // cell; false: none
+    static bool p2Notice(const Runtime& rt, int p, uint32_t& sprite, int& x, int& y);
+    static bool blueNotice(const Runtime& rt, int p);
+    // charsel4: players 1 / 2's "1P" / "2P" labels in the other player's colours where Rogan / G sit in the other seat
+    // (look_seat): the arcade pass's pictures (labelLook2D) and one PC label sprite drawn at (px, py) (labelLookPc)
+    void labelLook2D(const Runtime& rt, std::vector<uint8_t>* const* pics, int n);
+    void labelLookPc(const Runtime& rt, std::vector<uint8_t>& canvas, uint32_t sprite, int px, int py);
+    int labelSwapSeat(const Runtime& rt, uint32_t sprite) const;   // the seat (0 / 1) whose label `sprite` is, if it is drawn swapped; -1
+    SeatImg lookLabel_[2][2];   // the reference labels ["1P", "2P"][arcade, PC]
     bool drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool composed = false);
     // the game area's left edge (the window's, or areaW's) relative to the picture's (W x H fitted to the window's
     // height, centred)
@@ -316,7 +382,7 @@ private:
     bool seatOk_[4] = {}, seatSprite_[4] = {};
     int seatW_[4] = {}, seatH_[4] = {};
     int seatDw_[4] = {}, seatDh_[4] = {}, seatCx_[4] = {}, seatCy_[4] = {};
-    bool buildSeatSight(int seat, bool pcModels, int wh);
+    bool buildSeatSight(int seat, bool pcModels, int wh, int look = -1);   // (charsel4: look: the colour seat, Game::look_seat; -1 the seat)
     void drawSight(int player, int ww, int wh, float x, float y);
     std::string pcDir_;
     int blood_ = 0;

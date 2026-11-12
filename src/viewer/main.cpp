@@ -398,7 +398,7 @@ struct App {
             std::string("F     arcade filtering (") + onoff(opt.filter) + ")",
             std::string("V     arcade texture sets: ") + (zoneSets ? "by position" : "per model"),
             std::string("Z     arcade draw zones + texture areas from the ROM, unverified (") + onoff(zoneCull) + ")",
-            std::string("X     arcade colour rows as in the game (") + onoff(scriptRows) + ")",
+            std::string("X     arcade color rows as in the game (") + onoff(scriptRows) + ")",
             "C     print camera   F12 screenshot   Esc quit",
         };
         return l;
@@ -1432,7 +1432,7 @@ int main(int argc, char* argv[])
                     else if (k == SDLK_G) app.opt.gamma = !app.opt.gamma;
                     else if (k == SDLK_V) app.zoneSets = !app.zoneSets;
                     else if (k == SDLK_Z) { app.zoneCull = !app.zoneCull; SDL_Log("draw zones %s (zone %d)", app.zoneCull ? "on" : "off", app.currentZone()); }
-                    else if (k == SDLK_X) { app.scriptRows = !app.scriptRows; SDL_Log("arcade colour rows: %s", app.scriptRows ? "as in the game (the scripts' rows)" : "the areas' own"); }
+                    else if (k == SDLK_X) { app.scriptRows = !app.scriptRows; SDL_Log("arcade color rows: %s", app.scriptRows ? "as in the game (the scripts' rows)" : "the areas' own"); }
                     else if (k == SDLK_K) app.sky = !app.sky;
                     else if (k == SDLK_O) app.creatures = !app.creatures;
                     else if (k == SDLK_J) app.animate = !app.animate;

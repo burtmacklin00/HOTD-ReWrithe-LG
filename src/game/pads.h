@@ -47,6 +47,8 @@
 // gun pointed off the window (or reporting 0, 0) aims off the screen = the reload. F9 in the game: calibration (each
 // gun shoots two targets), kept in launcher.ini (gun1cal / gun2cal). ipolish: Controls > Light Guns > Assign gives a
 // seat its own device (a trigger pull takes it; launcher.ini gun1dev= / gun1name=); unassigned seats: the order used.
+// linuxmice (GitHub #67): on Linux the same devices are read from the kernel's evdev nodes (/dev/input/event*: SDL
+// gives one shared cursor, on Wayland always), which needs read access (the "input" group); evdevPoll / evdevEvent.
 #pragma once
 
 #include "game/launcher.h"
@@ -58,6 +60,8 @@
 #include <functional>
 #include <string>
 #include <vector>
+
+namespace hotd::test { struct Access; }   // (tests/unit: hotd_unit's look at the private parts)
 
 namespace hotd::game {
 
@@ -87,6 +91,10 @@ public:
     // --input-test: only SDL's virtual pads (the test's own) are opened; physical pads and their buttons are left out,
     // so the test runs the same whatever is plugged in
     bool virtualOnly = false;
+    // deckfs (GitHub #74, a Steam Deck: "the crosshair can go right out of the screen"): the picture drawn, in window
+    // coordinates (main sets it each frame of play: the part of the window the screen shows, the Aspect's black bars
+    // left out); w 0: the whole window. The crosshair stays on it (a pull just past its edge: the off-screen reload)
+    SDL_Rect aimArea{0, 0, 0, 0};
     // weapons (game/weapons.h; Survival in play, main sets it each frame): a pad's shoulder buttons L1 / R1 and the
     // d-pad's left / right are the previous / next weapon (their bound actions not done meanwhile: the triggers L2 / R2
     // reload / fire by default); weaponStep: the steps asked since main last read them, by player
@@ -285,6 +293,21 @@ public:
 #ifdef _WIN32
     void winRawInput(const void* rawInput, void* hwnd);   // a RAWINPUT (mouse) for the game window
 #endif
+    // linuxmice (GitHub #67): one evdev input_event (type / code / value as linux/input.h; EV_SYN's SYN_REPORT ends a
+    // packet: its motion, then its buttons) and an absolute device's ABS_X / ABS_Y range (its whole range = the
+    // window; F9's calibration corrects the rest). Portable: the input test feeds recorded events on any platform
+    void evdevRange(uint64_t dev, int minX, int maxX, int minY, int maxY);
+    void evdevEvent(uint64_t dev, unsigned type, unsigned code, int value);
+    // Linux: once per loop: every mouse / gun in /dev/input read (opened at need, rescanned every 2 s for new ones);
+    // on false: all closed (nothing old is read on the next open). Elsewhere nothing
+    void evdevPoll(bool on);
+    const std::string& evdevNote() const { return evdevNote_; }   // why no device can be read ("": fine / not Linux)
+    // Linux's "a second mouse" (P1 Mouse, P2 Mouse 2, no gun): the desktop cursor until a second evdev mouse is really
+    // used (as Windows' raw input decides it), then every mouse its own crosshair through evdev (evdevMiceOn: the
+    // first used = player 1). Before that the events are only counted (no crosshair moves twice). reset(): off
+    int evdevMiceSeen() const { return int(seen_.size()); }
+    void evdevMiceOn();
+    bool evdevMice() const { return evdevMice_; }
 
     // the game loop, once per loop after the events: positions and buttons into the guns, the start buttons
     void apply(Runtime& rt, GunState guns[], bool paused, int lw, int lh);
@@ -308,7 +331,7 @@ public:
     // a device's lasting name and the name shown (main.cpp's raw input asks Windows once per device; the input test
     // names its own)
     void describe(uint64_t dev, const std::string& key, const std::string& name);
-    bool connected(const std::string& key);   // that device is plugged in (Windows' raw-input list, checked each second)
+    bool connected(const std::string& key);   // that device is plugged in (Windows' raw-input list / Linux' evdev nodes, checked each second)
     // the Assign page: seat p waits for a trigger pull (left button) from any raw-input gun / mouse, which takes it
     void startAssign(int seat) { assignSeat_ = seat; assigned = Assigned{}; }
     void cancelAssign() { assignSeat_ = -1; }
@@ -359,6 +382,7 @@ public:
     }
 private:
     int seatPick_ = 0;
+    friend struct ::hotd::test::Access;   // (tests/unit: the evdev packets' devices)
     struct Dev {
         uint64_t id = 0;
         std::string key, name;   // (ipolish) describe()
@@ -380,6 +404,28 @@ private:
     uint64_t listedAt_ = 0;
     bool listedOnce_ = false;
     float calRead_[kInputPlayers][4] = {};
+    struct Evd {   // linuxmice: an evdev device's packet so far (evdevEvent)
+        uint64_t id = 0;
+        int minX = 0, maxX = 0, minY = 0, maxY = 0, x = 0, y = 0;
+        bool absMoved = false, dropping = false;
+        float dx = 0, dy = 0;
+        unsigned flags = 0;
+    };
+    std::vector<Evd> evd_;
+    std::string evdevNote_;
+    std::vector<uint64_t> seen_;   // (evdevMiceSeen: the devices moved / clicked while not active, in that order)
+    bool evdevMice_ = false;
+    struct EvNode {   // Linux: an open /dev/input/event* node
+        int fd = -1;
+        uint64_t id = 0;
+        std::string path, key, name;
+    };
+    std::vector<EvNode> evNodes_;
+    uint64_t evScanAt_ = 0;
+#ifdef __linux__
+    void evdevScan(std::vector<EvNode>* open, std::vector<std::string>* keys);
+#endif
+    Evd& evd(uint64_t id);
     Dev& dev(uint64_t id);
     void place(Dev& d);   // a device without a player: the next gun / mouse player that has none
     void calibrationShot(Dev& d);

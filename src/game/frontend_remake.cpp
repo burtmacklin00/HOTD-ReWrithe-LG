@@ -555,7 +555,7 @@ void Frontend::remakeSettings(const std::string& title, std::vector<Extra>* rows
         w->raw = e.raw;
         w->value = e.value ? e.value() : std::string();
         w->user = on ? 0 : 1;
-        w->seed = exp ? 1 : 0;
+        w->seed = exp ? 1 : e.info ? 2 : 0;   // (totdex: 2 an info row, no chevron)
         w->draw = &Frontend::drawRRow;
         w->flags |= 0x100;
         w->help = !off.empty() ? off : (exp && e.help.rfind("Experimental", 0) != 0 ? "Experimental: " + e.help : e.help);
@@ -793,7 +793,9 @@ void Frontend::remakeSettings(const std::string& title, std::vector<Extra>* rows
             tw = std::max(tw, rTextWidth(c, 13.0f));
         const int rx = px + 22, ry = rowTop + r * rowH, rw = pw - 44;
         const int lw0 = std::max(150, int(std::ceil(tw)) + 46 + (icons ? 30 : 0));
-        const int below = kHeight - 6 - (ry + rowH), above = ry - 2 - 6;
+        // (smallfix2 user 2026-11-09: the list stayed over the tab bar: kept inside the page's panel, the rows' area)
+        const int dTop = py + 3, dBot = std::min(kHeight - 6, rowTop + fullRows * rowH + 4);
+        const int below = dBot - (ry + rowH), above = ry - 2 - dTop;
         int vis = std::min(nItems, icons ? 7 : 10);
         auto heightOf = [&](int v) { return v * itemH + 2 * m + (v < nItems ? 24 : 0); };   // (the arrows' room)
         while (vis > 3 && heightOf(vis) > std::max(below, above))
@@ -803,8 +805,8 @@ void Frontend::remakeSettings(const std::string& title, std::vector<Extra>* rows
         const int lw = lw0 + sbW;
         const int lx = rx + rw - lw;
         int ly = ry + rowH;
-        if (ly + lh > kHeight - 6)
-            ly = std::max(6, ry - lh - 2);
+        if (ly + lh > dBot)
+            ly = std::max(dTop, ry - lh - 2);
         int curK = -1;
         for (int k = 0; k < nItems; ++k)
             if (curIdx >= 0 ? k == curIdx : ch[size_t(k)] == cur)
@@ -943,7 +945,8 @@ void Frontend::remakePrompts(Widget* root, bool tabsKeys, std::function<void()> 
 {
     struct P { const char* label; const char* key; const char* pad; std::function<void()> act; int tag; };
     std::vector<P> ps;
-    if (tabsKeys && !gunPrompts) {
+    // (vrprompts: a VR controller has no shoulder buttons for the tabs: its ray clicks them; no Left / Right prompts)
+    if (tabsKeys && !gunPrompts && !(padPrompts_ && isVrStyle(padType_))) {   // (Light Gun Edition: gunPrompts)
         auto step = [this](int d) {
             return [this, d]() {
                 if (remakeTabs_ > 0)
@@ -1971,6 +1974,8 @@ std::string Frontend::padKey(const std::string& xbox) const
 
 bool Frontend::ringKey(const std::string& key) const
 {
+    if (padPrompts_ && isVrStyle(padType_))   // vrprompts: a VR controller's round buttons (A / B / X / Y, the menu's)
+        return key.size() == 1 || key == "Menu";
     return padPrompts_ && (key.size() == 1 || key == "Cross" || key == "Circle" || key == "Square" || key == "Triangle" ||
                            key == "Left" || key == "Down" || key == "Up" || key == "Right");
 }
@@ -2101,6 +2106,21 @@ bool Frontend::rPadGlyph(const std::string& key, float cx, float cy, float r)
 
 bool Frontend::rPadSymbol(const std::string& key, float cx, float cy, float r)
 {
+    if (key == "Menu" && padPrompts_ && isVrStyle(padType_)) {   // vrprompts: a VR controller's menu button: three bars
+        const float S = ps_, hw = r * 0.42f, hh = r * 0.075f, gap = r * 0.3f;
+        for (int py = std::max(0, int((cy - r) * S)); py < std::min(int((cy + r) * S) + 1, rph()); ++py)
+            for (int px = std::max(0, int((cx - r) * S)); px < std::min(int((cx + r) * S) + 1, rpw()); ++px) {
+                const float ux = std::fabs((float(px) + 0.5f) / S - cx), uy = (float(py) + 0.5f) / S - cy;
+                float d = 1e9f;
+                for (int k = -1; k <= 1; ++k) {   // (a rounded bar each: its distance in units)
+                    const float qx = ux - hw, qy = std::fabs(uy - float(k) * gap) - hh;
+                    d = std::min(d, std::hypot(std::max(qx, 0.0f), std::max(qy, 0.0f)) + std::min(std::max(qx, qy), 0.0f));
+                }
+                const float a = clamp01((0.5f / S - d) * S);
+                if (a > 0) rBlend(px, py, 0xF4ECE4, a);
+            }
+        return true;
+    }
     if (key == "Left" || key == "Down" || key == "Up" || key == "Right") {   // padglyphs: a Joy-Con's arrow, filled
         const float S = ps_, s = r * 0.42f;
         for (int py = std::max(0, int((cy - r) * S)); py < std::min(int((cy + r) * S) + 1, rph()); ++py)
@@ -2166,11 +2186,11 @@ void Frontend::rChevron(float cx, float cy, float s, uint32_t rgb, float alpha)
 }
 
 // ---- the blood colour (the Blood Color setting) ----
-uint32_t Frontend::bloodColour() const
+uint32_t Frontend::bloodColour(bool smooth) const
 {
     // v1.3.1 (user 2026-11-07): Rainbow Blood on: the menu's blood in the rainbow (the computer screens' colours), at
     // the red's depth
-    if (float c[3]; rainbowMenuColour(double(nowMs_) / 1000.0, c)) {
+    if (float c[3]; rainbowMenuColour(double(nowMs_) / 1000.0, c, smooth)) {
         const float m = std::max({c[0], c[1], c[2], 0.01f}), k = 176.0f / m;
         return uint32_t(c[0] * k) << 16 | uint32_t(c[1] * k) << 8 | uint32_t(c[2] * k);
     }
@@ -2202,7 +2222,7 @@ uint32_t Frontend::tint(uint32_t c) const
 // excess (x 0.95 + 14 of 160) laid on that colour instead, as tint()
 void Frontend::backdropTint(bool on, float mul[3], float add[3]) const
 {
-    // (the main menu, user 2026-10-21 "the video in the background also reflects the blood colour": the same tint at
+    // (the main menu, user 2026-10-21 "the video in the background also reflects the blood color": the same tint at
     // 30 %, a faint cast; the settings pages: whole)
     const float k = on ? 1.0f : 0.3f;
     for (int c = 0; c < 3; ++c) {
@@ -2642,7 +2662,7 @@ void Frontend::drawRRow(Widget& w)
         v.pop_back();
         while (!v.empty() && v.back() == ' ') v.pop_back();
     }
-    if (!grey) {
+    if (!grey && w.seed != 2) {   // (totdex: an info row: its value alone)
         if (open)
             rText(rtl ? "<" : ">", mx(right - 6), ty, th, col, 1, 0.0f, 0, fx);
         else {
@@ -2676,12 +2696,16 @@ void Frontend::drawRPrompt(Widget& w)
     // on one line, the arcade's claw marks (0x2A) small behind each, the label right-aligned a fixed gap to their left
     const float kh = kPromptCapH, colW = kPromptCapW;
     // (leftovers, rtl: mirrored: the caps at the widget's left, the label left-aligned a gap to their right)
-    const float kw = padPrompts_ && !gun ? kh : colW, ccx = w.rtlRow ? float(x) + colW / 2 : float(x + ww) - colW / 2;
+    const float th = 7.0f;
+    // vrprompts: a VR controller's word buttons (Trigger, Grip, Trackpad) in a rounded box as wide as the word (into
+    // the gap before the label when wider than the column), its round ones (A, B, the menu button) in a ring
+    const bool vrWord = padPrompts_ && isVrStyle(padType_) && !ringKey(key);
+    const float kw = vrWord ? std::max(kh, rTextWidth(key, th) + 8.0f) : padPrompts_ && !gun ? kh : colW;   // (Light Gun Edition: gun)
+    const float ccx = w.rtlRow ? float(x) + colW / 2 : float(x + ww) - colW / 2;
     const float kx = ccx - kw / 2, ky = float(y) + (float(hh) - kh) / 2;
     rBlood(2, ccx + 4.0f, ky + kh / 2 - 2.0f, 40.0f, 0.38f, 0.72f);   // (out past the cap's top right / bottom left)
-    const float th = 7.0f;
     if (gun || !rPadGlyph(key, ccx, ky + kh / 2, kh / 2)) {   // (padglyphs: the pad's / keys' icons, else the cap)
-        rKeyCap(kx, ky, kw, kh, padPrompts_ && !gun);
+        rKeyCap(kx, ky, kw, kh, padPrompts_ && !vrWord && !gun);
         if (gun || !rPadSymbol(key, ccx, ky + kh / 2, kh / 2))   // (padpass: a PlayStation pad's shapes)
             rText(key, ccx, ky + (kh - th) / 2, th, 0xF4ECE4, 1, 0.0f, 0);
     }
@@ -2980,8 +3004,16 @@ void Frontend::remakeRender()
             f();
         }
     }
-    bloodHue_ = bloodColour();
+    // smallfix2 (user 2026-11-09: Rainbow Blood's menu blood a smooth cycle, no lag): on the GPU menu the layers stay in the
+    // reference red (their caches, the splatter job and the static layer, never see a new colour) and the shader tints
+    // them every frame (RemakeLayers::tintOn); the backdrop takes the real colour as always
+    float rbc[3];
+    rTint_ = gpuLayers && rainbowMenuColour(0.0, rbc, true);
+    bloodHue_ = bloodColour(rTint_);
+    const uint32_t liveHue = bloodHue_;
     bool dirty = rBackground();
+    if (rTint_)
+        bloodHue_ = 0xA00C08;
     // the widgets under the hand / the focus (the hover walk's marks), then the marks off (the draw walk's clearing)
     std::vector<Widget*> lit;
     std::vector<std::pair<Widget*, bool>> live;   // menuperf: the changing widgets (each its own part), lit or not
@@ -3255,6 +3287,8 @@ void Frontend::remakeRender()
     canvas_ = &canvas;
     if (gpuLayers) {   // blood2: the GPU composes (Hud::drawRemake): the layers, no picture here
         RemakeLayers& L = layers_;
+        L.tintOn = rTint_;
+        for (int k = 0; k < 3; ++k) L.tintRgb[k] = float((liveHue >> (16 - 8 * k)) & 255);
         L.fg = &fgStatic_, L.fw = PW, L.fh = PH, L.fgGen = staticGen_, L.unitsW = cw_;
         std::copy(staticDirty_, staticDirty_ + 4, L.fgDirty);
         L.parts = &hov_, L.partsGen = fgGen_;

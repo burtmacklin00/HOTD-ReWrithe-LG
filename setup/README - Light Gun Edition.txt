@@ -2,7 +2,7 @@ The House of the Dead: ReWrithe - Light Gun Edition
 ===================================================
 Unofficial build of The House of the Dead: ReWrithe (https://github.com/TawhidI-602/The-House-of-the-Dead-ReWrithe)
 for light gun setups (arcade cabinets, Gun4IR, Sinden, AimTrak and other guns that act as a mouse). Based on ReWrithe
-v1.3.1. New ReWrithe releases are merged in only when they are worth it, so a working setup is never broken by
+v1.4.0. New ReWrithe releases are merged in only when they are worth it, so a working setup is never broken by
 upstream changes. Not made by, or supported by, ReWrithe's author: please report problems with this edition here, not
 on the original's page.
 

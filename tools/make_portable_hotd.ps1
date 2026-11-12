@@ -5,9 +5,10 @@
 #   powershell -ExecutionPolicy Bypass -File tools\make_portable_hotd.ps1 [-Build <build folder>] [-Out <folder>] [-NoBuild] [-Release]
 #   -NoBuild: copy the exe the build folder already has (no cmake --build, nothing is rebuilt or locked).
 #   -Release: a public release package (docs/porting.md "Experimental modes"): built with HOTD_EXPERIMENTAL_MODES=OFF (no
-#     unreleased mode; The Typing of the Dead 0 in, HOTD_TOTD_MODE=ON; Survival Mode in, HOTD_SURVIVAL_MODE=ON) in its own build folder, build-release (configured the first time with
+#     unreleased mode; The Typing of the Dead 0 in, HOTD_TOTD_MODE=ON; Survival Mode in, HOTD_SURVIVAL_MODE=ON; Horde Mode in,
+#     HOTD_HORDE_MODE=ON) in its own build folder, build-release (configured the first time with
 #     the dev build's generator and dependency folders), into private\portable\HOTD ReWrithe Release; the exe is checked
-#     (--totd-test accepted). Without -Release: the user's own copy from build\ (the modes ON, as build\Release).
+#     (--totd-test and --horde-mode accepted). Without -Release: the user's own copy from build\ (the modes ON, as build\Release).
 #
 # Default output: <repo>\private\portable\HOTD Teaser (inside private\, never committed).
 # The game needs nothing else: the work RAM is built from the ROM at the start and the textures / colours come from
@@ -43,7 +44,7 @@ if ($Release -and -not $NoBuild) {
         throw "-Release builds in its own folder (build-release): not the dev build ($devBuild), which keeps the modes ON"
     }
     # the release package: HOTD_EXPERIMENTAL_MODES=OFF in its own build folder (the dev build keeps the modes)
-    $cfgArgs = @('-S', $repo, '-B', $Build, '-DHOTD_EXPERIMENTAL_MODES=OFF', '-DHOTD_TOTD_MODE=ON', '-DHOTD_SURVIVAL_MODE=ON', '-DHOTD_LOCAL_ICON=OFF')
+    $cfgArgs = @('-S', $repo, '-B', $Build, '-DHOTD_EXPERIMENTAL_MODES=OFF', '-DHOTD_TOTD_MODE=ON', '-DHOTD_SURVIVAL_MODE=ON', '-DHOTD_HORDE_MODE=ON', '-DHOTD_LOCAL_ICON=OFF')
     if (-not (Test-Path -LiteralPath (Join-Path $Build "CMakeCache.txt"))) {
         $devCache = Get-Content -LiteralPath (Join-Path $devBuild "CMakeCache.txt") -ErrorAction SilentlyContinue
         $cfgArgs += @('-G', 'Visual Studio 17 2022', '-A', 'x64')
@@ -86,7 +87,22 @@ if ($Release) {
     $said = (& (Join-Path $Build "Release\hotd.exe") --totd-test --frames 1 --arcade "nonexistent.zip" 2>&1 | Out-String)
     $ErrorActionPreference = $eap
     if ($said -match 'not in this version') { throw "the release exe refused The Typing of the Dead 0: $said" }
-    Write-Host "experimental modes: OFF (the unreleased modes left out; The Typing of the Dead 0 and Survival in; checked)"
+    # hordepub (user 2026-11-09): Horde Mode ships too (HOTD_HORDE_MODE, "Experimental / Proof of Concept"): accepted;
+    # Survival's old "--horde <arena>" names stay development-only (an unknown option here)
+    $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    $said = (& (Join-Path $Build "Release\hotd.exe") --horde-mode normal --frames 1 --arcade "nonexistent.zip" 2>&1 | Out-String)
+    $old = (& (Join-Path $Build "Release\hotd.exe") --horde-test 1 --frames 1 --arcade "nonexistent.zip" 2>&1 | Out-String)
+    $ErrorActionPreference = $eap
+    if ($said -match 'not in this version|unknown option') { throw "the release exe refused Horde Mode: $said" }
+    if ($old -notmatch 'unknown option|not in this version') { throw "the release exe took Survival's old --horde-test: $old" }
+    # survpub (user 2026-11-10, v1.4.0): Survival's three arenas in the release too (main.cpp survivalArenaCount)
+    $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    foreach ($arena in @("courtyard", "platform", "roof")) {
+        $said = (& (Join-Path $Build "Release\hotd.exe") --survival $arena --mute --frames 1 --arcade "nonexistent.zip" 2>&1 | Out-String)
+        if ($said -match 'one of|not in this version|unknown option') { $ErrorActionPreference = $eap; throw "the release exe refused the Survival arena ${arena}: $said" }
+    }
+    $ErrorActionPreference = $eap
+    Write-Host "experimental modes: OFF (the unreleased modes left out; The Typing of the Dead 0, Survival and Horde in; checked)"
 } else {
     Write-Host ("experimental modes: " + $(if ($expOn) { "ON (the user's own copy)" } else { "OFF" }))
 }
@@ -191,6 +207,41 @@ setlocal
 cd /d "%~dp0"
 start "" "%~dp0bin\hotd.exe" --safe-mode %*
 '@ | Set-Content -LiteralPath (Join-Path $Out "Play (Safe Mode).bat") -Encoding ascii
+# vr3 (2026-11-09): the game in VR (README.md "How to play in VR"): a PC VR headset through the PC's OpenXR runtime
+@'
+@echo off
+rem Play in VR: the game in a VR headset connected to this PC (Meta Quest through Quest Link / Air Link or Steam Link,
+rem or a SteamVR headset). The setup also makes "The House of the Dead ReWrithe VR.exe" (the same thing with the game's
+rem icon); this file is the fallback. Start the headset's PC app first (Meta Horizon Link, or SteamVR) and put the
+rem headset on; see "Play in VR" in README.txt. With no headset found the game plays as usual on the monitor
+rem (settings\hotd.log says why; "VR Check.bat" lists what the PC's VR runtime offers). VR settings: data\vr\vr.ini.
+setlocal
+cd /d "%~dp0"
+if not exist "%~dp0bin\hotd.exe" (
+  echo bin\hotd.exe is missing. Unzip the whole package again.
+  pause
+  exit /b 1
+)
+start "" "%~dp0bin\hotd.exe" --vr openxr %*
+'@ | Set-Content -LiteralPath (Join-Path $Out "Play in VR.bat") -Encoding ascii
+# vrship (2026-11-09): the VR check (bin\hotd.exe --vr-check, docs/vr.md "VR check"): the PC's OpenXR runtime, the
+# headset, the formats and controller profiles, in this window and settings\hotd.log; no game starts
+@'
+@echo off
+rem VR Check: shows which VR runtime this PC uses (Meta Horizon Link or SteamVR), the headset it sees and what it offers.
+rem Nothing is installed or changed and the game does not start. Put the headset on and start Link / Steam Link first.
+rem The same lines are written to settings\hotd.log: send that file when you report a VR problem.
+setlocal
+cd /d "%~dp0"
+if not exist "%~dp0bin\hotd.exe" (
+  echo bin\hotd.exe is missing. Unzip the whole package again.
+  pause
+  exit /b 1
+)
+"%~dp0bin\hotd.exe" --vr-check %*
+echo.
+pause
+'@ | Set-Content -LiteralPath (Join-Path $Out "VR Check.bat") -Encoding ascii
 @'
 @echo off
 rem Starts the ReWrithe Model Viewer: browse the game's models and stages from your own files (see README.txt).
@@ -257,6 +308,9 @@ Quick start
 4. Double-click HOTDReWritheSetup.bat once. After the files check it makes "The House of the Dead ReWrithe.exe" in this
    folder (your PC game's icon): start the game with that from then on. Mouse = gun.
 5. Problem? The setup window says what is missing and where it goes; details are in settings\hotd.log.
+6. VR headset (Meta Quest through Link / Air Link / Steam Link, or a SteamVR headset): start its PC app, put it on,
+   then start "The House of the Dead ReWrithe VR.exe" (made with the other one; or "Play in VR.bat"). Step by step:
+   "Play in VR" below.
 
 Something went wrong?
 ---------------------
@@ -359,6 +413,31 @@ More:
   Players 3 / 4    the experimental 4-player mode (gamepads), empty seats can be CPU teammates.
 Settings, the log (hotd.log) and crash reports are in this folder's settings\ (delete launcher.ini there for the defaults).
 
+Play in VR
+----------
+The game can be played in a VR headset connected to this PC: you stand in the game's world, the right controller is
+your gun. New and not yet tested on every headset; if it does not start, settings\hotd.log says why (the game then
+plays on the monitor as usual).
+1. Connect the headset to the PC and start its PC app:
+   - Meta Quest 2 / 3 / 3S / Pro: install the Meta Horizon Link app on the PC (meta.com). In it: Settings -> General ->
+     OpenXR Runtime -> "Set Meta Horizon Link as active". Connect the headset with a USB-C cable (Link) or over
+     Wi-Fi (Air Link), then in the headset: Quick Settings -> Link -> Launch.
+   - Meta Quest through SteamVR: install Steam and SteamVR on the PC, the free "Steam Link" app on the headset (from
+     the headset's Store); start Steam Link in the headset and connect to the PC; in SteamVR's Settings -> OpenXR:
+     "Set SteamVR as OpenXR runtime".
+   - Valve Index, HTC Vive and other SteamVR headsets: install Steam and SteamVR, start SteamVR; in SteamVR's
+     Settings -> OpenXR: "Set SteamVR as OpenXR runtime".
+   Not sure it works? Double-click "VR Check.bat": its last line says OK or what is missing (also in settings\hotd.log).
+2. Start "The House of the Dead ReWrithe VR.exe" (HOTDReWritheSetup.bat makes it beside the normal one), or
+   "Play in VR.bat", or the "(VR)" shortcut the setup makes when "Create a VR shortcut" is ticked. (VR always uses the
+   OpenGL renderer, whatever Options -> Video -> Renderer says.)
+   The menus are on the monitor: pick the game with the mouse, then put the headset on (in data\vr\vr.ini,
+   menu_panel = on shows the menus on a big screen in the headset instead: the right controller is the mouse).
+Controls: trigger = shoot; grip, A or B = reload (or point the gun at the floor, or shoot off the screen); X = Start /
+join; the left menu button = pause; hold a thumbstick down for 1 second = recentre (after you move your chair).
+Comfort: play seated; data\vr\vr.ini has the options (cutscenes = cinema shows the cut-scenes on a big screen in front
+of you; follow = level keeps the horizon level; dual_pistols = on for a gun in each hand).
+
 Model Viewer
 ------------
 Double-click "Model Viewer.bat" to look around the game's worlds and creatures with a free camera, from your own files
@@ -393,7 +472,7 @@ if (Test-Path -LiteralPath $lgReadme) {
 # Special Elite, Apache 2.0: NOTICE.md), data\fonts (Noto Sans for Korean / Japanese / Chinese / Arabic / Hebrew /
 # Cyrillic, OFL.txt), data\lang (the language files: en / ko / ja / zh / ru / ar / he ...), data\mods (the ragdoll mod and the example mod); every file
 # the repo has there, so a new one comes along by itself
-foreach ($d in "ui", "fonts", "lang", "mods", "vr", "typing") {   # (vr: vr.ini, the VR settings: docs/vr.md; typing: The Typing of the Dead 0's typing.ini, dictionary, ding: docs/typing.md)
+foreach ($d in "ui", "fonts", "lang", "mods", "vr", "typing", "subtitles") {   # (subtitles: the subtitle files, docs/subtitles.md; vr: vr.ini, the VR settings: docs/vr.md; typing: The Typing of the Dead 0's typing.ini, dictionary, ding: docs/typing.md)
     $src = Join-Path $repo "data\$d"
     if (-not (Test-Path -LiteralPath $src)) { continue }
     Get-ChildItem -LiteralPath $src -Recurse -File | ForEach-Object {

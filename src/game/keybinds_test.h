@@ -16,7 +16,7 @@ namespace hotd::game {
 class BindTest {
 public:
     static constexpr int kFirst = 1172, kLast = 1200;
-    static constexpr int kChecks = 63;   // (padglyphs: + 22 families, Steam Input, the setting / icons, the pad cursor) the checks its cases make (expect / counts calls through Ctx)
+    static constexpr int kChecks = 64;   // (vrprompts: + the VR controllers' styles) (padglyphs: + 22 families, Steam Input, the setting / icons, the pad cursor) the checks its cases make (expect / counts calls through Ctx)
     struct Ctx {
         Runtime& rt;
         GunState* guns;

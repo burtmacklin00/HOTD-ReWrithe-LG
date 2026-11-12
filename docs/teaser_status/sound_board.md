@@ -237,3 +237,39 @@ song alone; the reference: the PC CD's tracks, which have the same pitch, ratio 
   starts each attack at 0x17F of 0x3FF on a linear scale, the chip counts its attenuation down), the feedback's stack
   delay (MAME: MDXSL 0 = the slot's own output 2 samples before), the modulation scale (MAME assumes 1024 samples per
   cycle; this wave has 64) and the key-rate scaling formula (MAME: octave + 2 KRS + FNS bit 9).
+
+## Arcade FM, part 2 (GitHub #26, 2026-11-09, worker claude/sound2)
+
+The board no longer builds MAME's scsp.cpp as it is: `cmake/scsp_hw.cmake` copies mame0289's file into the build
+folder (`build/scsp_hw/scsp.cpp`) with text edits where the YMF292 behaves differently from MAME on HOTD's music
+(configure stops if an anchor is missing, i.e. another MAME tag). The behaviour follows the chip as documented by
+mednafen's Saturn SCSP (hardware-tested; GPL, read as a reference only, no code taken) and the review in
+private/notes/issue_review_2026-11-04. Each fix is one bit of `hotd_scsp_fix` (src/audio/sound_board.cpp), all on;
+`HOTD_SCSP_MAME=<bits>` or `HOTD_SCSP_MAME=all` turns them off at run time (MAME's output, bit-identical to before).
+
+| Bit | Fix | MAME |
+|---|---|---|
+| 1 | FM: the modulation keeps 1/64-sample precision (6 fraction bits, the lowest dropped), moves the interpolation weight; MDL 0-4 = no modulation; wrapped to 11 bits of whole samples | rounded to whole samples, the weight from the unmodulated phase |
+| 16 | FM: the chip's interpolation quirk, the second point's whole part from the modulation plus the NEXT slot's phase fraction | the next sample |
+| 2 | EG attack: key on at attenuation 0x280 (-60 dB), each EG clock takes 1/2^n of the attenuation off (exponential in amplitude, the chip's EG clock), the level through the same dB table as the other phases | starts at 0x17F/0x3FF linear (-8.5 dB) and ramps linearly |
+| 4 | key-rate scaling: clamp(KRS + octave, 0, 15) added to each 5-bit rate, a rate of 0 does not move, a DL / RR rewrite keeps the scaling | octave + 2 KRS + FNS bit 9 on the 64-step tables, negative at low octaves (all HOTD's notes: KRS 0, octave -3..0 = slower decays / releases) |
+| 8 | timers: a reload is loaded on the next prescaler tick of the chip's sample counter, then counts to 0xFF | counts from the moment of the write |
+
+**Measured** (`--board-wav`, each song alone, 72 s; the reference is the CD's tracks, which have the board's pitch):
+- Tempo. The driver reloads timer B (0x03C6: prescale 8, 57 counts) 92 cycles into its interrupt in all songs
+  (`HOTD_TRACE_TIMERB=1`). MAME: a period of 457 samples; with fix 8: 464 (58 ticks). Song loops: Chapter 2 102.41 s ->
+  104.49 s (CD 105.93 s), Chapter 3 93.06 -> 94.99 s (CD 96.00), Magician 70.50 -> 71.96 s (CD 72.83). So the songs
+  were 3.2-3.4 % fast and are now 1.1-1.4 % fast. The rest is probably the 68000's wait states on sound RAM / register
+  accesses (mednafen's notes say the same of its own "a very teensy bit too fast" music): `HOTD_SCSP_WAIT=<cycles>`
+  (testing) adds wait cycles per access; 12 gives Chapter 2 105.9 s but Chapter 3 96.36 / Magician 73.23 (0.4 % slow),
+  so no single value fits yet: left off.
+- FM. The FM fixes take 1-1.5 dB off 2-10 kHz in Chapter 2 (less of the whole-sample phase noise). The CD's own mix
+  differs from the board by 2-8 dB per third-octave band (much brighter above 3 kHz), so it cannot confirm the timbre;
+  that needs the issue's hardware rips (YouTube, not fetched by us).
+- Everything else: HOTD keys every voice with AR 31 and KRS 0 (Chapter 1, 5709 key-ons), so fix 2 is a 0.5 ms fade-in
+  on every note (MAME: instant) and fix 4 makes the decays / releases of octave -3..-1 notes 1-1.5 rate steps faster.
+- The PC sound path is untouched.
+
+**Not changed (ranked plan in the worker's STATUS.md):** wait states, the EG's decay / release clocking (MAME's
+continuous tables vs the chip's discrete stepping), the level curve (one attenuation sum in the chip), the loop end's
+second interpolation point, a timer that is not reloaded (the chip keeps counting), MAME's DSP vs the chip's buffering.

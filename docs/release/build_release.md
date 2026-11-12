@@ -6,8 +6,9 @@ Run from the repo root in PowerShell. The package is made OUTSIDE the repo; noth
 ## 0. Experimental modes OFF in every public package (user 2026-11-03)
 
 The Typing of the Dead 0 ships since v1.3.0, labelled "Experimental / Proof of Concept"; the unreleased modes are **not**
-in a public release until they are polished; Survival Mode **is** (user 2026-11-03; courtyard only). Every
-release build is configured with **`-DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MODE=ON -DHOTD_SURVIVAL_MODE=ON`** ([porting.md](../porting.md#experimental-modes)):
+in a public release until they are polished; Survival Mode **is** (user 2026-11-03), with all three arenas since v1.4.0 (survpub, user 2026-11-10: the courtyard,
+Chapter 3's platform, Chapter 4's Magician's roof). Every
+release build is configured with **`-DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MODE=ON -DHOTD_SURVIVAL_MODE=ON -DHOTD_HORDE_MODE=ON`** ([porting.md](../porting.md#experimental-modes)):
 
 - [ ] Windows: `tools\make_portable_hotd.ps1 -Release` (its own `build-release` folder, configured OFF; it stops if the
       cache says ON and checks that nothing of `src/unreleased` is compiled and the exe accepts `--totd-test`). A hand-made build folder: add the flag to its configure.
@@ -15,8 +16,10 @@ release build is configured with **`-DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MO
       TotD 0 option on Windows, Linux and macOS.
 - [ ] Linux / SteamOS: configure `build-linux` with the flag; `tools/make_linux_package.sh` stops on a build without it.
 - [ ] Quest APK: `tools\make_quest_apk.ps1` configures OFF (`-Experimental` only for a testing APK).
-- [ ] From the package: `bin\hotd.exe --survival courtyard` prints "... not in this version ..." (exit 2); More Modes
-      shows The Typing of the Dead 0 (with its Experimental / Proof of Concept line) and Survival and nothing else; High Scores has no other mode's table.
+- [ ] From the package: `bin\hotd.exe --survival-test 2 --survival courtyard --mute` (and `--survival platform`,
+      `--survival roof`) ends "result=ok"; `--survival 4` prints "one of courtyard platform roof (or 1-3)"; More Modes'
+      Survival Arena row steps through the three arenas; More Modes
+      shows The Typing of the Dead 0 and Horde (each with its Experimental / Proof of Concept line) and Survival and nothing else; High Scores has no other mode's table (TotD 0, Survival, Horde only).
 
 The user's own builds (`build\Release`, the private portable from `make_portable_hotd.ps1` without `-Release`) keep them ON.
 
@@ -26,11 +29,11 @@ SDL3 and stb_vorbis are not downloaded by the build unless asked. Two ways:
 
 ```
 # a) offline (what the dry run used): SDL3 source and stb already on disk
-cmake -S . -B build-package -G "Visual Studio 17 2022" -A x64 -DHOTD_FETCH_SDL3=ON -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MODE=ON -DHOTD_SURVIVAL_MODE=ON ^
+cmake -S . -B build-package -G "Visual Studio 17 2022" -A x64 -DHOTD_FETCH_SDL3=ON -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MODE=ON -DHOTD_SURVIVAL_MODE=ON -DHOTD_HORDE_MODE=ON ^
   "-DFETCHCONTENT_SOURCE_DIR_SDL3=<folder of the SDL3 release-3.2.10 source>" "-DHOTD_STB_DIR=<folder with stb_vorbis.c>"
 
 # b) on a machine with internet: SDL3 (tag release-3.2.10) and nothings/stb are fetched from GitHub
-cmake -S . -B build-package -G "Visual Studio 17 2022" -A x64 -DHOTD_FETCH_SDL3=ON -DHOTD_FETCH_STB=ON -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MODE=ON -DHOTD_SURVIVAL_MODE=ON
+cmake -S . -B build-package -G "Visual Studio 17 2022" -A x64 -DHOTD_FETCH_SDL3=ON -DHOTD_FETCH_STB=ON -DHOTD_EXPERIMENTAL_MODES=OFF -DHOTD_TOTD_MODE=ON -DHOTD_SURVIVAL_MODE=ON -DHOTD_HORDE_MODE=ON
 ```
 
 The configure output must contain `OGG music: stb_vorbis from <folder>`. If it says `OGG music: off` the package has no music.

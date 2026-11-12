@@ -1,0 +1,106 @@
+# HOTD ReWrithe subtitle file: English (docs/subtitles.md)
+#
+# Options > Gameplay > Subtitles: Custom uses this file (the language's code: en.txt, es.txt, ...). As shipped it
+# repeats the game's own English captions exactly, so nothing changes until you edit a line.
+#
+#   <event>.<line> [start=<time>] [end=<time>] [size=<percent>] [pos=top|bottom|<y percent>] [hide] = <text>
+#
+#   start / end: frames (60 a second; "250ms" or "0.5s" also work), + later, - earlier than the game's own
+#   size: percent of the normal caption size; pos: the game's place by default, top, bottom, or the line's centre
+#   in percent of the screen's height (0 top, 100 bottom); hide: the line not shown; \n in the text: a new line.
+#   Leave the text out ("1.1 size=150 =") to keep the game's (or your language file's) text.
+#   A line that is missing here, or this whole file, means the game's own caption.
+#
+# Examples (remove the # to try them):
+# 1.1 size=150 pos=top = Sophie!?
+# 3.1 start=-30 end=+60 = Wait!
+# 5.1 pos=40 = Let's go in!
+#
+# Find a caption's id: run the game with HOTD_TRACE_SUBS=1; each caption prints "subs: frame <n> show <id> ...".
+# Inspired by Tenome's Typing of the Dead EX (MIT, https://github.com/Tenome/Typing-of-the-Dead-EX).
+
+1.1 = Sophie!?
+2.1 = Run! Run!
+3.1 = Wait!
+4.1 = We'll get you for this!
+5.1 = Let's go in!
+6.1 = Sure, why not?
+7.1 = This is terrible!!
+8.1 = That voice!!
+9.1 = Sophie, are you ok?
+10.1 = It's a dead end!
+11.1 = Ah! It's locked.
+12.1 = This must be the Security card.
+13.1 = It's too late.
+14.1 = Curien!!
+15.1 = After him!!
+16.1 = I'll stop him!
+17.1 = Better be ready, Curien!
+18.1 = I'll get you, Curien!
+19.1 = We won't let you have it your way, Curien!
+20.1 = Ok Curien, now it's your turn!
+21.1 = Don't worry, he'll pay for this.
+22.1 = There's no way out Curien!
+23.1 = But you will never,
+24.1 = ever defeat me!
+25.1 = Say hello to my masterpiece!
+26.1 = What happened?
+26.2 = Why don't you follow my instructions?
+27.1 = This is the warning from Dr.Curien.
+28.1 = Stay away from this house! Or else....
+29.1 = Nobody leaves here alive!
+30.1 = This is as far as you go!
+31.1 = I'll finish you here!
+32.1 = I'll finish you here!
+33.1 = Who are you?
+34.1 = I shall destroy everything.
+35.1 = Unlocked.
+36.1 = Unlocked.
+37.1 = Others are still inside. Save them.
+42.1 = Thank you!! Take this.
+43.1 = Thank you!! Take this.
+44.1 = You can go up stairs from that room.
+45.1 = They're still up stairs.
+46.1 = Use this.
+49.1 = Rogan, it's you!
+50.1 = I was so scared!
+51.1 = Thank you.
+52.1 = You must stop Curien.
+52.2 = Or else, something terrible will happen.
+54.1 = I must compliment you,
+54.2 = I didn't think you could make it this far.
+55.1 = However, this is it!
+56.1 = Let's see how good you really are!
+57.1 = I must admit,
+58.1 = I really respect your consistancy.
+59.1 = I really respect your consistancy.
+60.1 = Up.
+61.1 = Down.
+62.1 = Everything is over....
+63.1 = I have no thing more to lose.
+64.1 = However, I must go on.
+65.1 = Good bye, Curien....
+66.1 = Mission completed.
+67.1 = Now, on to the next mission.
+68.1 = Good bye, Curien.
+69.1 = I guess everything's over.
+70.1 = I guess so.
+71.1 = Shall we go now?
+72.1 = You haven't seen....
+73.1 = anything yet!!
+74.1 = !!
+75.1 = !?
+76.1 = Are you ok?
+77.1 = Nobody gives me instructions.
+78.1 = Farewell Sophie....
+79.1 = Sophie!!
+80.1 = Sophie!
+81.1 = Sophie....
+82.1 = This is terrible!!
+83.1 = That voice!!
+84.1 = It's a dead end!
+85.1 = Ah! It's locked.
+86.1 = This must be the Security card.
+87.1 = It's too late.
+88.1 = Curien!!
+89.1 = There's no way out Curien!

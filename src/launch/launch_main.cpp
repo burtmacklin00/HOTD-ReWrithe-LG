@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cwchar>
+#include <cwctype>
 #include <fstream>
 #include <set>
 #include <string>
@@ -220,7 +222,20 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     path.resize(n);
     const std::wstring dir = path.substr(0, path.find_last_of(L"\\/"));
     const std::wstring exe = dir + L"\\bin\\hotd.exe";
-    std::wstring cmd = L"\"" + exe + L"\"" + cl;
+    // vrship (user 2026-11-09): this same stub copied as "The House of the Dead ReWrithe VR.exe" (util/game_exe.h
+    // kGameVrExeName) starts the game in a headset: its own name ending in " VR" adds --vr openxr (the OpenGL renderer
+    // comes with it: main.cpp), unless the arguments name a --vr backend already
+    std::wstring self = path.substr(path.find_last_of(L"\\/") + 1);
+    for (wchar_t& c : self) c = wchar_t(towlower(c));
+    bool vr = self.size() > 7 && self.compare(self.size() - 7, 7, L" vr.exe") == 0;
+    {
+        int argc = 0;
+        LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        for (int i = 1; argv && i < argc; ++i)
+            if (std::wstring(argv[i]) == L"--vr") vr = false;
+        if (argv) LocalFree(argv);
+    }
+    std::wstring cmd = L"\"" + exe + L"\"" + (vr ? L" --vr openxr" : L"") + cl;
     STARTUPINFOW si{};
     si.cb = sizeof si;
     PROCESS_INFORMATION pi{};

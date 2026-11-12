@@ -325,6 +325,7 @@ template <class P> void Game<P>::prop_default(uint32_t obj)
             of<uint32_t>(obj, 0x32C) = step;
             const uint32_t r = pr::rec(of<int16_t>(obj, 0xCC));
             if (mem.u32(r + 0x20 + 4 * step) == 0) {
+                prop_broken(obj);   // (ours: Horde Mode's drops; nothing in a normal game)
                 auto drop = [&]() {
                     const uint8_t f = of<uint8_t>(obj, 0x58);
                     if ((f >> 5) & 1)

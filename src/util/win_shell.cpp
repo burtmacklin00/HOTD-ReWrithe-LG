@@ -228,7 +228,7 @@ ShortcutResult createShortcut(const std::string& folder, bool startMenu, const s
 std::string selfExePath() { return narrow(selfExe().wstring()); }
 
 ShortcutResult createShortcutTo(const std::string& linkFolder, const std::string& name, const std::string& target,
-                                const std::string& iconFile, std::string& made, std::string& msg) {
+                                const std::string& iconFile, std::string& made, std::string& msg, const std::string& args) {
     const fs::path dir(wide(linkFolder)), exe(wide(target));
     std::error_code ec;
     fs::create_directories(dir, ec);
@@ -239,8 +239,9 @@ ShortcutResult createShortcutTo(const std::string& linkFolder, const std::string
     if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLinkW, reinterpret_cast<void**>(&link)))) {
         const fs::path icon = iconFile.empty() ? exe : fs::path(wide(iconFile));
         link->SetPath(exe.c_str());
+        if (!args.empty()) link->SetArguments(wide(args).c_str());   // (vr3: the VR shortcut's --vr openxr)
         link->SetWorkingDirectory(exe.parent_path().c_str());
-        link->SetDescription(L"The House of the Dead: ReWrithe");
+        link->SetDescription(args.empty() ? L"The House of the Dead: ReWrithe" : L"The House of the Dead: ReWrithe (VR)");
         link->SetIconLocation(icon.c_str(), 0);
         IPersistFile* file = nullptr;
         if (SUCCEEDED(link->QueryInterface(IID_IPersistFile, reinterpret_cast<void**>(&file)))) {
@@ -296,9 +297,9 @@ int runHidden(const std::string& exe, const std::string& args, int seconds) {
 // linux (2026-11-03): the setup's install on Linux / macOS. Linux: "<linkFolder>/<name>.desktop" (a desktop entry, as
 // createShortcut's), its icon the PNG iconFile when there is one; macOS: none yet (the package's .app is the shortcut)
 ShortcutResult createShortcutTo(const std::string& linkFolder, const std::string& name, const std::string& target,
-                                const std::string& iconFile, std::string& made, std::string& msg) {
+                                const std::string& iconFile, std::string& made, std::string& msg, const std::string& args) {
 #ifdef __APPLE__
-    (void)linkFolder, (void)name, (void)target, (void)iconFile, (void)made;
+    (void)linkFolder, (void)name, (void)target, (void)iconFile, (void)made, (void)args;
     msg = "shortcuts: not supported on macOS yet (drag the app to the Dock)";
     return ShortcutResult::Failed;
 #else
@@ -307,8 +308,10 @@ ShortcutResult createShortcutTo(const std::string& linkFolder, const std::string
     fs::create_directories(dir, ec);
     const bool icon = iconFile.size() > 4 && iconFile.compare(iconFile.size() - 4, 4, ".png") == 0 && fs::exists(iconFile, ec);
     std::ofstream f(p, std::ios::binary | std::ios::trunc);
-    f << "[Desktop Entry]\nType=Application\nName=The House of the Dead: ReWrithe\nComment=The House of the Dead: ReWrithe\n"
-      << "Exec=" << execQuote(exe.string()) << "\nPath=" << exe.parent_path().string() << "\n"
+    // (vr3: a shortcut with arguments, the VR one: " (VR)" in its menu name, its arguments after the program)
+    f << "[Desktop Entry]\nType=Application\nName=The House of the Dead: ReWrithe" << (args.empty() ? "" : " (VR)")
+      << "\nComment=The House of the Dead: ReWrithe\n"
+      << "Exec=" << execQuote(exe.string()) << (args.empty() ? std::string() : " " + args) << "\nPath=" << exe.parent_path().string() << "\n"
       << (icon ? "Icon=" + iconFile + "\n" : std::string()) << "Terminal=false\nCategories=Game;ActionGame;\n";
     f.close();
     if (!f) { msg = "could not create the shortcut in " + linkFolder; return ShortcutResult::Failed; }

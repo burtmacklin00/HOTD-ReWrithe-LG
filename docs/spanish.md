@@ -37,8 +37,14 @@ of ReWrithe: the source only has file sizes and SHA-1 hashes (`src/game/pc_manif
   the chapter cards, the boss files and name cards (Guerrero, PUNTO DÉBIL), RELOAD -> CARGA EL ARMA, HOLD YOUR FIRE ->
   NO, ¿CONTINUAR?, RESCATE / VIDA EXTRA / PUNTOS, the 1J / 2J player marks, the attract's how-to-play boards, the
   Spanish credit titles (PROGRAMADORES ...), the game-over route map (PATIO, CALABOZOS ...), the RANKING / NAME ENTRY
-  signs (matched by eye with tools/sprites_tool.py pairs, not seen in a run).
-  40 arcade sprites; found when the PC sprites load (a PC picture on a translated page that differs from the US one by
+  signs (matched by eye with tools/sprites_tool.py pairs, not seen in a run). rec131 (the user's v1.3.1 recording):
+  HOLD YOUR FIRE! -> only NO + the gun (the CD painted the English words over in opaque black: those texels are
+  left out, they showed as dark word boxes on bright scenes); the reload board (0x26B / 0x89) is the PC's 0x4E0
+  (RECARGA ANTES DE QUEDARTE SIN BALAS; it had been matched to the Japanese board next to it and stayed English).
+  Still English with the arcade models: the LIFE UP! item (a 3D model), the staff roll's titles except
+  PROGRAMADORES (the PC's are whole cards of another layout), the ranking file (RANK / Special Agent / SCORE) and
+  the name entry's 1ST.
+  42 arcade sprites (40 before rec131); found when the PC sprites load (a PC picture on a translated page that differs from the US one by
   more than the re-saved colours; `HOTD_TRACE_ES=1` prints them and, each time they change, the ones on the screen).
   Kept English (no Spanish picture for them, or the PC match is another picture): PRESS START BUTTON and FREE PLAY
   (the PC has neither), the "shoot outside of the screen" reload hint (the PC never draws its 0x527), GAME OVER (the

@@ -313,6 +313,10 @@ template <class P> void Game<P>::chariot_frame(uint32_t obj)
             chariot_armour_hit_test(obj);
         chariot_armoured_hits(obj);
     } else {
+        // hordepub (ours, weapons): the explosions near it are shots at its nearest part with a plate left (its own
+        // part test; the armoured phase's hand hit box is an item: weapon_blast_items marks it)
+        if (weaponHooks && !((flags >> 28) & 1))
+            weapon_blast_boss(obj, nullptr, 0);
         if (!((flags >> 28) & 1))
             chariot_part_damage(obj);
         chariot_unarmoured_hits(obj);

@@ -2,6 +2,7 @@
 
 #include "game/bossmode.h"
 #include "game/frontend.h"
+#include "game/survival.h"
 #include "port/game.h"
 #include "util/utf8.h"
 
@@ -145,8 +146,13 @@ void OnlineMenu::endEdit(game::Frontend& fe, bool keep)
         if (playerName.empty()) playerName = "Player";
         if (keep && saveSettings) saveSettings();
     }
+    const bool replyNow = keep && edit_ == &replyText_ && !replyText_.empty();
     joinAfterEdit_ = false;
     edit_ = nullptr;
+    if (replyNow) {   // (hole punching: the friend's reply code typed in the waiting room)
+        useReply(fe, replyText_);
+        return;
+    }
     if (joinNow)
         joinTyped(fe);
     else
@@ -223,8 +229,56 @@ void OnlineMenu::joinTyped(game::Frontend& fe)
     build(fe);
 }
 
+void OnlineMenu::useReply(game::Frontend& fe, const std::string& text)
+{
+    // natpunch2: the text (typed, or the whole clipboard: a group chat's copy) may hold several reply codes; every
+    // new one is punched to at once ("3 reply codes found: punching..."); the box shows the last one found
+    std::string msg;
+    if (game_) {
+        game_->addReply(text, msg);
+        status_ = msg;
+        const std::vector<ReplyCode> found = findReplyCodes(text);
+        if (!found.empty()) replyText_ = makeReplyCode(found.back());
+    }
+    build(fe);
+}
+
+void OnlineMenu::focusGained(game::Frontend& fe)
+{
+    // natpunch2 (optional, cheap): the window got the focus back on the host's waiting room (the player copied the
+    // codes in a chat window, then came back): the clipboard is looked at once, now only; nothing is done unless it
+    // holds a valid reply code not used yet (text without one is never shown, kept or logged)
+    if (page_ != Page::Hosting || edit_ || !paste || !game_ || !game_->session().isHost() || game_->nat().stun() == NatTraversal::Stun::Off)
+        return;
+    const std::string t = paste();
+    if (t.size() > (64u << 10) || findReplyCodes(t).empty())
+        return;
+    std::string msg;
+    if (game_->addReply(t, msg) && msg.find("found") != std::string::npos) {
+        status_ = msg;
+        const std::vector<ReplyCode> found = findReplyCodes(t);
+        replyText_ = makeReplyCode(found.back());
+        build(fe);
+    }
+}
+
+void OnlineMenu::copyReply()
+{
+    if (game_ && copy) {
+        const std::string c = game_->replyCode();
+        if (!c.empty()) copy(c);
+    }
+    copiedAt_ = std::chrono::steady_clock::now();
+}
+
 bool OnlineMenu::pasteCode(game::Frontend& fe)
 {
+    if (page_ == Page::Hosting && !edit_ && paste && game_) {   // (hole punching: Ctrl+V in the waiting room = every reply code in it)
+        std::string t = paste();
+        if (t.size() > (64u << 10)) t.resize(64u << 10);
+        useReply(fe, t);
+        return true;
+    }
     if (page_ != Page::Join || edit_ || !paste)
         return false;
     std::string t;
@@ -263,6 +317,9 @@ std::unique_ptr<NetGame> OnlineMenu::take(Settings& s)
         s.pcMode = g.pcMode, s.pmContinues = g.pmContinues, s.pmFreePlay = g.pmFreePlay;
         std::copy(g.pmChar, g.pmChar + 4, s.pmChar);
         s.bossMode = g.bossMode;   // (Boss Mode online, protocol 18: the host's boss)
+        s.survival = g.survival;   // (Survival online, protocol 22: the host's arena, seed, cap ..)
+        s.survivalSeed = g.survivalSeed, s.survivalCap = g.survivalCap, s.survivalCut = g.survivalCut;
+        s.survivalSmgWave = g.survivalSmgWave, s.survivalWeaponsWave = g.survivalWeaponsWave, s.survivalTest = g.survivalTest;
     }
     ready_ = false;
     tookHost_ = page_ == Page::Hosting;
@@ -375,6 +432,10 @@ OnlineMenu::Shown OnlineMenu::shown() const
     g.seats = game_->gameSettings().seats;
     g.wrong = game_->session().wrongCodes();
     game_->roster(g.roster);
+    g.punch = game_->nat().stun() != NatTraversal::Stun::Off;
+    g.symmetric = game_->nat().symmetric();
+    g.reply = game_->replyCode();
+    g.natNote = game_->natNote();
     if (g.host) {
         g.code = game_->shownCode();
         g.share = game_->shareCode();
@@ -385,7 +446,12 @@ OnlineMenu::Shown OnlineMenu::shown() const
         case PortMapper::State::Mapped:
             g.internet = u.externalIp() ? "Open: " + ipOnly(Address{u.externalIp(), 0}) : std::string("Port open (UPnP)");
             break;
-        default: g.internet = "Your network only";
+        default: {   // (hole punching: the STUN-mapped address in the code; the router lets a friend in once both send)
+            const NatTraversal::Stun st = game_->nat().stun();
+            g.internet = st == NatTraversal::Stun::Done ? std::string(game_->nat().symmetric() ? "Strict NAT" : "Hole punching")
+                         : st == NatTraversal::Stun::Resolving || st == NatTraversal::Stun::Asking ? std::string("Getting your address...")
+                                                                                                   : std::string("Your network only");
+        }
         }
     }
     return g;
@@ -417,6 +483,15 @@ bool OnlineMenu::preview(game::Frontend& fe, const std::string& scene)
         show(fe, page_);
         return true;
     }
+    // fix140a: "<scene>-surv<N>": the Host page's Survival with arena N (1..; 0: the mode's own default), the v1.4.0
+    // crash's page (HOTD_FE_FOCUS / HOTD_FE_PRESS click its Game Mode row: Survival -> Arcade)
+    if (const size_t sv = scene.rfind("-surv"); sv != std::string::npos && sv > 0 && sv + 6 == scene.size()) {
+        if (!preview(fe, scene.substr(0, sv))) return false;
+        survivalArenas = int(game::survivalArenas().size());
+        base.pcMode = false, base.bossMode = 0, base.survival = scene.back() - '0';
+        show(fe, page_);
+        return true;
+    }
     if (scene.size() > 5 && scene.compare(scene.size() - 5, 5, "-boss") == 0) {   // Boss Mode online: All Bosses
         if (!preview(fe, scene.substr(0, scene.size() - 5))) return false;
         fake_.roster[0].boss = 6;
@@ -445,6 +520,32 @@ bool OnlineMenu::preview(game::Frontend& fe, const std::string& scene)
         show(fe, Page::Join);
         if (scene == "join-typing") startEdit(fe, joinText_, 48);
         return true;
+    }
+    // hole punching (natpunch): the host's waiting room with the Reply Code rows and a note; a joiner's page with its
+    // reply code (the strict-NAT warning, the privacy note); the joiner's "Couldn't connect"
+    if (scene == "hosting-punch" || scene == "hosting-strict") {
+        previewing_ = true;
+        seat(0, 0);
+        fake_.punch = true;
+        fake_.internet = scene == "hosting-punch" ? "Hole punching" : "Strict NAT";
+        fake_.natNote = scene == "hosting-punch" ? "Waiting for your friend..." : "Your network may block direct connections.";
+        replyText_ = "7ZK3M-Q8RTD-2VWXP-HN4CB";
+        return show(fe, Page::Hosting), true;
+    }
+    if (scene == "joining-reply") {
+        previewing_ = true;
+        fake_.host = false;
+        fake_.punch = fake_.symmetric = true;
+        fake_.reply = "7ZK3M-Q8RTD-2VWXP-HN4CB";
+        fake_.natNote = "No direct answer yet: send this reply code to the host (they paste it in their waiting room). "
+                        "Waiting for your friend...";
+        status_ = "Connecting...";
+        return show(fe, Page::Joining), true;
+    }
+    if (scene == "fail-punch") {
+        status_ = "Couldn't connect: your networks block direct connections (strict / carrier-grade NAT). Try UPnP / port "
+                  "forwarding, or let the other player host.";
+        return show(fe, Page::Joining), true;
     }
     if (scene == "main") return show(fe, Page::Main), true;
     if (scene == "host") return show(fe, Page::Host), true;
@@ -594,6 +695,12 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
                              if (saveSettings) saveSettings();
                          }});
         rows.back().help = "In play: the ping at the bottom of the screen (F3 switches Small / Detailed / Off)";
+        // hole punching (2026-11-10): the one outside contact, a public STUN server telling this PC its internet address
+        rows.push_back(X{"Address Lookup", [this]() { return std::string(base.stun == "off" ? "Off" : "On"); }, [this]() {
+                             base.stun = base.stun == "off" ? (stunServers.empty() ? std::string(kDefaultStun) : stunServers) : "off";
+                             if (saveSettings) saveSettings();
+                         }});
+        rows.back().help = "On: a public STUN server tells your PC its internet address, so codes work without port forwarding";
         break;
     case Page::Host:
         rows.push_back(X{"Start Hosting", nullptr, [this, &fe]() {
@@ -612,17 +719,39 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
         }
         // PC Mode online (docs/pcmode.md "Online"): the host decides; each player picks a character on their own PC.
         // Boss Mode online (protocol 18): the host picks the boss (or All Bosses); every PC plays it
-        rows.push_back(X{"Game Mode", [this]() { return std::string(base.bossMode ? "Boss Mode" : base.pcMode ? "PC Mode" : "Arcade"); },
+        // Survival online (protocol 22): after Boss Mode when this build has Survival; the host's arena for every PC
+        if (base.survival > survivalArenas)
+            base.survival = 0;
+        rows.push_back(X{"Game Mode", [this]() {
+                             return std::string(base.survival ? "Survival" : base.bossMode ? "Boss Mode" : base.pcMode ? "PC Mode" : "Arcade");
+                         },
                          [this]() {
-                             if (base.bossMode)
-                                 base.bossMode = 0;
+                             if (base.survival)
+                                 base.survival = 0;
+                             else if (base.bossMode)
+                                 base.bossMode = 0, base.survival = survivalArenas > 0 ? 1 : 0;
                              else if (base.pcMode)
                                  base.pcMode = false, base.bossMode = 6;
                              else
                                  base.pcMode = true;
                              if (saveSettings) saveSettings();
                          }});
-        rows.back().help = "PC Mode: the 1998 PC port's mode (characters; Continues). Boss Mode: the bosses only, against the clock";
+        rows.back().help = survivalArenas > 0 ? "PC Mode: the 1998 PC port's mode. Boss Mode: the bosses, against the clock. Survival: rounds of creatures"
+                                              : "PC Mode: the 1998 PC port's mode (characters; Continues). Boss Mode: the bosses only, against the clock";
+        if (base.survival && survivalArenas > 1) {
+            // (fix140a, the v1.4.0 crash: the Remake menu reads a row's value after a click changed the page, before the
+            // rows are made again; Game Mode Survival -> Arcade left base.survival 0 here, and arenas[-1].name crashed)
+            rows.push_back(X{"Survival Arena", [this]() {
+                                 const auto& arenas = game::survivalArenas();
+                                 return base.survival >= 1 && base.survival <= int(arenas.size()) ? std::string(arenas[size_t(base.survival - 1)].name)
+                                                                                               : std::string();
+                             },
+                             [this]() {
+                                 base.survival = base.survival >= survivalArenas ? 1 : base.survival + 1;
+                                 if (saveSettings) saveSettings();
+                             }});
+            rows.back().help = "Where everyone fights the rounds";
+        }
         if (base.bossMode) {
             rows.push_back(X{"Boss", [this]() { return std::string(game::kBossNames[std::clamp(base.bossMode, 2, 6) - 2]); },
                              [this]() {
@@ -651,7 +780,7 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
         const std::string code = hasGame() ? shown().share : std::string();
         const int lw = fe.rowTextWidth("Your Code"), vw = fe.rowTextWidth(code);
         const bool oneRow = textMode_ || lw == 0 || lw + 16 + vw <= game::Frontend::kExtrasWidth;
-        const std::string codeHelp = "Give this code to your friends. It is also the password: share it privately";
+        const std::string codeHelp = "Share this code only with friends: it is the password and contains your internet address";
         rows.push_back(X{"Your Code", [this, oneRow]() { return oneRow && hasGame() ? shown().share : std::string(); },
                          [this]() { copyCode(); }});
         rows.back().help = codeHelp;
@@ -707,11 +836,23 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
         rows.push_back(X{"Internet", [this]() { return hasGame() ? shown().internet : std::string(); }, nullptr});
         if (hasGame()) {
             const Shown g = shown();
-            rows.back().help = g.internet.rfind("Open", 0) == 0
+            rows.back().help = g.internet == "Hole punching" ? "Your code holds your internet address: most routers let a friend in (else they send you a reply code)"
+                : g.internet.rfind("Open", 0) == 0
                 ? "Your router opened the port: the code works over the internet and on your network"
                 : "Internet: forward UDP " + g.lan.substr(g.lan.rfind(':') + 1) +
                   " to this PC (" + g.lan.substr(0, g.lan.rfind(':')) + "); joiners type address + password " + g.code;
         }
+        // hole punching: a friend whose direct try got no answer sends a reply code; typed / pasted here, this PC
+        // punches toward it (both PCs send: the routers let the game through)
+        // (natpunch2: up to four PCs: while a seat is free; one paste takes every joiner's code)
+        if (hasGame() && shown().punch && (!shown().peerIn || (shown().multi && !(shown().roster[1].in && shown().roster[2].in && shown().roster[3].in)))) {
+            rows.push_back(X{"Reply Code", edited("Reply Code", replyText_), [this, &fe]() { startEdit(fe, replyText_, 32); }});
+            rows.back().help = "Your friend's reply code (their Join page shows it when they cannot reach you), then Enter";
+            rows.push_back(X{"Paste Reply Code", nullptr, [this, &fe]() { pasteCode(fe); }});
+            rows.back().help = "Copy all your friends' reply codes from the chat at once and paste them here (Ctrl+V works too)";
+        }
+        if (hasGame() && !shown().natNote.empty())
+            problem(shown().natNote);
         if (hasGame() && shown().wrong > 0)   // someone typed a wrong code (a typo, or a guesser)
             rows.push_back(X{"Wrong Codes", [this]() {
                                  return hasGame() ? std::to_string(shown().wrong) + " tried (20 = locked)" : std::string();
@@ -791,6 +932,20 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
     case Page::Joining:
         if (hasGame()) {
             rows.push_back(X{"Status", [this]() { return util::utf8Head(status_, 34); }, nullptr});
+            // hole punching: no direct answer from the host yet: this PC's reply code for the host's waiting room
+            if (!shown().reply.empty()) {
+                rows.push_back(X{"Reply Code", [this]() { return hasGame() ? shown().reply : std::string(); }, [this]() { copyReply(); }});
+                rows.back().help = "Send this to the host (privately): they paste it in their waiting room";
+                rows.push_back(X{"Copy Reply Code", [this]() { return std::string(copiedShown() ? "Copied!" : ""); }, [this]() { copyReply(); }});
+                rows.back().help = "Copies the reply code: paste it in a chat with Ctrl+V";
+            }
+            if (!shown().natNote.empty())
+                problem(shown().natNote);
+            if (!shown().reply.empty()) {
+                if (shown().symmetric)
+                    problem("Your network may block direct connections.");
+                problem("Share this code only with friends: it contains your internet address.");
+            }
             // the waiting room: the host's roster (every seat's name and ping); this PC marked "(you)"
             if (shown().peerIn) {
                 const Shown g = shown();
@@ -803,6 +958,12 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
                     const int b = g.roster[0].boss;
                     rows.push_back(X{"Game Mode", [b]() { return "Boss Mode: " + std::string(game::kBossNames[b - 2]); }, nullptr});
                     rows.back().help = "The host's choice: the bosses only, against the clock; no continues";
+                } else if (g.roster[0].survival >= 1) {   // (the host's Survival game, protocol 22)
+                    const int a = g.roster[0].survival - 1;
+                    const auto& arenas = game::survivalArenas();
+                    const std::string where = a < int(arenas.size()) ? arenas[size_t(a)].name : "arena " + std::to_string(a + 1);
+                    rows.push_back(X{"Game Mode", [where]() { return "Survival: " + where; }, nullptr});
+                    rows.back().help = "The host's choice: rounds of creatures, points for the shop between the rounds";
                 }
                 for (int s = 0; s < seats; ++s) {
                     const std::string label = s == 0 ? std::string("Host") : four ? "Players " + std::to_string(s + 1) + " + " + std::to_string(s + 3)
@@ -866,9 +1027,11 @@ void OnlineMenu::script(game::Frontend& fe, const std::string& cmd)
         if (!base.bossMode) base.pcMode = false, base.bossMode = 6;
         base.bossMode = base.bossMode >= 6 ? 2 : base.bossMode + 1;
         if (saveSettings) saveSettings();
-    } else if (cmd == "host-alone" || cmd == "host-alone-boss") {   // Play Alone at once (player 2 joins the running game)
+    } else if (cmd == "host-alone" || cmd == "host-alone-boss" || cmd == "host-alone-survival") {   // Play Alone at once (player 2 joins the running game)
         if (cmd == "host-alone-boss")   // (Boss Mode online: the Chariot)
             base.pcMode = false, base.bossMode = 2;
+        if (cmd == "host-alone-survival")   // (Survival online: the courtyard)
+            base.pcMode = false, base.bossMode = 0, base.survival = 1;
         show(fe, Page::Host);
         startHost(fe);
         if (game_ && hostSettings) {

@@ -57,6 +57,19 @@ const char* const* padNames(int style)
     static N kDeck = {"A", "B", "X", "Y", "L1", "R1", "L2", "R2", "L3", "R3", "Menu", "View", "...", "R4", "L4", "R5", "L5", DP};
     static N kGen = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", DP};
 #undef DP
+    // vrprompts (user 2026-11-10): a VR controller's buttons for what the pad's would do (docs/vr.md "Controls"; the
+    // menus on the big screen: vr_scene.cpp panelFrame): south (Choose) the trigger at what the ray points at, east
+    // (Back) B / Y / the menu button, Start (the pause) the menu button (Index: the left B), the shoulders the grips,
+    // the stick's click the stick; "Menu" is drawn as the three-bar button in the caps (frontend_remake.cpp rPadSymbol)
+#define VS "Stick", "Stick", "Stick", "Stick"
+#define VT "Trackpad", "Trackpad", "Trackpad", "Trackpad"
+    static N kVrTouch = {"Trigger", "B", "X", "Y", "Grip", "Grip", "Trigger", "Trigger", "Stick", "Stick", "Menu", "Menu", "-", "-", "-", "-", "-", VS};
+    static N kVrIndex = {"Trigger", "B", "A", "B", "Grip", "Grip", "Trigger", "Trigger", "Stick", "Stick", "B (L)", "B (L)", "-", "-", "-", "-", "-", VS};
+    static N kVrVive = {"Trigger", "Menu", "Trackpad", "Menu", "Grip", "Grip", "Trigger", "Trigger", "Trackpad", "Trackpad", "Menu", "Menu", "-", "-", "-", "-", "-", VT};
+    static N kVrWmr = {"Trigger", "Menu", "Trackpad", "Menu", "Grip", "Grip", "Trigger", "Trigger", "Stick", "Stick", "Menu", "Menu", "-", "-", "-", "-", "-", VS};
+    static N kVrSimple = {"Select", "Menu", "Select", "Menu", "-", "-", "Select", "Select", "-", "-", "Menu", "Menu", "-", "-", "-", "-", "-", "-", "-", "-", "-"};
+#undef VS
+#undef VT
     switch (style) {
     case SDL_GAMEPAD_TYPE_XBOX360: return k360;
     case kPsXboxElite: return kElite;
@@ -77,6 +90,11 @@ const char* const* padNames(int style)
     case kPsSteamController: return kSc;
     case kPsSteamDeck: return kDeck;
     case kPsGeneric: return kGen;
+    case kPsVrTouch: case kPsVrHp: return kVrTouch;
+    case kPsVrIndex: return kVrIndex;
+    case kPsVrVive: return kVrVive;
+    case kPsVrWmr: return kVrWmr;
+    case kPsVrSimple: return kVrSimple;
     default: return kOne;   // Xbox One / Series, STANDARD, UNKNOWN, a Steam Input pad Steam names no type for
     }
 }
@@ -183,6 +201,7 @@ const char* keyFixed(SDL_Scancode sc)
     case SDL_SCANCODE_ESCAPE: return "the pause";
     case SDL_SCANCODE_F1: return "developer lines";
     case SDL_SCANCODE_F3: return "network stats";
+    case SDL_SCANCODE_F8: return "photo mode";   // (photomode)
     case SDL_SCANCODE_F9: return "light-gun calibration";
     case SDL_SCANCODE_F11: return "fullscreen";
     case SDL_SCANCODE_F12: return "screenshot";

@@ -14,6 +14,7 @@
 #include "game/pads.h"
 #include "game/player_colours.h"
 #include "game/scene_view.h"
+#include "game/survival.h"
 #include "game/pm_portraits.h"
 #include "util/png.h"
 #include "util/utf8.h"
@@ -825,7 +826,9 @@ std::string Frontend::hintFor() const
         }
     }
     switch (screen_) {
-    case 1: return mainGroup_ ? "Enter/A Choose    Esc/B Back" : "Enter/A Choose    Esc/B Quit";
+    case 1:   // (vr3: in a VR run the main menu says when to put the headset on: the menus are on the monitor)
+        if (vrNote && !mainGroup_) return "VR: put the headset on when the game starts    Enter/A Choose    Esc/B Quit";
+        return mainGroup_ ? "Enter/A Choose    Esc/B Back" : "Enter/A Choose    Esc/B Quit";
     case 15: return "Type a name    Backspace/B Delete    Enter Done";
     case 16: return "";   // PC Mode: the original's two panels fill the screen (and the 4P panels' own keys)
     case 17: case 19: return "";   // the Gallery / Cut-scenes: their own keys line at the bottom
@@ -917,20 +920,27 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
         items.push_back({-1, "More Modes", "", nullptr});
         items.back().heading = true;
         items.push_back({-1, "Chapter Select", "Start at any chapter", [this]() { screenChapters(); }});
-        items.push_back({-1, "Co-op", "2 players, 4 players or online",
-                         onCoop ? std::function<void()>([this]() { const auto f = onCoop; f(); }) : nullptr});
+        // (fix140a, user 2026-11-10: VR is single player only: no 2 / 4 players, no online; greyed as TotD 0)
+        // (questui, user 2026-11-10: on the standalone Quest left out, not greyed: menu_pages.h menuQuest)
+        if (!menuQuest)
+            items.push_back({-1, "Co-op", coopNoVr ? "Not available in VR" : "2 players, 4 players or online",
+                             onCoop && !coopNoVr ? std::function<void()>([this]() { const auto f = onCoop; f(); }) : nullptr});
         if (sonicValue)
             items.push_back({-1, "Sonic Mode: " + sonicValue(), "Faster play, own high scores (click: next preset)",
                              [this]() {
                                  if (onSonic) onSonic();
                                  screenMainMenu();
                              }});
-        if (startTotd) {   // The Typing of the Dead 0 (game/typing.h): the game played by typing
+        if (startTotd && !menuQuest) {   // The Typing of the Dead 0 (game/typing.h): the game played by typing (questui: not on the Quest)
             // (rel130, user 2026-11-05: in the release, labelled "Experimental / Proof of Concept": the item's tag line,
             // its help line, a notice when it starts: main.cpp / Hud::drawTotdNote)
+            // (vr, user 2026-11-09: not playable in VR: greyed, the help line says why)
             items.push_back({-1, "The Typing of the Dead 0",
-                             "Experimental / Proof of Concept: type the words over the enemies to shoot them (keyboard)",
-                             [this]() { const auto f = startTotd; f(); }});
+                             totdNoVr ? "Not available in VR"
+                                      : "Experimental / Proof of Concept: type the words over the enemies to shoot them (keyboard)",
+                             totdNoVr ? std::function<void()>()
+                             : startTotdPractice ? group(3)   // (totdpacks: its own group: Play, Practice)
+                                                 : std::function<void()>([this]() { const auto f = startTotd; f(); })});
             items.back().tag = "Experimental / Proof of Concept";
         }
         if (startSurvival && survivalArenaValue) {   // Survival Mode (game/survival.h): the game (players asked first), its arena
@@ -945,7 +955,33 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
                                  screenMainMenu();
                              }});
         }
+#if HOTD_HORDE
+        if (hordeSizeValue) {   // Horde Mode (game/horde.h): the arcade game from Chapter 1, more creatures at once
+            // (hordepub, user 2026-11-09: in the release, labelled "Experimental / Proof of Concept" as The Typing of the
+            // Dead 0 is: the item's tag line, its help line, a notice when it starts: main.cpp / Hud::drawTotdNote)
+            items.push_back({-1, "Horde", "Experimental / Proof of Concept: the arcade game with many more zombies at once; own high scores", [this]() {
+                                 askPlayers("Horde - " + hordeSizeValue(), [this]() { if (startHorde) { const auto f = startHorde; f(); } },
+                                            [this]() { screenMainMenu(); });
+                             }});
+            items.back().tag = "Experimental / Proof of Concept";
+            items.push_back({-1, "Horde Size: " + hordeSizeValue(), "How many more creatures: Low 2x, Normal 3x, High 4x (click: next)",
+                             [this]() {
+                                 if (onHordeSize) onHordeSize();
+                                 screenMainMenu();
+                             }});
+        }
+#endif
         items.push_back({-1, "Back", "Back to the main menu (Escape)", group(0)});
+    } else if (grp == 3) {   // totdpacks: The Typing of the Dead 0's group (More Modes' item): the game, its Practice
+        items.push_back({-1, "The Typing of the Dead 0", "", nullptr});
+        items.back().heading = true;
+        items.push_back({-1, "Play", "Experimental / Proof of Concept: type the words over the enemies to shoot them (keyboard)",
+                         startTotd ? std::function<void()>([this]() { const auto f = startTotd; f(); }) : nullptr});
+        items.push_back({-1, "Practice: Word Packs", "Words float across the screen, no attacks: the word packs you chose (Options)",
+                         [this]() { const auto f = startTotdPractice; if (f) f(false); }});
+        items.push_back({-1, "Practice: Your Misses", "The same with the words you missed most (your statistics)",
+                         [this]() { const auto f = startTotdPractice; if (f) f(true); }});
+        items.push_back({-1, "Back", "Back to More Modes (Escape)", group(1)});
     } else if (grp == 2) {
         items.push_back({-1, "Extras", "", nullptr});
         items.back().heading = true;
@@ -974,7 +1010,12 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
         items.push_back({2, "", pc ? "The PC version's own mode" : "PC Mode: coming (not ported yet)", pc});
         items.push_back({0x42, "", boss ? "Fight the bosses one by one" : "Boss Mode: coming (not ported yet)", boss});
         // (Survival named only when its items are there: main.cpp)
+#if HOTD_HORDE
+        items.push_back({-1, "More Modes", std::string("Chapter Select, Co-op, Sonic Mode") + (startSurvival ? ", Survival" : "") +
+                                               (hordeSizeValue ? ", Horde" : ""), group(1)});
+#else
         items.push_back({-1, "More Modes", std::string("Chapter Select, Co-op, Sonic Mode") + (startSurvival ? ", Survival" : ""), group(1)});
+#endif
         items.push_back({-1, "Extras", "Gallery, Jukebox", group(2)});
         items.push_back({0x43, "", "The top 10 tables", mainMenuEnabled[3] ? std::function<void()>([this]() { screenRanking(); }) : nullptr});
         items.push_back({6, "", "Difficulty, lives, volumes and all settings",
@@ -1681,7 +1722,7 @@ void Frontend::screenGallery()
     if (g.otherSource)
         setHandlers(src, act(2), &Frontend::hitText);
     Widget* bg = text("Background", 10, y1 + 25, 146, 24, 0x20000);
-    bg->help = "The window's background: dark, the game's skies, plain colours. Key: B, pad: View / Back";
+    bg->help = "The window's background: dark, the game's skies, plain colors. Key: B, pad: View / Back";
     setHandlers(bg, act(7), &Frontend::hitText);
     text(g.background, 12, y1 + 49, 146, 12, 0x800000);
     Widget* reset = text("Reset view", 10, y1 + 66, 146, 24, 0x20000);
@@ -1739,7 +1780,7 @@ void Frontend::screenGallery()
     // gallery blood / gallery dismemberment: the Gallery's own blood settings and the body parts' damage (keys), their
     // state over the window's top left
     if (!g.pad)
-        text("G: blood colour  N: rainbow  J: particles  Z: body part  X: its damage  Shift+Z: all whole", 0, 441, 0, 12, 0x800020);
+        text("G: blood color  N: rainbow  J: particles  Z: body part  X: its damage  Shift+Z: all whole", 0, 441, 0, 12, 0x800020);
     {
         std::string s = T("Blood:") + " " + T(g.blood) + g.bloodHex() + (g.particles ? std::string() : " " + T("(no particles)")) + "   ";
         if (!g.damageNote.empty())
@@ -2540,7 +2581,7 @@ std::vector<Frontend::Extra> Frontend::optionsRows()
         "The lives each player starts with (1P and 2P together)",
         "Continues in PC Mode (0-9); arcade games are free play",
         "An empty gun reloads by itself (not in the originals; 1P and 2P together)",
-        "The blood's colour (a custom colour: Gameplay)",
+        "The blood's color (a custom color: Gameplay)",
         "The sound effects' volume",
         "The music's volume (more audio settings: Audio)"};
     std::vector<Extra> r;
@@ -2777,7 +2818,7 @@ void Frontend::screenOptions()
     // our custom colour (5) is kept by the text launcher and shown as None here)
     {
         static const int kBlood[6] = {0x1D, 0x1C, 0x1F, 0x20, 0x1E, 0x21};
-        valueLabel(row(0x12, "The blood's colour (a custom colour: Gameplay)"), kBlood[std::clamp(options.blood, 0, 5)], [this, changed](Widget& w) {
+        valueLabel(row(0x12, "The blood's color (a custom color: Gameplay)"), kBlood[std::clamp(options.blood, 0, 5)], [this, changed](Widget& w) {
             optionsStep(kOptBlood, 1);
             changed(2)(w);
         });
@@ -3517,7 +3558,9 @@ void Frontend::update(const FrontendInput& inRaw, uint32_t nowMs)
     nowMs_ = nowMs;
     // padglyphs: Button Prompts: one family always (its usual pad), the keyboard always, or Auto (the device used last)
     const int forced = padForced_ ? 0 : promptChoiceStyle(promptChoice);
-    if (forced < 0) {
+    if (vrStyle > 0 && !padForced_) {   // vrprompts: a VR run: the VR controller's buttons always (main.cpp sets it)
+        padPrompts_ = true, padType_ = vrStyle;
+    } else if (forced < 0) {
         padPrompts_ = false;
     } else if (forced > 0) {
         padPrompts_ = true, padType_ = forced;
@@ -3681,8 +3724,12 @@ void Frontend::render(std::vector<uint8_t>& canvas)
         return;
     }
     drawHelp();
-    if (const std::string h = hintFor(); !h.empty())   // uxpolish: the controls line at the very bottom
-        drawSmall(h, 0x1D5, true);
+    if (const std::string h = hintFor(); !h.empty()) {   // uxpolish: the controls line at the very bottom
+        if (padPrompts_ && isVrStyle(padType_))   // vrprompts: a VR controller's buttons (translated first)
+            drawSmallRaw(vrPromptLine(langOn() ? lang::tr(h) : h, padType_), 0x1D5, true);
+        else
+            drawSmall(h, 0x1D5, true);
+    }
     if (!hideHand && !rangeHand_)   // (menufb: in the Firing Range the crosshair, no hand)
         drawCursor();
     canvas_ = nullptr;
@@ -3820,6 +3867,11 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         return findMods(dirs);
     }();
     hooks.modsRows = []() { return menuModRows(cfg, mods, nullptr, nullptr); };
+    if (menuQuest) {   // questui (HOTD_QUEST_MENUS=1): the Quest's pages, the VR rows as a headset run has them (vr.ini's defaults)
+        hooks.vrDualDefault = []() { return false; };
+        hooks.vrLaserDefault = []() { return true; };
+        hooks.vrCrosshairDefault = []() { return true; };
+    }
     for (int k = 0; k < menuTabCount(); ++k)
         fe.tabs.push_back(menuCategoryName(menuTabCategory(k)));
     fe.sonicValue = []() { return std::string(sonicName(cfg.sonic)); };
@@ -3837,11 +3889,17 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         const bool release = std::getenv("HOTD_FE_RELEASE") != nullptr || HOTD_EXPERIMENTAL_MODES == 0;
         if (HOTD_EXPERIMENTAL_MODES != 0 || HOTD_SURVIVAL_MODE != 0) {
             fe.startSurvival = []() {};
-            fe.survivalArenaValue = []() { return std::string("Chapter 1: The Courtyard"); };
+            fe.survivalArenaValue = []() { return std::string(survivalArenas()[0].name); };   // (survpub: the arena's own name)
             fe.onSurvivalArena = []() {};
         }
         if (!release || HOTD_TOTD_MODE != 0)   // (rel130: The Typing of the Dead 0 in the release builds too)
             fe.startTotd = []() {};
+#if HOTD_HORDE
+        {   // (hordepub: Horde in the release builds too, wherever it is built in: HOTD_HORDE)
+            fe.hordeSizeValue = []() { return std::string("Normal"); };
+            fe.onHordeSize = []() {};
+        }
+#endif
     }
     for (int k = 0; k < 4; ++k)
         fe.chapterEnabled[k] = chapterPlayable(k);
@@ -3944,7 +4002,11 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
             bot[2] = 2;
         };
         fe.playersSet = [](int, const int*) {};
+#if HOTD_HORDE
+        fe.askPlayers(std::getenv("HOTD_FE_HORDE") ? "Horde - Normal" : "Arcade", []() {}, []() {});   // (HOTD_FE_HORDE: Horde's)
+#else
         fe.askPlayers("Arcade", []() {}, []() {});
+#endif
     } else if (screen == 119) {   // menufb: the Firing Range (HOTD_FE_PAGE: its player 0-3; HOTD_FE_RANGE=1: shots fired)
         static int seat = 0;
         seat = std::clamp(pg, 0, 3);
@@ -4117,6 +4179,12 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         fe.screenPcMode();
     } else {
         if (pg >= 1 && pg <= 2) fe.mainMenuGroup(pg);   // menu2: HOTD_FE_PAGE 1 More Modes, 2 Extras
+#if HOTD_HORDE
+        if (std::getenv("HOTD_FE_HORDE")) {   // (HOTD_FE_HORDE=1: More Modes with Horde's items, as HOTD_EXPERIMENTAL_MODES builds have)
+            fe.hordeSizeValue = []() { return std::string("Normal"); };
+            fe.startHorde = []() {};
+        }
+#endif
         fe.screenMainMenu();
     }
     std::vector<uint8_t> c;
@@ -4130,6 +4198,16 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
             in.down = false;
             fe.update(in, shotMs + 2u * unsigned(k) + 2);
         }
+        // fix140a: HOTD_FE_PRESS=n: the focused row pressed n times (Enter), as a player's clicks: the page rebuilt
+        // from the rows each time (the v1.4.0 crash: a stale row's value read after its click)
+        if (const char* pr = std::getenv("HOTD_FE_PRESS"))
+            for (int k = std::atoi(pr); k > 0; --k) {
+                in.press = true;
+                fe.update(in, shotMs + 200u + 2u * unsigned(k));
+                in.press = false;
+                fe.update(in, shotMs + 201u + 2u * unsigned(k));
+                std::printf("front end: pressed, focus %s\n", fe.focusText().c_str());
+            }
     } else if (fe.remakeScreen()) {   // (the mouse: the hand shown)
         FrontendInput in;
         in.mouseMoved = true;

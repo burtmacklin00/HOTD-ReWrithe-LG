@@ -3,6 +3,8 @@
 #include "assets/mods.h"
 #include "render/gamma.h"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -178,8 +180,15 @@ void main() {
             }
             // the tweaks' offset without the floor pulls (they stood in for the sort the band now does: a door's foot
             // pulled 14 units nearer took its whole leaf over Chapter 2's bullet holes): the decal layer, uPush, the bias; the
-            // decals' / shadows' own small pull stays (drawn late without depth writes, they lie under the floor's band)
-            float d2 = min(uFloorPull == 2 ? pull : (layer > 0.0 ? layer * 0.05 * length(uRot[0]) : 0.0) - uPush, dist * 0.5);
+            // decals' / shadows' own small pull stays (drawn late without depth writes, they lie under the floor's band).
+            // sinkvr (user's PC VR / Quest recording 2026-11-11, 4:54-5:12): a lying body's whole pull (feet4,
+            // uFloorPull 3) stays too. The opening's dying researcher lies 2-2.7 units under the slab's top beside him;
+            // with the band alone (20 % of the distance: his pixels and the slab's clamped the same way) he stayed under
+            // it, so the slab's top cut through his body in every VR eye (and the flat game's Depth Buffer); the Arcade
+            // Sort draws him whole. Uniform for the whole body, so his own parts keep their order
+)"  // (MSVC: the raw string's size limit)
+R"(
+            float d2 = min(uFloorPull == 2 || uFloorPull == 3 ? pull :(layer > 0.0 ? layer * 0.05 * length(uRot[0]) : 0.0) - uPush, dist * 0.5);
             vec4 q2 = uViewProj * vec4(vWorld + toCam / max(dist, 1e-6) * d2, 1.0);
             float adj = uProj.y / max(uProj.x - (q2.z / q2.w - (uDepthBias + layer * 1e-5) * uBiasScale), 1e-9) - w0;
 #ifdef KEY_BAND_FRAG
@@ -366,6 +375,8 @@ uniform int uMip;                // Model 2 texture mip levels
 uniform float uFade;             // DrawItem::fade
 uniform int uSideOnly;           // DrawItem::sideOnly: no pixels inside the centred 4:3 picture
 uniform vec2 uSideClip;          // its centre x and half width in pixels
+uniform int uSideCover;          // render5: 1 = uCover holds the zone's coverage (alpha > 0: drawn) for the sideOnly items
+uniform sampler2D uCover;
 uniform int uRamp;              // DrawItem::ramp (-1 off)
 uniform int uLook;              // RenderOptions::look (Light Gun Edition)
 uniform vec3 uRampStops[5];
@@ -537,6 +548,9 @@ void prepassDiscards() {
 )"  // (MSVC: the raw string's size limit)
 R"(
 void main() {
+#ifdef BAND_SHIFT_TEST
+    if (uBandShift > 1e30) discard;   // (sinkfix test: an extra uniform first, the others at other places)
+#endif
 #ifdef SORT_FRAGDEPTH
     gl_FragDepth = vSortDepth >= 0.0 ? vSortDepth : gl_FragCoord.z;   // Arcade Sort: the polygon's key (vertex shader)
 #endif
@@ -553,6 +567,23 @@ void main() {
 #endif
     if ((vFL.x & CHECKER) != 0u && ((int(gl_FragCoord.x) + int(gl_FragCoord.y)) & 1) != 0) discard;
     if (uSideOnly == 1 && abs(gl_FragCoord.x - uSideClip.x) < uSideClip.y) discard;
+    // render5 (the player's list: "background areas not culled through empty doors"): a neighbouring zone's piece fills
+    // only a hole of the side strip itself. Where the zone drew nothing in the 4:3 picture's edge column and nothing
+    // between it and this pixel (a doorway / opening the original shows black running out of the picture), it stays
+    // black as the picture's own part of that opening; the zone's own pixels are never covered (uCover: its alpha)
+    if (uSideCover == 1 && uSideOnly == 1) {
+        ivec2 p = ivec2(gl_FragCoord.xy);
+        if (texelFetch(uCover, p, 0).a > 0.0) discard;
+        int dir = gl_FragCoord.x < uSideClip.x ? -1 : 1;
+        int xe = int(floor(uSideClip.x + float(dir) * (uSideClip.y - 0.5)));   // the picture's last column on this side
+        bool open = texelFetch(uCover, ivec2(xe, p.y), 0).a == 0.0;
+        int d = abs(p.x - xe), st = max(1, d / 96);
+        for (int k = st; k < d && open; k += st)
+            if (texelFetch(uCover, ivec2(xe + dir * k, p.y), 0).a > 0.0) open = false;
+        if (open) discard;
+    }
+)"  // (MSVC: the raw string's size limit)
+R"(
     if (uPrepass == 1) {   // (colour writes off)
         prepassDiscards();
         oColor = vec4(0.0);
@@ -1064,89 +1095,67 @@ bool Renderer::init(std::string& err)
         gl::Uniform1i(gl::GetUniformLocation(pr, "uRepl"), 6);
         gl::Uniform1i(gl::GetUniformLocation(pr, "uReplRef"), 7);
         gl::Uniform1i(gl::GetUniformLocation(pr, "uSortKeys"), 8);
+        gl::Uniform1i(gl::GetUniformLocation(pr, "uCover"), 9);   // (render5: the zone's coverage)
         return pr;
     };
     // depthfix: Depth Buffer's key band per pixel (KEY_BAND_FRAG: gl_FragDepth, so its own program: the other modes
-    // keep the early depth test). Used only when every uniform has the same location in both programs (the draw sends
-    // them by the main program's locations); else the band stays per vertex
+    // keep the early depth test). The draw sends the uniforms by the main program's locations (the members below)
     std::string bandErr;
-    programBand_ = link("#define KEY_BAND_FRAG 1\n", bandErr);
+    // (HOTD_BAND_SHIFT=1, testing: one more uniform in the band program, declared first, so that its other uniforms
+    // may get other locations than the main program's, as on the Quest's driver)
+    static const bool bandShift = std::getenv("HOTD_BAND_SHIFT") && *std::getenv("HOTD_BAND_SHIFT") == '1';
+    programBand_ = link(bandShift ? "#define KEY_BAND_FRAG 1\n#define BAND_SHIFT_TEST 1\nuniform float uBandShift;\n"
+                                  : "#define KEY_BAND_FRAG 1\n", bandErr);
     if (!programBand_)
-        std::fprintf(stderr, "renderer: key band program: %s (per vertex instead)\n", bandErr.c_str());
+        SDL_Log("renderer: key band program: %s (per vertex instead)", bandErr.c_str());
     program_ = link(nullptr, err);
     if (!program_) return false;
-    if (programBand_) {
-        for (const char* src : {kVertexShader, kFragmentShader})
-            for (const char* q = std::strstr(src, "uniform "); q && programBand_; q = std::strstr(q + 8, "uniform ")) {
-                const char* nm = std::strchr(q + 8, ' ');
-                if (!nm) break;
-                std::string name;
-                for (++nm; *nm && (std::isalnum((unsigned char)*nm) || *nm == '_'); ++nm) name += *nm;
-                if (!name.empty() && gl::GetUniformLocation(program_, name.c_str()) != gl::GetUniformLocation(programBand_, name.c_str())) {
-                    std::fprintf(stderr, "renderer: key band program: uniform %s at another place (per vertex instead)\n", name.c_str());
-                    gl::DeleteProgram(programBand_);
-                    programBand_ = 0;
-                }
-            }
-        gl::UseProgram(program_);
-    }
-    uSort_ = gl::GetUniformLocation(program_, "uSort");
-    uHybrid_ = gl::GetUniformLocation(program_, "uHybrid");
-    uKeyless_ = gl::GetUniformLocation(program_, "uKeyless");
-    uProj_ = gl::GetUniformLocation(program_, "uProj");
-    uBiasScale_ = gl::GetUniformLocation(program_, "uBiasScale");
-    uSortItem_ = gl::GetUniformLocation(program_, "uSortItem");
-    uPrepass_ = gl::GetUniformLocation(program_, "uPrepass");
-    uHasRepl_ = gl::GetUniformLocation(program_, "uHasRepl");
-    uPcFilter_ = gl::GetUniformLocation(program_, "uPcFilter");
-    uGreyRepl_ = gl::GetUniformLocation(program_, "uGreyRepl");
     gl::GenTextures(1, &palAnim_);
     setPaletteAnimation(nullptr);
     makeSpareTextures();
-    uViewProj_ = gl::GetUniformLocation(program_, "uViewProj");
-    uOffset_ = gl::GetUniformLocation(program_, "uOffset");
-    uRot_ = gl::GetUniformLocation(program_, "uRot");
-    uUVScroll_ = gl::GetUniformLocation(program_, "uUVScroll");
-    uShading_ = gl::GetUniformLocation(program_, "uShading");
-    uLighting_ = gl::GetUniformLocation(program_, "uLighting");
-    uLightDir_ = gl::GetUniformLocation(program_, "uLightDir");
-    uAmbient_ = gl::GetUniformLocation(program_, "uAmbient");
-    uFilter_ = gl::GetUniformLocation(program_, "uFilter");
-    uTransp_ = gl::GetUniformLocation(program_, "uTransp");
-    uCamPos_ = gl::GetUniformLocation(program_, "uCamPos");
-    uM2Known_ = gl::GetUniformLocation(program_, "uM2Known");
-    uM2Gamma_ = gl::GetUniformLocation(program_, "uM2Gamma");
-    uM2Black_ = gl::GetUniformLocation(program_, "uM2Black");
-    uCull_ = gl::GetUniformLocation(program_, "uCull");
-    uMip_ = gl::GetUniformLocation(program_, "uMip");
-    uPcCullSign_ = gl::GetUniformLocation(program_, "uPcCullSign");
-    uClampUV_ = gl::GetUniformLocation(program_, "uClampUV");
-    uDepthBias_ = gl::GetUniformLocation(program_, "uDepthBias");
-    uFloorY_ = gl::GetUniformLocation(program_, "uFloorY");
-    uFloorPull_ = gl::GetUniformLocation(program_, "uFloorPull");
-    uPush_ = gl::GetUniformLocation(program_, "uPush");
-    uFade_ = gl::GetUniformLocation(program_, "uFade");
-    uSideOnly_ = gl::GetUniformLocation(program_, "uSideOnly");
-    uSideClip_ = gl::GetUniformLocation(program_, "uSideClip");
-    uFlat_ = gl::GetUniformLocation(program_, "uFlat");
-    uTie_ = gl::GetUniformLocation(program_, "uTie");
-    uTieItem_ = gl::GetUniformLocation(program_, "uTieItem");
-    uIdMode_ = gl::GetUniformLocation(program_, "uIdMode");
-    uGrey_ = gl::GetUniformLocation(program_, "uGrey");
-    uRainbow_ = gl::GetUniformLocation(program_, "uRainbow");   // (cosmods)
-    uRainbowPhase_ = gl::GetUniformLocation(program_, "uRainbowPhase");
-    uBloodRgb_ = gl::GetUniformLocation(program_, "uBloodRgb");
-    uRainbowTable_ = gl::GetUniformLocation(program_, "uRainbowTable");
-    uRainbowGame_ = gl::GetUniformLocation(program_, "uRainbowGame");
-    uRainbowSync_ = gl::GetUniformLocation(program_, "uRainbowSync");
-    uBloodRows_ = gl::GetUniformLocation(program_, "uBloodRows");   // (rainbow2)
-    uSepia_ = gl::GetUniformLocation(program_, "uSepia");
-    uM2Light_ = gl::GetUniformLocation(program_, "uM2Light");
-    uM2Diffuse_ = gl::GetUniformLocation(program_, "uM2Diffuse");
-    uM2Ambient_ = gl::GetUniformLocation(program_, "uM2Ambient");
-    uM2SpecScale_ = gl::GetUniformLocation(program_, "uM2SpecScale");
-    uM2SpecCtl_ = gl::GetUniformLocation(program_, "uM2SpecCtl");
-    uCamFwd_ = gl::GetUniformLocation(program_, "uCamFwd");
+    // the uniforms the draw sends, by name (each member: its location in program_)
+    const std::pair<const char*, gl::GLint*> uniforms[] = {
+        {"uSort", &uSort_}, {"uHybrid", &uHybrid_}, {"uKeyless", &uKeyless_}, {"uProj", &uProj_},
+        {"uBiasScale", &uBiasScale_}, {"uSortItem", &uSortItem_}, {"uPrepass", &uPrepass_}, {"uHasRepl", &uHasRepl_},
+        {"uPcFilter", &uPcFilter_}, {"uGreyRepl", &uGreyRepl_}, {"uViewProj", &uViewProj_}, {"uOffset", &uOffset_},
+        {"uRot", &uRot_}, {"uUVScroll", &uUVScroll_}, {"uShading", &uShading_}, {"uLighting", &uLighting_},
+        {"uLightDir", &uLightDir_}, {"uAmbient", &uAmbient_}, {"uFilter", &uFilter_}, {"uTransp", &uTransp_},
+        {"uCamPos", &uCamPos_}, {"uM2Known", &uM2Known_}, {"uM2Gamma", &uM2Gamma_}, {"uM2Black", &uM2Black_},
+        {"uCull", &uCull_}, {"uMip", &uMip_}, {"uPcCullSign", &uPcCullSign_}, {"uClampUV", &uClampUV_},
+        {"uDepthBias", &uDepthBias_}, {"uFloorY", &uFloorY_}, {"uFloorPull", &uFloorPull_}, {"uPush", &uPush_},
+        {"uFade", &uFade_}, {"uSideOnly", &uSideOnly_}, {"uSideClip", &uSideClip_}, {"uFlat", &uFlat_},
+        {"uTie", &uTie_}, {"uTieItem", &uTieItem_}, {"uIdMode", &uIdMode_}, {"uGrey", &uGrey_},
+        {"uRainbow", &uRainbow_}, {"uRainbowPhase", &uRainbowPhase_}, {"uBloodRgb", &uBloodRgb_},   // (cosmods)
+        {"uRainbowTable", &uRainbowTable_}, {"uRainbowGame", &uRainbowGame_}, {"uRainbowSync", &uRainbowSync_},
+        {"uBloodRows", &uBloodRows_}, {"uSepia", &uSepia_}, {"uM2Light", &uM2Light_}, {"uM2Diffuse", &uM2Diffuse_},
+        {"uM2Ambient", &uM2Ambient_}, {"uM2SpecScale", &uM2SpecScale_}, {"uM2SpecCtl", &uM2SpecCtl_},
+        {"uCamFwd", &uCamFwd_}, {"uSideCover", &uSideCover_}, {"uCover", &uCover_},
+        {"uPalOver", &uPalOver_}, {"uPcTint", &uPcTint_}, {"uRamp", &uRamp_}, {"uRampStops", &uRampStops_},   // (v1.3.1, 4P)
+        {"uBodyHue", &uBodyHue_}};   // (cosmods: Rainbow Blood's creature colour)
+    for (const auto& [name, loc] : uniforms)
+        *loc = gl::GetUniformLocation(program_, name);
+    // sinkfix (user 2026-11-10 on the Quest 3: "in vr the first researcher is sinking to the pavement"): the locations
+    // are the driver's choice. Before, any uniform at another place in the band program (even a sampler, which link()
+    // sets in each program anyway) dropped that program (the band per vertex: the opening's feet in the kerb, as
+    // before vrnull; reproduced with HOTD_BAND_SHIFT: "uniform uPalAnim at another place (per vertex instead)"),
+    // which a native driver (the Quest's Adreno) may do while desktop OpenGL and ANGLE give both programs the same
+    // places. Now the draw swaps in the band program's own locations while that program is in use
+    bandLocs_.clear();
+    if (programBand_) {
+        for (const auto& [name, loc] : uniforms)
+            if (const gl::GLint b = gl::GetUniformLocation(programBand_, name); b != *loc) bandLocs_.push_back({loc, b});
+        if (!bandLocs_.empty())
+            SDL_Log("renderer: key band program: %zu uniform(s) at other places than the main program's (remapped)",
+                    bandLocs_.size());
+    }
+    gl::UseProgram(program_);
+    gl::GenTextures(1, &coverTex_);   // render5: resized by draw when it is used; 1 x 1 until then (a complete texture)
+    gl::BindTexture(gl::TEXTURE_2D, coverTex_);
+    gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, 1, 1, 0, gl::RGBA, gl::UNSIGNED_BYTE, nullptr);
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST);
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST);
+    gl::BindTexture(gl::TEXTURE_2D, 0);
+    coverW_ = coverH_ = 1;
     return true;
 }
 
@@ -1365,6 +1374,20 @@ void Renderer::upload(const StageData& stage)
     }
     uploadReplacements(repl, g);
     stages_[&stage] = std::move(g);
+    // questsim (2026-11-10): the stage's GPU memory, estimated (the texture arrays with their mipmaps, the indexed
+    // sets' tables, the vertices as uploaded): the Quest 3 budget's texture memory
+    uint64_t tex = 0, vtx = 0;
+    for (const TextureSet& ts : stage.textureSets) {
+        const uint64_t page = uint64_t(ts.width) * uint64_t(ts.height);
+        if (ts.shading == Shading::DirectRgba)
+            tex += page * 4 * (ts.layers.size() + ts.layersBrown.size()) * 4 / 3;
+        else
+            tex += page * ts.layers.size() + 128 * 128 + 256 * 96 + 2048;
+    }
+    for (const auto& [key, m] : stage.models)
+        for (const Mesh& me : m.meshes) vtx += uint64_t(me.vertexCount()) * sizeof(Vertex);
+    gpuBytesOf_[&stage] = {tex, vtx};
+    textureBytes += tex, vertexBytes += vtx;
 }
 
 void Renderer::sortKeysOf(const Mesh& m, size_t count, std::vector<float>& out)
@@ -1534,6 +1557,10 @@ void Renderer::release(const StageData& stage)
     if (g.sortTex) gl::DeleteTextures(1, &g.sortTex);
     if (g.sortBuf) gl::DeleteBuffers(1, &g.sortBuf);
     stages_.erase(it);
+    if (auto b = gpuBytesOf_.find(&stage); b != gpuBytesOf_.end()) {   // (questsim)
+        textureBytes -= std::min(textureBytes, b->second.first), vertexBytes -= std::min(vertexBytes, b->second.second);
+        gpuBytesOf_.erase(b);
+    }
 }
 
 void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int width, int height, const RenderOptions& opt)
@@ -1589,11 +1616,20 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     // HOTD_KEY_BAND=x sets it (0: the plain per-pixel depth, comparisons)
     const bool sort = drawDepth() == kArcadeSort && !cam.perPixelDepth;
     static const char* bandEnv = std::getenv("HOTD_KEY_BAND");
-    const float band = sort ? 0.0f : bandEnv ? std::max(0.0f, float(std::atof(bandEnv))) : cam.perPixelDepth ? kKeyBandFreeCam : kKeyBand;
+    const float band = sort ? 0.0f : bandEnv ? std::max(0.0f, float(std::atof(bandEnv))) : cam.keyBand >= 0.0f ? cam.keyBand : cam.perPixelDepth ? kKeyBandFreeCam : kKeyBand;
     const bool bandFrag = band > 0.0f && programBand_ != 0;
     gl::UseProgram(bandFrag ? programBand_ : program_);
+    // sinkfix: the band program's own uniform locations where its driver placed them elsewhere (init), for this draw
+    struct LocSwap {
+        std::vector<std::pair<gl::GLint*, gl::GLint>>* locs;
+        void swap() const { for (auto& [m, l] : *locs) std::swap(*m, l); }
+        ~LocSwap() { if (locs) swap(); }
+    } locSwap{bandFrag && !bandLocs_.empty() ? &bandLocs_ : nullptr};
+    if (locSwap.locs) locSwap.swap();
     gl::ActiveTexture(gl::TEXTURE0 + 3);
     gl::BindTexture(gl::TEXTURE_2D, palAnim_);
+    gl::ActiveTexture(gl::TEXTURE0 + 9);   // (render5: uCover, a complete texture under its sampler)
+    gl::BindTexture(gl::TEXTURE_2D, coverTex_);
     gl::ActiveTexture(gl::TEXTURE0);
     gl::UniformMatrix4fv(uViewProj_, 1, gl::FALSE_, vp);
     gl::Uniform1i(uLighting_, opt.lighting ? 1 : 0);
@@ -1713,14 +1749,8 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         unitTex[unit] = tex;
         unitKnown[unit] = true;
     };
-    static gl::GLint uRamp = -2, uStops = -2, uBodyHue = -2, uPalOver = -2, uPcTint = -2;
-    if (uRamp == -2) {
-        uPalOver = gl::GetUniformLocation(program_, "uPalOver");   // (v1.3.1: the afterimages' own colours)
-        uPcTint = gl::GetUniformLocation(program_, "uPcTint");
-        uRamp = gl::GetUniformLocation(program_, "uRamp");
-        uStops = gl::GetUniformLocation(program_, "uRampStops");
-        uBodyHue = gl::GetUniformLocation(program_, "uBodyHue");   // (cosmods: Rainbow Blood's creature colour)
-    }
+    // (sinkfix: members fetched in init, this program's; were statics, the first renderer's program for every renderer)
+    const gl::GLint uRamp = uRamp_, uStops = uRampStops_, uBodyHue = uBodyHue_, uPalOver = uPalOver_, uPcTint = uPcTint_;
     int rampStopsSent = -1;
     static gl::GLint uLook = -2;   // Light Gun Edition: the fun modes' looks
     if (uLook == -2) uLook = gl::GetUniformLocation(program_, "uLook");
@@ -1748,11 +1778,43 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     // zone's own room where a zone swaps a space's dressing (the ending room after the Magician: the fight's panels a
     // few metres from the camera, over the floor and the sky's window). Now they go first, then the depth is cleared and
     // the sky and the zone's items draw over them: they show only where neither drew (the holes they were added for)
+    // render5 (the player's list: rooms seen through the doorways at the widescreen sides): the zone first now, its
+    // coverage in the alpha (cleared to 0, its pixels write 1) copied to uCover, then the depth cleared and the pieces
+    // drawn where the zone drew nothing and the opening does not run on from the 4:3 picture (the fragment shader).
+    // Before, a doorway cut by the picture's edge was black inside it and showed the next room beside it
     bool hasSide = false;
     for (const DrawItem& it : items)
         hasSide = hasSide || it.sideOnly;
-    for (int phase = hasSide ? 0 : 1; phase < 2; ++phase) {
-    if (phase == 1 && hasSide) {
+    static const bool sideOld = std::getenv("HOTD_SIDE_OLD") != nullptr;   // (comparisons: the visfix order, no cover test)
+    const bool cover = hasSide && !sideOld && !eye;
+    auto clearAlpha = [&](float a) {
+        gl::ColorMask(gl::FALSE_, gl::FALSE_, gl::FALSE_, gl::TRUE_);
+        gl::ClearColor(0.0f, 0.0f, 0.0f, a);
+        gl::Clear(gl::COLOR_BUFFER_BIT);
+        gl::ColorMask(gl::TRUE_, gl::TRUE_, gl::TRUE_, gl::TRUE_);
+        gl::ClearColor(opt.clear[0], opt.clear[1], opt.clear[2], 1.0f);
+    };
+    gl::Uniform1i(uSideCover_, 0);
+    if (cover) clearAlpha(0.0f);
+    const int phases[2] = {cover ? 1 : 0, cover ? 0 : 1};
+    for (int pi = hasSide ? 0 : 1; pi < 2; ++pi) {
+    const int phase = phases[pi];
+    if (cover && phase == 0) {   // the zone is drawn: its coverage for the pieces
+        if (coverW_ != width || coverH_ != height) {
+            gl::ActiveTexture(gl::TEXTURE0 + 9);
+            gl::BindTexture(gl::TEXTURE_2D, coverTex_);
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, width, height, 0, gl::RGBA, gl::UNSIGNED_BYTE, nullptr);
+            coverW_ = width, coverH_ = height;
+        }
+        gl::ActiveTexture(gl::TEXTURE0 + 9);
+        gl::BindTexture(gl::TEXTURE_2D, coverTex_);
+        gl::CopyTexSubImage2D(gl::TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+        gl::ActiveTexture(gl::TEXTURE0 + gl::GLenum(activeUnit));
+        gl::Uniform1i(uSideCover_, 1);
+        gl::DepthMask(gl::TRUE_);
+        gl::Clear(gl::DEPTH_BUFFER_BIT);
+    }
+    if (phase == 1 && hasSide && !cover) {
         gl::DepthMask(gl::TRUE_);
         gl::Clear(gl::DEPTH_BUFFER_BIT);
     }
@@ -1779,6 +1841,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         const DrawItem& it = items[ii];
         if (it.background != (pass == 0)) continue;
         if (hasSide && it.sideOnly != (phase == 0)) continue;
+        if (it.around && !eye) continue;   // (vr3: a VR eye's piece outside the game camera's view; never in a flat picture)
         // PC models fading out are blended: after the opaque pass, without depth writes (with the decals). Arcade
         // Sort: the arcade decals in the opaque pass, in their list order (their polygons' sort keys place them)
         const bool late = (it.decal && !(sort && it.stage->source == Source::Arcade)) || (it.fade < 1.0f && it.stage->source == Source::PC);
@@ -1803,7 +1866,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         // depth from its own z, in the sort's depth scale: the arcade polygons around it keep their order); under the
         // Depth Buffer a "sort" item takes its polygons' keys whole (an unlimited key band), a "buffer" one no band
         int itemMode = -1;
-        if (!g.modelDepth.empty() && !cam.perPixelDepth)
+        if (!g.modelDepth.empty() && (!cam.perPixelDepth || cam.keyBand >= 0.0f))   // (vrnull: the VR eyes keep them)
             if (auto md = g.modelDepth.find(it.model->key); md != g.modelDepth.end()) itemMode = md->second;
         const float itemBand = sort || itemMode < 0 ? band : itemMode == kArcadeSort ? 1e6f : 0.0f;
         set1i(kKeyless, uKeyless_, sort && itemMode == kDepthBuffer ? 1 : 0);
@@ -1915,12 +1978,14 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
             }
             gl::DrawArrays(gl::TRIANGLES, rg.first, rg.count);
             ++drawCalls;
+            triangles += uint64_t(rg.count) / 3;
         }
     }
     }
     }
     if (activeUnit != 0)
         gl::ActiveTexture(gl::TEXTURE0);
+    if (cover) clearAlpha(1.0f);   // (render5: the alpha as before for what reads the picture)
     if (keyedRange) gl::DepthRange(0.0, 1.0);
     gl::DepthMask(gl::TRUE_);
     gl::Disable(gl::BLEND);

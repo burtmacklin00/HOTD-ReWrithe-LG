@@ -7,6 +7,7 @@
 // Read from the typed decompilation / disassembly: UNVERIFIED (teaser), no capture proof, except the bank routines
 // (src/port/sprite_banks.cpp) and the per-player HUD state (src/port/hud_state.cpp), moved to the port and proven (proofs-5).
 #include "game/runtime.h"
+#include "game/subtitles.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -248,6 +249,7 @@ void Runtime::text_layers_clear()
     std::fill(cellHud.begin(), cellHud.end(), uint8_t(0));
     std::fill(cellText.begin(), cellText.end(), uint8_t(0));
     pcTexts.clear();
+    pcTextIds.clear();
     cardLatch_.clear();
     for (uint32_t a = 0x51E8F4; a < 0x51E904; a += 2)
         mem.at<uint16_t>(a) = 0;
@@ -455,6 +457,18 @@ void Runtime::tile_text_draw(int x, int y, uint32_t text)
     sprites_ensure();
     const uint16_t base = uint16_t(int16_t(mem.u32(kBanks + 0x2E * 16)) * 0x80 + 0x8000);
     pcTexts[{x, y}] = reinterpret_cast<const char*>(mem.ptr(text));
+    // subs (game/subtitles.h): a line of the subtitle table (96 bytes an event: line 1 at +1, line 2 at +0x31) is a
+    // caption with an id; HOTD_TRACE_SUBS=1 prints it (docs/subtitles.md: how to find a line's id)
+    if (const uint32_t off = text - G::voice_subtitles; text >= G::voice_subtitles && off < 256 * 96 && (off % 96 == 1 || off % 96 == 0x31)) {
+        const int e = int(off / 96), l = off % 96 == 1 ? 1 : 2;
+        pcTextIds[{x, y}] = {e * 2 + l - 1, frameCount};
+        if (subs::trace())
+            std::fprintf(stderr, "subs: frame %llu show %d.%d (event %u frames, line 2 at %u left): %s\n", (unsigned long long)frameCount,
+                         e, l, unsigned(mem.at<uint16_t>(G::voice_messages + uint32_t(e) * 12 + 2)),
+                         unsigned(mem.at<uint16_t>(G::voice_subtitles + uint32_t(e) * 96 + 0x2E)),
+                         reinterpret_cast<const char*>(mem.ptr(text)));
+    } else
+        pcTextIds.erase({x, y});
     for (int i = 0; mem.at<uint8_t>(text + uint32_t(i)) != 0 && x + i < 64; ++i)
         if (x + i >= 0 && y >= 0 && y < 63) {   // display2: centred text (both rows of the glyphs)
             for (uint32_t r = 0; r < 2; ++r) {
@@ -483,6 +497,12 @@ void Runtime::voice_message_frame_sub(int x, int y, uint32_t text)
 {
     sprites_ensure();
     pcTexts.erase({x, y});
+    if (auto it = pcTextIds.find({x, y}); it != pcTextIds.end()) {
+        if (subs::trace())
+            std::fprintf(stderr, "subs: frame %llu clear %d.%d (shown %llu frames)\n", (unsigned long long)frameCount,
+                         it->second.first / 2, it->second.first % 2 + 1, (unsigned long long)(frameCount - it->second.second));
+        pcTextIds.erase(it);
+    }
     for (int i = 0; mem.at<uint8_t>(text) != 0; ++text, ++i) {
         if (x + i >= 0 && x + i < 64 && y >= 0 && y < 63)
             for (uint32_t r = 0; r < 2; ++r)

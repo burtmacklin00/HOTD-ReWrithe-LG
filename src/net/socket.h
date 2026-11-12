@@ -26,6 +26,13 @@ struct LocalIf { uint32_t ip = 0, broadcast = 0; };
 std::vector<LocalIf> localInterfaces();
 bool isPrivateIp(uint32_t ip);   // 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10 (CGNAT), 127/8
 
+// the logs (natpunch 2026-11-10: players attach hotd.log to issues): every public IPv4 address in text written as
+// "public#XXXX" (XXXX: a hash with this run's random salt, so two players can be told apart in one log, nothing
+// recovered across runs); the port after it stays. Private / loopback addresses stay readable. HOTD_NET_LOG_IPS=1:
+// unchanged (developers). salt 0 = this run's (the tests pass their own)
+std::string redactLog(const std::string& text, uint32_t salt = 0);
+std::string logAddr(const Address& a);   // redactLog(a.str())
+
 class UdpSocket {
 public:
     UdpSocket() = default;

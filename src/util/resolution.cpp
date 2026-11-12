@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 namespace hotd::util {
 
@@ -48,6 +50,68 @@ bool windowFullscreen(SDL_Window* w)
     return windowExclusive(w) || (SDL_GetWindowFlags(w) & SDL_WINDOW_BORDERLESS) != 0;
 }
 
+bool underGamescope()
+{
+#ifdef _WIN32
+    return false;
+#else
+    static const bool on = []() {
+        if (const char* t = std::getenv("HOTD_GAMESCOPE"); t && *t)
+            return *t != '0';
+        const char* desk = std::getenv("XDG_CURRENT_DESKTOP");
+        const char* gs = std::getenv("GAMESCOPE_WAYLAND_DISPLAY");
+        return (desk && std::strstr(desk, "gamescope")) || (gs && *gs);
+    }();
+    return on;
+#endif
+}
+
+namespace {
+bool gHiddenDesktopFs = false;   // deckfs: a hidden window's exclusive note is the desktop's fullscreen (the tests)
+} // namespace
+
+bool windowFullscreenDesktop(SDL_Window* w)
+{
+    if (gHiddenExclusive && hidden(w))
+        return gHiddenDesktopFs;
+    return (SDL_GetWindowFlags(w) & SDL_WINDOW_FULLSCREEN) != 0 && SDL_GetWindowFullscreenMode(w) == nullptr;
+}
+
+void logWindowState(SDL_Window* w, const char* when)
+{
+    int lw = 0, lh = 0, pw = 0, ph = 0, wx = 0, wy = 0;
+    SDL_GetWindowSize(w, &lw, &lh);
+    SDL_GetWindowSizeInPixels(w, &pw, &ph);
+    SDL_GetWindowPosition(w, &wx, &wy);
+    SDL_DisplayID d = SDL_GetDisplayForWindow(w);
+    if (!d)
+        d = SDL_GetPrimaryDisplay();
+    SDL_Rect b{};
+    SDL_GetDisplayBounds(d, &b);
+    const SDL_DisplayMode* dm = SDL_GetDesktopDisplayMode(d);
+    const SDL_WindowFlags f = SDL_GetWindowFlags(w);
+    const char* drv = SDL_GetCurrentVideoDriver();
+    const bool fs = (f & SDL_WINDOW_FULLSCREEN) != 0, bl = (f & SDL_WINDOW_BORDERLESS) != 0;
+    SDL_Log("window (%s): %s%s, %d x %d at %d, %d (%d x %d pixels, density %.2f, scale %.2f); display %d x %d at %d, %d, "
+            "desktop %d x %d; %s%s%s",
+            when, drv ? drv : "?", underGamescope() ? ", gamescope" : "", lw, lh, wx, wy, pw, ph,
+            double(SDL_GetWindowPixelDensity(w)), double(SDL_GetWindowDisplayScale(w)), b.w, b.h, b.x, b.y, dm ? dm->w : 0,
+            dm ? dm->h : 0, fs ? (windowFullscreenDesktop(w) ? "fullscreen (the desktop's)" : "fullscreen (a display mode)") : "",
+            bl ? (fs ? ", borderless" : "borderless") : "", (fs || bl) ? "" : "windowed");
+}
+
+SDL_Rect visibleArea(const SDL_Rect& d, int wx, int wy, int lw, int lh, bool whole)
+{
+    const SDL_Rect all{0, 0, lw, lh};
+    if (whole || d.w <= 0 || d.h <= 0)
+        return all;
+    const int x0 = std::max(0, d.x - wx), y0 = std::max(0, d.y - wy);
+    const int x1 = std::min(lw, d.x + d.w - wx), y1 = std::min(lh, d.y + d.h - wy);
+    if (x1 - x0 >= lw / 2 && y1 - y0 >= lh / 2)   // (a window mostly off its display: the window's own edges)
+        return SDL_Rect{x0, y0, x1 - x0, y1 - y0};
+    return all;
+}
+
 namespace {
 void sortUnique(std::vector<Size>& v)
 {
@@ -63,8 +127,35 @@ SDL_DisplayID displayOf(SDL_Window* w)
 
 // exclusive fullscreen in the display's mode closest to s (the highest refresh rate of that size; Auto: the desktop's
 // size). rescrash: a hidden window (the tests) only notes it, so no test ever changes the display's mode
+#ifndef _WIN32
+// deckfs (GitHub #74): Fullscreen as the window manager's / compositor's fullscreen at the desktop's size (no display
+// mode of our own). A Steam Deck's log: "no display mode near 1920 x 1080 (Couldn't find any matching video modes)",
+// so Fullscreen stayed Borderless (in Game Mode and on the desktop); under gamescope it is the only fullscreen there is
+bool enterDesktopFullscreen(SDL_Window* w, const char* why)
+{
+    if (hidden(w)) {
+        gHiddenExclusive = gHiddenDesktopFs = true;
+        SDL_Log("resolution: fullscreen at the desktop's size, %s (a hidden window: noted, the display unchanged)", why);
+        return true;
+    }
+    if (!SDL_SetWindowFullscreenMode(w, nullptr) || !SDL_SetWindowFullscreen(w, true)) {
+        SDL_Log("resolution: the desktop's fullscreen not set either (%s): borderless", SDL_GetError());
+        SDL_SetWindowFullscreen(w, false);
+        return false;
+    }
+    SDL_SyncWindow(w);
+    SDL_Log("resolution: fullscreen at the desktop's size, %s", why);
+    return true;
+}
+#endif
+
 bool enterExclusive(SDL_Window* w, Size s)
 {
+    gHiddenDesktopFs = false;
+#ifndef _WIN32
+    if (underGamescope())
+        return enterDesktopFullscreen(w, "gamescope's (it scales the game to the screen: the same picture as Borderless)");
+#endif
     if (s.automatic()) {
         if (const SDL_DisplayMode* dm = SDL_GetDesktopDisplayMode(displayOf(w)))
             s = {dm->w, dm->h};
@@ -74,7 +165,11 @@ bool enterExclusive(SDL_Window* w, Size s)
     SDL_DisplayMode mode{};
     if (!SDL_GetClosestFullscreenDisplayMode(displayOf(w), s.w, s.h, 0.0f, true, &mode)) {
         SDL_Log("resolution: no display mode near %d x %d (%s)", s.w, s.h, SDL_GetError());
+#ifndef _WIN32
+        return enterDesktopFullscreen(w, "no display mode of that size");
+#else
         return false;
+#endif
     }
     if (hidden(w)) {
         gHiddenExclusive = true;
@@ -84,7 +179,11 @@ bool enterExclusive(SDL_Window* w, Size s)
     if (!SDL_SetWindowFullscreenMode(w, &mode) || !SDL_SetWindowFullscreen(w, true)) {
         SDL_Log("resolution: %d x %d not set (%s)", mode.w, mode.h, SDL_GetError());
         SDL_SetWindowFullscreen(w, false);
+#ifndef _WIN32
+        return enterDesktopFullscreen(w, "the display mode could not be set");
+#else
         return false;
+#endif
     }
     SDL_SyncWindow(w);
     SDL_Log("resolution: fullscreen %d x %d at %.2f Hz", mode.w, mode.h, double(mode.refresh_rate));

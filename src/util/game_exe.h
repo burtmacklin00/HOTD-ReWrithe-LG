@@ -8,9 +8,12 @@
 namespace hotd::util {
 
 constexpr const char* kGameExeName = "The House of the Dead ReWrithe.exe";
+// vrship (user 2026-11-09): the same stub under this name starts the game in a VR headset (the stub adds --vr openxr
+// when its own name ends in " VR"); made beside the other one, with the same icon
+constexpr const char* kGameVrExeName = "The House of the Dead ReWrithe VR.exe";
 
 // packageRoot: the package's folder (empty: not a package, nothing done); pcDir: the PC game's folder or zip.
-// Made again when missing or older than bin\hotd_launch.exe. false: not made (msg says why)
+// Made again when missing or older than bin\hotd_launch.exe, the VR exe with it. false: not made (msg says why)
 bool makeGameExe(const std::string& packageRoot, const std::string& pcDir, std::string& msg);
 
 } // namespace hotd::util

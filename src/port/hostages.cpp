@@ -1268,7 +1268,7 @@ template <class P> void Game<P>::hostage_gift_task(uint32_t task)
 // kept between 10 and 50, focal 496, scale 0.0012), blinking from frame 40, gone after 60
 template <class P> void Game<P>::hostage_gift_fly(uint32_t task)
 {
-    gift_fly_step(task, of<uint8_t>(task, 0x2EB) == 0 ? 0x3BB : 0x3BC);   // (4P: players 3 / 4 in player 2's, ramped by the view)
+    gift_fly_step(task, look_seat(of<uint8_t>(task, 0x2EB)) == 0 ? 0x3BB : 0x3BC);   // (4P: players 3 / 4 in player 2's, ramped by the view; charsel4: Rogan player 1's, G player 2's in any seat)
 }
 
 // 0x1DE90 gift_effect (a 0x58-byte task at a rescued researcher, researcher_gift_spawn): the same flight and blink as

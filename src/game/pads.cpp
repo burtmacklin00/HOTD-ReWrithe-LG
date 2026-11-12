@@ -951,10 +951,12 @@ void Pads::apply(Runtime& rt, GunState guns[], Pause& pause, PauseInput& pin, in
             const PadStyle& st = styleSet(d);
             if (t == 2 && d.tDown) {
                 // the touchpad as a pointer: the touch's point (after the dead band) is the crosshair's; the pad's
-                // whole area = the window's (both edges reachable: its outer 4.5 % aims off the window = the reload)
+                // whole area = the window's (both edges reachable: its outer 4.5 % aims off the window = the reload);
+                // deckfs: the picture's (aimArea)
                 const float m = lh * 0.05f;
-                g.x = std::clamp((d.tFx * 1.1f - 0.05f) * float(lw), -m, float(lw) + m);
-                g.y = std::clamp((d.tFy * 1.1f - 0.05f) * float(lh), -m, float(lh) + m);
+                const SDL_Rect a = aimArea.w > 0 ? aimArea : SDL_Rect{0, 0, lw, lh};
+                g.x = std::clamp(float(a.x) + (d.tFx * 1.1f - 0.05f) * float(a.w), float(a.x) - m, float(a.x + a.w) + m);
+                g.y = std::clamp(float(a.y) + (d.tFy * 1.1f - 0.05f) * float(a.h), float(a.y) - m, float(a.y + a.h) + m);
             }
             // the crosshair pointed off the window (the stick / gyro / touchpad past the edge): the light gun's reload
             // gesture (main's off-screen shot). padfix (user 2026-10-30: "if you do, the reticle gets reset to the
@@ -1069,10 +1071,13 @@ void Pads::aim(GunState guns[], int lw, int lh, float dt)
         // the stick, the gyro and the touchpad, as a light gun, can point a little past the window's edges: a trigger
         // pull there is the off-screen reload (padfix, user 2026-10-30: "you can't shoot outside the screen": the
         // sticks stopped at the edge before)
+        // deckfs (#74): past the picture's edges (aimArea: the part of the window on the screen, the Aspect's bars
+        // left out), not the window's
         const float m = float(lh) * kMargin;
+        const SDL_Rect a = aimArea.w > 0 ? aimArea : SDL_Rect{0, 0, lw, lh};
         GunState& g = guns[p];
-        g.x = std::clamp(g.x + dx, -m, float(lw) + m);
-        g.y = std::clamp(g.y + dy, -m, float(lh) + m);
+        g.x = std::clamp(g.x + dx, float(a.x) - m, float(a.x + a.w) + m);
+        g.y = std::clamp(g.y + dy, float(a.y) - m, float(a.y + a.h) + m);
     }
 }
 

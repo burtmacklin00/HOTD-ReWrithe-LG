@@ -7,6 +7,7 @@
 #include "game/lang.h"
 #include "game/lives.h"
 #include "game/sights.h"
+#include "game/subtitles.h"
 #include "render/gamma.h"
 #include "util/cab_unpack.h"
 #include "util/disc_image.h"
@@ -57,6 +58,12 @@ std::string fromBase(const std::string& p, const std::string& base)
 }
 
 } // namespace
+
+Cheats& cheats()
+{
+    static Cheats c;   // (smallfix: this run only, never saved)
+    return c;
+}
 
 const char* const kPadStyleKeys[kPadStyles] = {"classic", "motion", "mix", "touch"};
 const char* const kPadStyleNames[kPadStyles + 1] = {"Auto", "Classic Pad", "Motion Only", "Motion + Stick", "Touchpad"};
@@ -276,8 +283,28 @@ bool LaunchConfig::load(const std::string& file)
         if (k == "showcrosshairs") { showCrosshairs = n != 0; continue; }
         if (k == "shotflashsize") { shotFlashSize = std::clamp(n, 0, 2); continue; }
         if (k == "bossnames") { bossCodenames = n != 0; continue; }   // spanish3: 0 Full, 1 Codenames Only
+        if (k == "netstun") { netStun = n != 0; continue; }   // natpunch: hole punching's STUN (Address Lookup)
+        if (k == "stunservers") { stunServers = v.substr(0, 400); continue; }
+        if (k == "subtitles") { if (const int m = subs::modeParse(v); m >= 0) subtitles = m; continue; }   // subs
+        if (k == "subtitlesize") { subtitleSize = std::clamp(n, 25, 400); continue; }
         if (k == "characters") { characters = v; continue; }   // charsel: the Character Select picks
+        if (k == "totd_live") { totdLive = n != 0; continue; }   // totdex: The Typing of the Dead 0's live WPM line
+        if (k == "totd_practice") { totdPractice = n != 0; continue; }   // totdrec: Practice Your Misses
+        if (k == "totd_packs") { totdPacks = v; continue; }   // totdpacks: the word packs chosen ("builtin,example-story")
+        if (k == "totd_mutators") { totdMutators = v; continue; }   // totdpacks: the mutators on ("long,onelife")
+        if (k == "totd_tts") { totdTts = n != 0; continue; }   // totdpacks: Speak the Words
         if (k == "charselect") { charSelect = n != 0; continue; }   // charsel: Gameplay > Character Select
+        if (k == "vrdual") { vrDual = std::clamp(n, -1, 1); continue; }   // vr4: Gameplay > Dual Pistols (VR)
+        if (k == "vrlaser") { vrLaser = std::clamp(n, -1, 1); continue; }   // vrsight: Gameplay > Laser (VR)
+        if (k == "vrmenuhands") { vrMenuHands = std::clamp(n, -1, 1); continue; }   // questfb: Gameplay > Hands in Menus (VR)
+        // vrcomfort: Gameplay > View / Screen Distance / Screen Size / Cut-scenes / Comfort Vignette (VR)
+        if (k == "vrview") { vrView = std::clamp(n, -1, 1); continue; }
+        if (k == "vrscreendist") { vrScreenDist = n == 2 || n == 3 || n == 4 || n == 6 ? n : -1; continue; }
+        if (k == "vrscreensize") { vrScreenSize = std::clamp(n, -1, 2); continue; }
+        if (k == "vrcutscenes") { vrCutscenes = std::clamp(n, -1, 1); continue; }
+        if (k == "vrvignette") { vrVignette = std::clamp(n, -1, 1); continue; }
+        if (k == "vrcrosshair") { vrCrosshair = std::clamp(n, -1, 1); continue; }   // vrsight: Gameplay > Crosshair (VR)
+        if (k == "soundchip") { soundChip = n == 1 ? 1 : 0; continue; }   // sound2: Audio > Sound Chip
         if (bindsIniLine(k, v, keys, padBinds)) {}   // keybind: key1.fire= / padbind1.fire= ...
         else if (funKey()) {}
         else if (k == "arcade") arcade = fromBase(v, base);
@@ -536,14 +563,15 @@ void LaunchConfig::save(const std::string& file) const
         }
     } c{std::ofstream(file + ".new"), file};
     std::ofstream& f = c.f;
-    f << "arcade=" << toBase(arcade, base) << "\npc=" << toBase(pc, base) << "\nmodels=" << models << "\nsound=" << sound << "\nvoice=" << voice << "\nreloadvoice=" << (reloadVoice ? 1 : 0) << "\nspanishpc=" << toBase(spanishPc, base) << "\nplayers=" << players << "\np2input=" << p2Input
+    f << "arcade=" << toBase(arcade, base) << "\npc=" << toBase(pc, base) << "\nmodels=" << models << "\nsound=" << sound << "\nvoice=" << voice << "\nreloadvoice=" << (reloadVoice ? 1 : 0) << "\nsoundchip=" << soundChip << "\nspanishpc=" << toBase(spanishPc, base) << "\nplayers=" << players << "\np2input=" << p2Input
       << "\ndifficulty=" << difficulty << "\nlives=" << lives << "\nstartlives=" << livesStartOf(lives) << "\nmaxlives=" << livesMostOf(lives) << "\nsoloseat=" << soloSeat << "\nchapterretry=" << (chapterRetry ? 1 : 0) << "\nblood=" << blood << "\ncuts=" << (cuts ? 1 : 0) << "\ntitle=" << (title ? 1 : 0) << "\nfbi=" << (fbi ? 1 : 0) << "\npcsplash=" << (pcSplash ? 1 : 0) << "\ngametext=" << gameText << "\nlang=" << language
-      << "\naspect=" << aspect << "\nwiden2d=" << widen2d << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nflashlight=" << (flashlight ? 1 : 0) << "\nbigheads=" << (bigHeads ? 1 : 0) << "\nshotgun=" << (shotgun ? 1 : 0) << "\npartyboard=" << (partyBoard ? 1 : 0) << "\nhardcore=" << (hardcore ? 1 : 0) << "\nfreefire=" << (freeFire ? 1 : 0) << "\nmachinegun=" << (machineGun ? 1 : 0) << "\narsenal=" << (weaponSwitch ? 1 : 0) << "\nsuddendeath=" << (suddenDeath ? 1 : 0) << "\nvampire=" << (vampire ? 1 : 0) << "\nhostagecrisis=" << (hostageCrisis ? 1 : 0) << "\nroulette=" << (roulette ? 1 : 0) << "\nsurvival=" << (survival ? 1 : 0) << "\nexploding=" << (exploding ? 1 : 0) << "\nfunlook=" << funLook << "\nturbo=" << turbo << "\nbossrush=" << (bossRush ? 1 : 0) << "\nmarried=" << (married ? 1 : 0) << "\nbossnames=" << (bossCodenames ? 1 : 0) << "\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
+      << "\nsubtitles=" << subtitles << "\nsubtitlesize=" << subtitleSize
+      << "\naspect=" << aspect << "\nwiden2d=" << widen2d << "\nfullscreen=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? 1 : 0) <<"\nautoreload=" << (autoReload ? 1 : 0) << "\nedgereload=" << (edgeReload ? 1 : 0) << "\nflashlight=" << (flashlight ? 1 : 0) << "\nbigheads=" << (bigHeads ? 1 : 0) << "\nshotgun=" << (shotgun ? 1 : 0) << "\npartyboard=" << (partyBoard ? 1 : 0) << "\nhardcore=" << (hardcore ? 1 : 0) << "\nfreefire=" << (freeFire ? 1 : 0) << "\nmachinegun=" << (machineGun ? 1 : 0) << "\narsenal=" << (weaponSwitch ? 1 : 0) << "\nsuddendeath=" << (suddenDeath ? 1 : 0) << "\nvampire=" << (vampire ? 1 : 0) << "\nhostagecrisis=" << (hostageCrisis ? 1 : 0) << "\nroulette=" << (roulette ? 1 : 0) << "\nsurvival=" << (survival ? 1 : 0) << "\nexploding=" << (exploding ? 1 : 0) << "\nfunlook=" << funLook << "\nturbo=" << turbo << "\nbossrush=" << (bossRush ? 1 : 0) << "\nmarried=" << (married ? 1 : 0) << "\nvrdual=" << vrDual << "\nvrlaser=" << vrLaser << "\nvrcrosshair=" << vrCrosshair << "\nvrmenuhands=" << vrMenuHands << "\nvrview=" << vrView << "\nvrscreendist=" << vrScreenDist << "\nvrscreensize=" << vrScreenSize << "\nvrcutscenes=" << vrCutscenes << "\nvrvignette=" << vrVignette <<"\nscoredisplay=" << (scoreDisplay ? 1 : 0) << "\nbossnames=" << (bossCodenames ? 1 : 0) << "\nattractgore=" << (attractGore ? 1 : 0) << "\nlgupdatecheck=" << (updateCheck ? 1 : 0) << "\noutputs=" << (outputs ? 1 : 0) << "\ncrosshairs=" << (crosshairs ? 1 : 0) << "\noutputsport=" << outputsPort << "\nlastversion=" << lastVersion << "\nholdskip=" << (holdSkip ? 1 : 0)
       << "\ndisplaymode=" << ((util::fullscreenLive() >= 0 ? util::fullscreenLive() != 0 : fullscreen) ? (exclusive ? 2 : 1) : 0)
       << "\nexclusive=" << (exclusive ? 1 : 0)
       << "\nresolution_fullscreen=" << util::sizeKey({resFullW, resFullH}) << "\nresolution_window=" << util::sizeKey({resWinW, resWinH})
       << "\ngamespeed=" << (gameSpeed < 0 ? "auto" : gameSpeed == 1 ? "60" : "arcade") << "\ncontinues=" << continues << "\nfreeplay=" << (freePlay ? 1 : 0) << "\nframerate=" << (frameRate == 0 ? std::string("display") : frameRate < 0 ? std::string("unlimited") : frameRate == kFrameRateArcade ? std::string("arcade") : std::to_string(frameRate))
-      << "\nvsync=" << (vsync ? 1 : 0) << "\nrenderer=" << (renderer == 1 ? "gl" : renderer == 2 ? "angle" : "auto") << "\nsmooth=" << (smooth ? 1 : 0) << "\nhitsparks=" << (hitSparks ? 1 : 0) << "\nmuzzleflash=" << (muzzleFlash ? 1 : 0) << "\nshotflashsize=" << shotFlashSize << "\nshowcrosshairs=" << (showCrosshairs ? 1 : 0) << "\nbloodparticles=" << (bloodParticles ? 1 : 0) << "\nhitmarks=" << (clearMarks ? 1 : 0) << "\ntransparency=" << transparency << "\nnetname=" << netName << "\ndisplay=" << display << "\nnetinfo=" << netInfo << "\nnetpcmode=" << (netPcMode ? 1 : 0) << "\nnetbossmode=" << netBossMode << "\nnetpcchar=" << netPcChar[0] << ',' << netPcChar[1] << "\nsonicmode=" << sonicKey(sonic) << "\nboss4p=" << boss4p << "\nenemy4p=" << enemy4p << "\nteamflash=" << teamFlash << "\ntrailer=" << (trailer ? 1 : 0) << "\nscene4p=" << scene4p
+      << "\nvsync=" << (vsync ? 1 : 0) << "\nrenderer=" << (renderer == 1 ? "gl" : renderer == 2 ? "angle" : "auto") << "\nsmooth=" << (smooth ? 1 : 0) << "\nhitsparks=" << (hitSparks ? 1 : 0) << "\nmuzzleflash=" << (muzzleFlash ? 1 : 0) << "\nshotflashsize=" << shotFlashSize << "\nshowcrosshairs=" << (showCrosshairs ? 1 : 0) << "\nbloodparticles=" << (bloodParticles ? 1 : 0) << "\nhitmarks=" << (clearMarks ? 1 : 0) << "\ntransparency=" << transparency << "\nnetname=" << netName << "\ndisplay=" << display << "\nnetinfo=" << netInfo << "\nnetstun=" << (netStun ? 1 : 0) << "\nstunservers=" << stunServers << "\nnetpcmode=" << (netPcMode ? 1 : 0) << "\nnetbossmode=" << netBossMode << "\nnetpcchar=" << netPcChar[0] << ',' << netPcChar[1] << "\nsonicmode=" << sonicKey(sonic) << "\nboss4p=" << boss4p << "\nenemy4p=" << enemy4p << "\nteamflash=" << teamFlash << "\ntrailer=" << (trailer ? 1 : 0) << "\nscene4p=" << scene4p
       << "\ncrt=" << crtPresetKey(crt.preset) << "\ncrt.scan=" << crt.scan << "\ncrt.mask=" << crt.mask << "\ncrt.masktype=" << crt.maskType
       << "\ncrt.curve=" << crt.curve << "\ncrt.bloom=" << crt.bloom << "\ncrt.bright=" << crt.bright
       << "\ncrt.crispsights=" << (crt.crispSights ? 1 : 0) << "\ncrt.shotfiltered=" << (crt.shotFiltered ? 1 : 0)
@@ -555,6 +583,11 @@ void LaunchConfig::save(const std::string& file) const
     f << "\nscenecast=" << sceneCast;   // actors2: the cut-scene viewer's Actors
     f << "\ncharacters=" << characters;   // charsel: the Character Select picks of the other modes ("1=sophie,2=g")
     f << "\ncharselect=" << (charSelect ? 1 : 0);   // charsel: Gameplay > Character Select
+    f << "\ntotd_live=" << (totdLive ? 1 : 0);      // totdex: The Typing of the Dead 0's live WPM / accuracy line
+    f << "\ntotd_practice=" << (totdPractice ? 1 : 0);   // totdrec: The Typing of the Dead 0's Practice Your Misses
+    f << "\ntotd_packs=" << totdPacks;   // totdpacks: its word packs (ids, comma list; builtin = the game's own lists)
+    f << "\ntotd_mutators=" << totdMutators;   // totdpacks: its mutators (ids, comma list; empty: none)
+    f << "\ntotd_tts=" << (totdTts ? 1 : 0);   // totdpacks: its Speak the Words (the system voice)
     f << "\nguntype=" << gunKind << "\ngunflash=" << gunFlash << "\ngunborder=" << gunBorder;   // padpass: light guns
     f << "\npadprompts=" << padPrompts << "\nbuttonstyle=" << buttonStyle << "\niconoutline=" << iconOutline;
     f << "\ntouchcursor=" << touchCursor << "\ngyrocursor=" << gyroCursor;   // padglyphs   // padglyphs: Button Prompts / Style
@@ -622,7 +655,8 @@ constexpr float kW = 960, kH = 600;
 // the actions of the page's clickable places
 enum Action { kNext = 1, kBack, kQuit, kBrowseDir, kZoneA, kZoneP, kFolderA, kFolderP, kOptDesk, kOptStart, kOptSteam,
               kOptMusic, kDoInstall, kPlayHere, kPlay, kOpenFolder, kUpdate, kNotNow, kDownloadPage, kContinue, kStart,
-              kZoneS, kFolderS, kClearS };   // (spanish2: the Extras page's Spanish PC copy)
+              kZoneS, kFolderS, kClearS,   // (spanish2: the Extras page's Spanish PC copy)
+              kOptVr };   // (vr3: Create a VR shortcut)
 
 // the painter: logical units (the window is 960 x 600) x s = the picture's pixels
 struct Painter {
@@ -1268,6 +1302,7 @@ void Launcher::startInstall()
     o.spanishPc = cfg.spanishPc;   // (spanish2: the Extras page's, optional)
     o.settingsFrom = cacheDir + "launcher.ini";
     o.desktop = optDesktop_ && !repairHere, o.startMenu = optStartMenu_ && !repairHere, o.steam = optSteam_ && !repairHere;
+    o.vrShortcut = optVr_ && !repairHere;   // (vr3)
     o.music = optMusic_;
     o.version = version;
     installState_ = 1;
@@ -1346,7 +1381,8 @@ void Launcher::render(int ww, int wh)
     std::string key = std::to_string(ww) + 'x' + std::to_string(wh) + '|' + std::to_string(int(mode)) + '|' + std::to_string(step_) + '|' +
                       std::to_string(pressed_) + '|' + std::to_string(hover_) + '|' + std::to_string(dropHover_) + '|' +
                       std::to_string(lang::gen()) + '|' + installDir_ + '|' + std::to_string(scroll_) + '|' +
-                      std::to_string(optDesktop_) + std::to_string(optStartMenu_) + std::to_string(optSteam_) + std::to_string(optMusic_);
+                      std::to_string(optDesktop_) + std::to_string(optStartMenu_) + std::to_string(optSteam_) + std::to_string(optMusic_) +
+                      std::to_string(optVr_);
     for (const Zone* z : {&za, &zp, &zs}) {
         key += '\n' + z->path + '\t' + std::to_string(z->state) + z->line + '\t' + std::to_string(int(z->progress * 100));
         for (const std::string& s : z->more) key += '\v' + s;
@@ -1575,6 +1611,9 @@ void Launcher::render(int ww, int wh)
         box(optDesktop_, T("Desktop shortcut"), "", kOptDesk, true);
         box(optStartMenu_, T("Applications menu entry"), "", kOptStart, true);
 #endif
+#if !defined(__APPLE__)   // vr3: a second shortcut that starts the game in VR (--vr openxr; README "How to play in VR")
+        box(optVr_, T("Create a VR shortcut"), T("(for a VR headset)") + "  " + T("EXPERIMENTAL"), kOptVr, true);   // (user 2026-11-10: "label vr experimental")
+#endif
         box(optSteam_, T("Add to Steam"), T("(Steam must be closed)"), kOptSteam, true);
         box(optMusic_ && zp.music > 0, T("Import the CD music"),
             zp.music ? lang::fmt("({n} tracks found)", {{"n", std::to_string(zp.music)}}) : T("(none found in your PC game)"), kOptMusic, zp.music > 0);
@@ -1637,9 +1676,32 @@ void Launcher::render(int ww, int wh)
         const float ty = 140, th = mode == Mode::Update ? 300.0f : 370.0f;
         field(L, ty, CW, th);
         std::vector<std::pair<std::string, float>> lines;   // (text, cap: 12 a heading); colour by cap
-        std::istringstream in(text);
-        for (std::string l; std::getline(in, l);) {
-            if (!l.empty() && l.back() == '\r') l.pop_back();
+        // qa140 (v1.4.0): the file's hard-wrapped lines joined back into their paragraphs first (a bullet's indented
+        // lines, a paragraph's next lines, a "> " quote's lines: they were each wrapped on their own, short lines
+        // mid-sentence), and a quote drawn without its "> " marks
+        std::vector<std::string> paras;
+        {
+            std::istringstream in(text);
+            int prev = 0;   // the last paragraph: 0 none / blank, 1 heading or comment, 2 text, 3 quote
+            for (std::string r; std::getline(in, r);) {
+                if (!r.empty() && r.back() == '\r') r.pop_back();
+                const size_t s = r.find_first_not_of(' ');
+                if (s == std::string::npos) { paras.push_back(""); prev = 0; continue; }
+                if (r[0] == '>') {
+                    std::string q = r.substr(r.find_first_not_of("> ") == std::string::npos ? r.size() : r.find_first_not_of("> "));
+                    if (q.empty()) { paras.push_back(""); prev = 0; continue; }
+                    if (prev == 3) paras.back() += " " + q;
+                    else paras.push_back(q), prev = 3;
+                    continue;
+                }
+                const bool item = r.compare(s, 2, "- ") == 0 || r.compare(s, 2, "* ") == 0;
+                const bool block = r[0] == '#' || r.rfind("<!--", 0) == 0;
+                if (prev == 2 && !item && !block) { paras.back() += " " + r.substr(s); continue; }
+                paras.push_back(r);
+                prev = block ? 1 : 2;
+            }
+        }
+        for (std::string l : paras) {
             for (size_t k; (k = l.find("**")) != std::string::npos;) l.erase(k, 2);
             l.erase(std::remove(l.begin(), l.end(), '`'), l.end());
             if (l.rfind("# ", 0) == 0) continue;   // (the file's title)
@@ -1755,6 +1817,7 @@ void Launcher::click(int action, SDL_Window* window)
     case kOptDesk: optDesktop_ = !optDesktop_; break;
     case kOptStart: optStartMenu_ = !optStartMenu_; break;
     case kOptSteam: optSteam_ = !optSteam_; break;
+    case kOptVr: optVr_ = !optVr_; break;
     case kOptMusic: optMusic_ = !optMusic_; break;
     case kDoInstall: startInstall(); break;
     case kPlayHere: click(kStart, window); return;

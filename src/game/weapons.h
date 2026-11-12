@@ -24,6 +24,8 @@
 #include <string>
 #include <vector>
 
+namespace hotd::test { struct Access; }   // (tests/unit: hotd_unit's look at the private parts)
+
 namespace hotd::game {
 
 class Runtime;
@@ -45,6 +47,7 @@ struct WeaponDef {
     int pellets = 0;                // extra rays (the shotgun)
     float spread = 0;               // their spread around the aim (arcade screen units)
     float range = 0;                // they hit only nearer than this (camera units; 0: any)
+    bool keepEmpty = false;         // used up: still held, empty (Ammo / Max Ammo fill it), not gone (survhand: the Hand)
     float area = 0;                 // an explosion at the hit (camera units; 0: none)
     bool projectile = false;        // the explosion flies there first: the Magician's fireball (survfix), no direct hit
     float dual = 0;                 // two guns: the second's offset (arcade screen units; 0: one gun)
@@ -95,12 +98,27 @@ public:
         int reload = 0;             // frames left of the reload (0: ready)
         int timer = 0, burst = 0;   // the held fire's count; a pull's burst left
         bool quick = false, bigMag = false;   // Survival's perks: half the reload, magazines x 1.5
+        bool down = false;          // Drops: out of lives (its weapons kept for the continue: afterFrame)
         uint64_t shotFrame = 0;     // the last shot's frame (the cue's seat, the model's kick)
         int shots[kWeapons] = {}, reloads[kWeapons] = {}, switches = 0, kills[kWeapons] = {};
     };
     Seat seat[4];
-    struct Pickup { float pos[3]; int weapon; int frames; };
+    // hold: its time runs only with the shots on; upgrade: Survival's perks instead of a weapon (givePerk)
+    struct Pickup { float pos[3]; int weapon; int frames; bool hold = false; bool upgrade = false; };
     std::vector<Pickup> pickups;    // the drops lying in the world
+    static constexpr size_t kMaxPickups = 10;   // (the kills' drops: 6 of them at most)
+    int pickDrop();                 // a weapon by the drop weights (-1: none)
+    // hordepub (user 2026-11-09: weapons from rescued researchers, crates, the bonus room): a pickup at a camera-space
+    // place (x right, y up, z ahead: as Obj +0x38), turned into the world's; why: the log's. false: none (full, Off).
+    // upgrade: an upgrade pickup (weapon ignored; Survival's QUICK RELOAD sign's model, the game's gold coin)
+    bool dropAt(Runtime& rt, const float cam[3], int weapon, int frames, bool hold, const char* why, bool upgrade = false);
+    // hordepub (user 2026-11-09: "upgrades (Survival's Big Mag, Quick Reload, ...)" in Horde): the seat's next upgrade,
+    // Survival's shop order: Quick Reload, then Big Mag, then Max Ammo (every weapon held full); its name (the notice)
+    std::string givePerk(Runtime& rt, int p);
+    int upgrades = 0;               // (the stats: upgrades given)
+    // (survhand, the balance runs' line: per weapon the frames it was in a hand in play with the shots on, and of
+    // those the frames it was reloading; stats only, not in the digest)
+    long long heldFrames[kWeapons] = {}, reloadingFrames[kWeapons] = {};
     int dropped = 0, taken = 0;     // Drops: pickups made / taken
     int reloadSeat = 0;             // the seat whose reload sound plays (the reload cue's)
 
@@ -139,9 +157,13 @@ public:
     int pickupAt(const Runtime& rt, float x, float y) const;
     bool pickupScreen(const Runtime& rt, int i, float& x, float& y) const;   // its place on the screen (false: behind)
     std::string summary() const;                   // the test line's part
+    // online (Survival, protocol 22): a digest of the weapons' logic state (each seat's weapons, magazines, reloads,
+    // perks, the requests, the pickups, the random stream; not the notices' texts) for the desync check
+    uint64_t digest() const;
     const WeaponDef& def(int w) const { return weaponDefs()[size_t(w)]; }
 
 private:
+    friend struct ::hotd::test::Access;   // (tests/unit: the weapons' random stream)
     uint32_t rng_ = 0x57504E53;     // own stream ("WPNS"): the game's rand() is not touched
     uint32_t next();
     std::vector<std::pair<uint32_t, uint64_t>> killed_;   // (Drops) creatures already counted (a kill reported twice)

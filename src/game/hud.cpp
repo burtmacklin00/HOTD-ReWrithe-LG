@@ -8,9 +8,11 @@
 #include "game/lang.h"
 #include "game/player_colours.h"
 #include "game/sights.h"
+#include "game/subtitles.h"
 #include "util/png_read.h"
 #include "render/gamma.h"
 #include "render/gl.h"
+#include "render/gl_backend.h"
 
 #include <algorithm>
 #include <array>
@@ -19,6 +21,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <set>
 
 namespace hotd::game {
 
@@ -84,6 +87,9 @@ bool placedAt(const Runtime& rt, uint32_t layer, int x, int y, uint32_t sprite)
     const uint16_t want = uint16_t(int16_t(slot) * 0x80 - 0x8000 + mem.at<uint16_t>(lay + 4));
     return mem.at<uint16_t>(layer + uint32_t(y * 0x80 + x * 2)) == want;
 }
+
+// (defined below, with the 4P HUD's helpers)
+SeatImg spriteImg(port::Mem& mem, bool pc, const assets::PcSprites& pcs, uint32_t sprite);
 
 } // namespace
 
@@ -197,6 +203,7 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
                 continue;
             std::vector<uint8_t>* pic[1] = {&rgba_};
             translucent2D(rt, tiles, high, pic, 1);
+            labelLook2D(rt, pic, 1);   // (charsel4)
             rainbow2D(rt, tiles, high, pic, 1);
             upload(rgba_, W, H, ww, wh, 0.0f, false, part.mode, wideW);
             any = true;
@@ -208,6 +215,7 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
             return false;
         std::vector<uint8_t>* pic[1] = {&rgba_};
         translucent2D(rt, tiles, high, pic, 1);
+        labelLook2D(rt, pic, 1);   // (charsel4)
         rainbow2D(rt, tiles, high, pic, 1);
         upload(rgba_, W, H, ww, wh);
         return true;
@@ -222,6 +230,7 @@ bool Hud::drawArcadePass(const Runtime& rt, int ww, int wh, bool high, bool comp
                                        drawn);
     std::vector<uint8_t>* pics[3] = {&arcadeSides_[0], &arcadeSides_[1], &arcadeSides_[2]};
     translucent2D(rt, tiles, high, pics, 3);
+    labelLook2D(rt, pics, 3);   // (charsel4)
     rainbow2D(rt, tiles, high, pics, 3);
     bool any = false;
     for (int s = 0; s < 3; ++s)
@@ -413,11 +422,33 @@ uint32_t Hud::coverShown(const Runtime& rt)
     return c != 0 && at(31, 24) == c && at(61, 47) == c ? spr & 0xFFFFu : 0;
 }
 
-bool Hud::p2Notice(const Runtime& rt, uint32_t& sprite, int& x, int& y)
+// vrfade (hud.h ScreenFade): the same levels draw() uses for its white fade, the cover and the PC fade
+Hud::ScreenFade Hud::screenFade(const Runtime& rt)
+{
+    ScreenFade f;
+    static const bool noWhite = std::getenv("HOTD_NO_WHITE") != nullptr;
+    const int whiteLevel = noWhite ? -1 : rt.pcModels ? rt.paletteWhite() : rt.whiteFade >= 0 ? rt.whiteFade : rt.paletteWhite();
+    if (whiteLevel >= 0 && whiteLevel < 32)
+        f.white = float((32 - whiteLevel) * 255 / 32) / 255.0f;   // (draw's alpha, its byte)
+    if (const uint32_t cover = coverShown(rt))
+        f.cover = cover == 0x8D && !noWhite ? 2 : 1;
+    if (rt.pcModels)
+        f.pcLevel = rt.pcFadeLevel();
+    return f;
+}
+
+// player p's (0 / 1) hit notice drawn blue: the 3-4 player mode's player 2 (user 2026-10-26), by look_seat (charsel4:
+// Rogan's red, G's blue in either seat)
+bool Hud::blueNotice(const Runtime& rt, int p)
+{
+    return rt.coop4_on() && rt.look_seat(p) == 1;
+}
+
+bool Hud::p2Notice(const Runtime& rt, int p, uint32_t& sprite, int& x, int& y)
 {
     port::Mem& mem = rt.mem;
-    const uint32_t r = 0x51F480 + 8;   // (its +4 is players_in_game_b, the art's row as the original indexes it, not the player)
-    if (!rt.coop4_on() || mem.at<uint8_t>(r) == 0)
+    const uint32_t r = 0x51F480 + uint32_t(p) * 8;   // (its +4 is players_in_game_b, the art's row as the original indexes it, not the player)
+    if (!blueNotice(rt, p) || mem.at<uint8_t>(r) == 0)
         return false;
     const int kind = mem.at<int8_t>(r + 3), who = int32_t(mem.u32(r + 4));
     if (who < 0 || who >= 4 || kind < 0 || kind >= 16)
@@ -433,24 +464,86 @@ bool Hud::p2Notice(const Runtime& rt, uint32_t& sprite, int& x, int& y)
 
 const uint8_t* Hud::withoutP2Notice(const Runtime& rt, const uint8_t* tiles)
 {
-    uint32_t spr = 0;
-    int x0 = 0, y0 = 0;
-    if (!p2Notice(rt, spr, x0, y0))
-        return tiles;
+    bool copied = false;
+    for (int p = 0; p < 2; ++p) {
+        uint32_t spr = 0;
+        int x0 = 0, y0 = 0;
+        if (!p2Notice(rt, p, spr, x0, y0))
+            continue;
+        port::Mem& mem = rt.mem;
+        const uint32_t lay = mem.u32(0xA6590 + spr * 12 + 8);   // its layout: u16 w, u16 h, w x h cells
+        if (lay == 0 || !mem.mapped(lay))
+            continue;
+        if (!copied)
+            tilesNoP2_.assign(tiles, tiles + 0x10000);
+        copied = true;
+        const int w = mem.at<uint16_t>(lay), h = mem.at<uint16_t>(lay + 2);
+        for (int j = 0; j < h; ++j)
+            for (int i = 0; i < w; ++i) {
+                const int x = x0 + i, y = y0 + j;
+                if (x < 0 || x >= 64 || y < 0 || y >= 64 || mem.at<uint16_t>(lay + 4 + uint32_t(j * w + i) * 2) == 0)
+                    continue;
+                std::memset(&tilesNoP2_[size_t(2) * 0x2000 + size_t(y) * 0x80 + size_t(x) * 2], 0, 2);   // (layer 2, 0x1004000)
+            }
+    }
+    return copied ? tilesNoP2_.data() : tiles;
+}
+
+// charsel4 (user 2026-11-09): Rogan / G keep player 1's red / player 2's blue in either seat (Game::look_seat): the
+// torches' flames are the look seat's own sprites (hud_lives_draw); the label keeps the seat's number ("1P" / "2P")
+// in the other player's colours (rankRecolour: the other label's own shades), where hud_player_start_draw put it
+// (table 0xCA6D0: x, sprite; row 0x2A). Not with Rainbow Blood's HUD option (the rainbow colours the labels then)
+int Hud::labelSwapSeat(const Runtime& rt, uint32_t sprite) const
+{
+    const RainbowBloodSettings& s = rainbowBloodSettings();
+    if ((s.on && s.hud >= 2 && !rt.greyPalette.on) || !rt.chars_on() || !rt.mem.mapped(0xCA6D0))
+        return -1;
+    for (int p = 0; p < 2; ++p)
+        if (rt.look_seat(p) != p && sprite == rt.mem.u32(0xCA6D0 + uint32_t(p) * 12 + 8))
+            return p;
+    return -1;
+}
+
+void Hud::labelLook2D(const Runtime& rt, std::vector<uint8_t>* const* pics, int n)
+{
     port::Mem& mem = rt.mem;
-    const uint32_t lay = mem.u32(0xA6590 + spr * 12 + 8);   // its layout: u16 w, u16 h, w x h cells
-    if (lay == 0 || !mem.mapped(lay))
-        return tiles;
-    tilesNoP2_.assign(tiles, tiles + 0x10000);
-    const int w = mem.at<uint16_t>(lay), h = mem.at<uint16_t>(lay + 2);
-    for (int j = 0; j < h; ++j)
-        for (int i = 0; i < w; ++i) {
-            const int x = x0 + i, y = y0 + j;
-            if (x < 0 || x >= 64 || y < 0 || y >= 64 || mem.at<uint16_t>(lay + 4 + uint32_t(j * w + i) * 2) == 0)
-                continue;
-            std::memset(&tilesNoP2_[size_t(2) * 0x2000 + size_t(y) * 0x80 + size_t(x) * 2], 0, 2);   // (layer 2, 0x1004000)
-        }
-    return tilesNoP2_.data();
+    if (!rt.chars_on() || !mem.mapped(0xCA6D0))
+        return;
+    const int W = assets::Arcade2D::kWidth, H = assets::Arcade2D::kHeight;
+    for (int p = 0; p < 2; ++p) {
+        const uint32_t row = 0xCA6D0 + uint32_t(p) * 12, spr = mem.u32(row + 8);
+        const int x = int(mem.u32(row)), y = 0x2A;
+        if (labelSwapSeat(rt, spr) != p || x < 0 || x >= 64 || rt.pcCells[size_t(y) * 64 + size_t(x)] != (spr | 0x10000u))
+            continue;   // (the label not there now: a cut-scene, the continue screen)
+        const uint32_t lay = mem.u32(0xA6590 + spr * 12 + 8);
+        if (lay == 0 || !mem.mapped(lay))
+            continue;
+        const int other = 1 - p;
+        SeatImg& ref = lookLabel_[other][0];
+        if (ref.px.empty())
+            ref = spriteImg(mem, false, pcSprites_, mem.u32(0xCA6D0 + uint32_t(other) * 12 + 8));
+        if (ref.px.empty())
+            continue;
+        for (int k = 0; k < n; ++k)
+            if (pics[k]->size() >= size_t(W) * H * 4)
+                rankRecolour(pics[k]->data(), W, H, x * 8, y * 8, mem.at<uint16_t>(lay) * 8, mem.at<uint16_t>(lay + 2) * 8, p,
+                             ref.px.data(), ref.px.size() / 4, other);
+    }
+}
+
+void Hud::labelLookPc(const Runtime& rt, std::vector<uint8_t>& canvas, uint32_t sprite, int px, int py)
+{
+    const int p = labelSwapSeat(rt, sprite);
+    if (p < 0 || sprite >= 0x276)
+        return;
+    const int id = kArcadeToPcSprite[sprite];
+    const int other = 1 - p;
+    SeatImg& ref = lookLabel_[other][1];
+    if (ref.px.empty())
+        ref = spriteImg(rt.mem, true, pcSprites_, rt.mem.u32(0xCA6D0 + uint32_t(other) * 12 + 8));
+    if (id && !ref.px.empty())
+        rankRecolour(canvas.data(), assets::PcSprites::kWidth, assets::PcSprites::kHeight, px, py, pcSprites_.width(id),
+                     pcSprites_.height(id), p, ref.px.data(), ref.px.size() / 4, other);
 }
 
 // spanish3 (user 2026-11-06, docs/spanish.md): which arcade sprites show the Spanish PC pictures with the arcade
@@ -480,13 +573,27 @@ void Hud::findEsSprites()
     static const uint16_t kFound[] = {0xE, 0xF, 0x32, 0x33, 0x34, 0x35, 0x36, 0x86, 0x88, 0x8C, 0xDA, 0xDB, 0xDC, 0xDD,
                                       0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3, 0x107, 0x108, 0x113, 0x120, 0x121, 0x122,
                                       0x123, 0x124, 0x1C9, 0x1CA, 0x1DC, 0x22B, 0x243, 0x244, 0x245, 0x246, 0x268,
-                                      0x269, 0x26A, 0x26C};
+                                      0x269, 0x26A, 0x26C,
+                                      0x89, 0x26B};   // (rec131: the reload boards, matched to the PC's 0x4E0)
+    // rec131 (user's v1.3.1 recording 2026-11-07, 8:48 / 25:42): the Spanish CD's HOLD YOUR FIRE! (PC 0x445, arcade
+    // 0x107) is the US picture with its words painted over in its black (0x8400, opaque) and a small "NO" + gun in
+    // the middle: over the arcade's 3D the black showed as the words' boxes (a dark "HOLD YOUR FIRE!" on bright
+    // scenes). Its dark texels are cleared: only NO + the gun are drawn
+    auto unpaint = [](int id, std::vector<uint8_t>& a) {
+        if (id != 0x445)
+            return;
+        for (size_t i = 0; i + 3 < a.size(); i += 4)
+            if (a[i + 3] && std::max({a[i], a[i + 1], a[i + 2]}) <= 24)
+                a[i] = a[i + 1] = a[i + 2] = a[i + 3] = 0;
+    };
     const bool reference = us.image(0x421) != pcSprites_.image(0x421);
     if (!reference)
         for (const uint16_t s : kFound) {
             const int id = kArcadeToPcSprite[s];
-            if (pcSprites_.drawable(id))
+            if (pcSprites_.drawable(id)) {
                 esSprite_[s] = 1, esImg_[id] = pcSprites_.image(id), ++n;
+                unpaint(id, esImg_[id]);
+            }
         }
     for (int s = 0; s < 0x276 && reference; ++s) {
         const int id = kArcadeToPcSprite[s];
@@ -513,8 +620,10 @@ void Hud::findEsSprites()
                     ++differ;
             }
             done[size_t(id)] = a.size() != b.size() || (differ >= 8 && differ * 100 >= texels) ? 1 : 0;
-            if (done[size_t(id)] == 1)
+            if (done[size_t(id)] == 1) {
+                unpaint(id, a);
                 esImg_[id] = std::move(a);
+            }
         }
         if (done[size_t(id)] == 1) {
             esSprite_[size_t(s)] = 1;
@@ -796,7 +905,7 @@ bool Hud::drawUnder(const Runtime& rt, int ww, int wh, const float clear[3])
     }
     if (rt.pcModels || !mem.mapped(kTileRam) || !mem.mapped(kCharRam))
         return false;   // PC: Runtime::pcCells carries no priority (all over the 3D)
-    subHide_ = pauseSelection < 0 && !noText && lang::active() && !subLines(rt).empty();   // (lang: as draw() will)
+    subHide_ = pauseSelection < 0 && subPlan(rt).hide;   // (lang, subs: as draw() will)
     const bool composed = composeEs(rt, codenameTiles(rt, spanishCut(rt, withoutP2Notice(rt, clean || noText || subHide_ ? filteredTiles(rt) : mem.ptr(kTileRam)))),
                                     false, 0xFu, rgba_);   // (spanish3)
     subHide_ = false;
@@ -817,6 +926,7 @@ void Hud::upload(const std::vector<uint8_t>& rgba, int W, int H, int ww, int wh,
 {
     gl::BindTexture(gl::TEXTURE_2D, texture_);
     gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
+    gl::texTag("hud picture");   // (questui: the upload log, render/gl_backend.h)
     gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, W, H, 0, gl::RGBA, gl::UNSIGNED_BYTE, rgba.data());
     const float s = fit ? std::min(float(ww) / float(W), float(wh) / float(H)) : float(wh) / float(H);
     // GitHub #43 (2026-11-04: "bilinear filtering is applied to HUD elements"; MAME 0.286 vs 1.1): the 2D layer (the HUD,
@@ -896,6 +1006,54 @@ int Hud::wideScreen(const Runtime& rt, int ww, int wh, int& wideW) const
         }
     }
     return kWideNone;
+}
+
+bool Hud::vrScreen2D(const Runtime& rt)
+{
+    port::Mem& mem = rt.mem;
+    if (mem.mapped(G::evt_clrgfst_flags) && (mem.u32(G::evt_clrgfst_flags) & 0x20u) != 0)
+        return true;   // (the chapter card: wideScreen's kWideCard)
+    const int16_t mode = mem.at<int16_t>(G::game_mode);
+    if (mode == 4 && mem.u32(G::game_submode) == 8)
+        return true;   // (the ending's staff roll and its last card: playerInControl's sub-mode 8)
+    if (mode == 4 && (mem.u32(G::game_submode) == 9 || mem.u32(G::game_submode) == 10))
+        return true;   // vrfix: the name entry (its letters in camera space, the 2D frame: made for the flat screen; VR
+                       // aims through the cinema screen, Scene::screenAim_)
+    if (mode == 7)
+        return true;   // vrfix: the ranking after a game / the name entry (as mode 6's)
+    if (mode == 4 || mode == 5) {   // (the GAME OVER card, the route map: wideScreen's kWidePicture)
+        const uint32_t* l2 = &rt.pcCells[size_t(2 * Runtime::kPcRows) * 64];
+        for (int i = 0; i < Runtime::kPcRows * 64; ++i) {
+            const uint32_t v = l2[i];
+            if (v == (0x106u | 0x10000u) || v == (0x243u | 0x10000u) || v == (0x244u | 0x10000u))
+                return true;
+        }
+    }
+    return false;
+}
+
+bool Hud::vrAttract2D(const Runtime& rt) const
+{
+    port::Mem& mem = rt.mem;
+    const int16_t mode = mem.at<int16_t>(G::game_mode);
+    if (mode == 4 || mode == 5)
+        return false;
+    if (mode == 2 && mem.u32(0x512294) > 0xB3)
+        return true;   // (the title's logo: attract.cpp title_run, the title group's frame counter past 0xB3)
+    if (mode == 6)
+        return true;   // (the ranking: its table over a still 3D backdrop)
+    int W = 0, H = 0;
+    if (rgba_.size() == size_t(assets::Arcade2D::kWidth) * assets::Arcade2D::kHeight * 4)
+        W = assets::Arcade2D::kWidth, H = assets::Arcade2D::kHeight;
+    else if (rgba_.size() == size_t(assets::PcSprites::kWidth) * assets::PcSprites::kHeight * 4)
+        W = assets::PcSprites::kWidth, H = assets::PcSprites::kHeight;
+    else
+        return false;
+    for (int x : {0, W - 1})
+        for (int y : {H / 8, H / 2, H * 7 / 8})
+            if (rgba_[(size_t(y) * W + x) * 4 + 3] < 128)
+                return false;
+    return true;
 }
 
 bool Hud::composeLayers(const Runtime& rt, const uint8_t* tiles, bool high, unsigned layers, std::vector<uint8_t>& out)
@@ -1208,6 +1366,7 @@ void Hud::drawPc2D(const Runtime& rt, int ww, int wh)
                         }
                 } else {
                     pcSprites_.draw(canvas, id, px, py);
+                    labelLookPc(rt, canvas, v & 0xFFFF, px, py);   // (charsel4: "1P" / "2P" in Rogan / G's colours)
                 }
                 pcSprites_.setTint(0, nullptr);
             }
@@ -1545,9 +1704,10 @@ void Hud::loadPcSprites()
 // (game/sights.h), scaled with the window height; their centre pixel on the aim's pixel. Firing range (user
 // 2026-10-26): each player's own style, size, thickness and colour (SeatSight); the pictures: game/sight_art.cpp (the
 // menu's Firing Range draws the same ones). Players 3 / 4 in the player colour: players 1 / 2's art recoloured.
-bool Hud::buildSeatSight(int seat, bool pcModels, int wh)
+bool Hud::buildSeatSight(int seat, bool pcModels, int wh, int look)
 {
     const game::SeatSight& s = sights[seat];
+    const int col = look >= 0 && look < 4 ? look : seat;   // (charsel4: Rogan player 1's colours, G player 2's in any seat)
     const int style = game::sightStyleKept(s.style);
     const bool sprite = style <= 2;
     if (sprite && !pcTried_)
@@ -1555,7 +1715,7 @@ bool Hud::buildSeatSight(int seat, bool pcModels, int wh)
     // (the sprites: drawn at the PC's 480 lines and scaled; the others: at the window's height)
     const int artWh = sprite ? assets::PcSprites::kHeight : wh;
     const std::string key = std::to_string(style) + "|" + s.custom + "|" + std::to_string(s.size) + "|" + std::to_string(s.thick) + "|" +
-                            std::to_string(s.colour) + "|" + std::to_string(artWh) + "|" + (pcModels ? "pc" : "arc") + "|" +
+                            std::to_string(s.colour) + "|" + std::to_string(artWh) + "|" + (pcModels ? "pc" : "arc") + "|c" + std::to_string(col) + "|" +
                             (pcSprites_.loaded() ? "s" + pcDir_ : std::string("-"));
     if (key == seatKey_[seat])
         return seatOk_[seat];
@@ -1565,7 +1725,7 @@ bool Hud::buildSeatSight(int seat, bool pcModels, int wh)
         sets = game::findCustomSights(customDirs);
     game::SightArt a;
     std::string err;
-    if (!game::seatSightArt(s, pcModels, &pcSprites_, sets, seat, artWh, a, &err) && style == game::kSightCustom) {
+    if (!game::seatSightArt(s, pcModels, &pcSprites_, sets, col, artWh, a, &err) && style == game::kSightCustom) {
         if (!err.empty()) std::fprintf(stderr, "crosshair: %s\n", err.c_str());
         std::fprintf(stderr, "crosshair: P%d's custom set \"%s\" not found or broken, drawing the simple cross\n", seat + 1, s.custom.c_str());
     }
@@ -1719,30 +1879,189 @@ std::vector<std::string> Hud::subLines(const Runtime& rt)
     return out;
 }
 
-void Hud::drawSubtitles(const std::vector<std::string>& lines, int ww, int wh)
+// subs: the game's own text of a caption (the subtitle table's line, as subLines reads it)
+static std::string subGameLine(const Runtime& rt, int e, int l)
+{
+    const uint32_t a = G::voice_subtitles + uint32_t(e) * 96 + (l == 2 ? 0x31u : 1u);
+    std::string s;
+    for (uint32_t i = 0; i < 48 && rt.mem.mapped(a + i); ++i) {
+        const uint8_t c = rt.mem.at<uint8_t>(a + i);
+        if (!c) break;
+        s += char(c);
+    }
+    return s;
+}
+
+// subs: the voice messages' starts and ends from the captions the game shows (Runtime::pcTextIds); a rewind (a
+// smaller frame count) forgets them
+void Hud::subTrack(const Runtime& rt)
+{
+    const uint64_t now = rt.frameCount;
+    if (now < subTrackFrame_) subEvents_.clear();
+    subTrackFrame_ = now;
+    std::set<int> live;
+    for (const auto& [pos, v] : rt.pcTextIds) {
+        const int e = v.first / 2, l = v.first % 2 + 1;
+        live.insert(e);
+        auto it = subEvents_.find(e);
+        uint64_t start = v.second;
+        if (l == 2) {   // (line 2 first seen: the event began the table's frames before its line-2 moment)
+            const uint32_t dur = rt.mem.at<uint16_t>(G::voice_messages + uint32_t(e) * 12 + 2);
+            const uint32_t k = rt.mem.at<uint16_t>(G::voice_subtitles + uint32_t(e) * 96 + 0x2E);
+            start = v.second >= dur - k ? v.second - (dur - k) : 0;
+        }
+        if (it == subEvents_.end() || it->second.done)
+            subEvents_[e] = SubEvent{start, 0, false};
+        else if (l == 1 && it->second.start != v.second)   // (the same message again)
+            it->second.start = v.second;
+    }
+    for (auto it = subEvents_.begin(); it != subEvents_.end();) {
+        if (!it->second.done && !live.count(it->first)) {
+            it->second.done = true;
+            it->second.end = now > 0 ? now - 1 : 0;
+        }
+        if (it->second.done && now > it->second.end + 1800)
+            it = subEvents_.erase(it);
+        else
+            ++it;
+    }
+}
+
+// subs (docs/subtitles.md): Off hides every caption; Original is the game's lines (a language's translations drawn
+// instead, as before; a Subtitle Size other than 100 %: the lines in our font at that size); Custom takes the subtitle
+// file's line (text, start / end, size, place) where it has one, and is Original exactly when no line changes anything
+Hud::SubPlan Hud::subPlan(const Runtime& rt)
+{
+    SubPlan p;
+    if (noText)
+        return p;
+    subTrack(rt);
+    const bool shown = !rt.pcTextIds.empty();
+    const int mode = subs::mode(), size = subs::sizePercent();
+    if (mode == subs::kOff) {
+        p.hide = shown;
+        return p;
+    }
+    auto original = [&]() {
+        SubPlan o;
+        std::vector<std::string> lines = subLines(rt);   // (a language's translations)
+        if (lines.empty() && size != 100) {
+            std::vector<std::pair<int, std::string>> byY;
+            for (const auto& [pos, v] : rt.pcTextIds)
+                if (auto t = rt.pcTexts.find(pos); t != rt.pcTexts.end()) byY.push_back({pos.second, t->second});
+            std::sort(byY.begin(), byY.end());
+            for (const auto& l : byY) lines.push_back(l.second);
+        }
+        for (const std::string& l : lines) o.lines.push_back({l, size, subs::kPlaceDefault, 0.0f});
+        o.hide = !o.lines.empty();
+        return o;
+    };
+    if (mode == subs::kOriginal)
+        return original();
+    // Custom: every line of the messages tracked (the ones shown, the ones a start / end offset shows or keeps)
+    const int64_t now = int64_t(rt.frameCount) - 1;   // (the last frame the game ran)
+    bool custom = false;
+    std::vector<std::pair<std::pair<int64_t, int>, SubDraw>> out;
+    for (const auto& [e, ev] : subEvents_)
+        for (int l = 1; l <= 2; ++l) {
+            const int id = e * 2 + l - 1;
+            bool showing = false;
+            for (const auto& [pos, v] : rt.pcTextIds)
+                showing = showing || v.first == id;
+            const subs::Entry* en = subs::find(e, l);
+            if (!en && !showing) continue;
+            const std::string game = subGameLine(rt, e, l);
+            bool vis = showing;
+            int64_t from = int64_t(ev.start);
+            if (en && (en->start != 0 || en->end != 0)) {   // the game's own times moved
+                const int64_t dur = rt.mem.at<uint16_t>(G::voice_messages + uint32_t(e) * 12 + 2);
+                const int64_t k = rt.mem.at<uint16_t>(G::voice_subtitles + uint32_t(e) * 96 + 0x2E);
+                if (l == 2 && k == 0) continue;   // (no second line)
+                const int64_t s0 = int64_t(ev.start) + (l == 2 ? dur - k : 0);
+                const int64_t e0 = int64_t(ev.start) + (l == 1 && k != 0 ? dur - k : dur);
+                int64_t a = s0 + en->start, b = e0 + en->end;
+                if (ev.done && int64_t(ev.end) + 2 < int64_t(ev.start) + dur)   // (skipped: never past the skip)
+                    b = std::min(b, int64_t(ev.end));
+                vis = now >= a && now < b;
+                from = a;
+            }
+            const std::string* tr = lang::subtitle(e, l);   // (the language's translation: the line's own text then)
+            if (en && (en->hide || !en->neutral(tr ? *tr : game))) custom = true;
+            if (!vis || (en && en->hide)) {
+                custom = custom || (showing && en);
+                continue;
+            }
+            const std::string text = en && en->hasText ? en->text : tr ? *tr : game;
+            out.push_back({{from, l}, SubDraw{text, en ? size * en->size / 100 : size, en ? int(en->place) : 0, en ? en->y : 0.0f}});
+        }
+    if (!custom && size == 100)
+        return original();
+    std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    for (auto& o : out) p.lines.push_back(std::move(o.second));
+    p.hide = shown || !p.lines.empty();
+    return p;
+}
+
+void Hud::drawSubtitles(const std::vector<SubDraw>& lines, int ww, int wh)
 {
     constexpr int W = 1280, H = 960;   // (the 4:3 screen at twice the PC's 640 x 480)
     std::string all;
-    for (const std::string& l : lines) all += l;
+    for (const SubDraw& l : lines) all += l.text;
     const render::TtfText* tf = lang::fontFor(all);
     if (!tf) tf = lang::anyFont();   // (an ASCII / Latin-1 translation: a font from data/fonts all the same)
     if (!tf) return;
     if (lines != subShown_ || subRgba_.size() != size_t(W) * H * 4) {
         subShown_ = lines;
         subRgba_.assign(size_t(W) * H * 4, 0);
-        const float em = 40.0f;
-        std::vector<std::string> rows;
-        for (const std::string& l : lines)
-            for (const std::string& r : tf->wrap(l, em, W - 120.0f)) rows.push_back(r);
+        // subs: each line's rows (wrapped, \n a break) at its size; the lines of one place stacked: the game's place
+        // (the first baseline at 3/4 of the screen, as before), the bottom (ending 5 % above the edge), the top (from
+        // 8 %), or a line's own centre (pos=<y>)
+        struct Row { std::string text; float em; };
         std::vector<float> cov(size_t(W) * H, 0.0f);
-        float base = 0.75f * H + em * 0.8f;
-        for (const std::string& r : rows) {
-            const float x = (float(W) - tf->width(r, em)) / 2.0f;
-            tf->draw(r, em, x, base, [&](int px, int py, float a) {
-                if (px >= 0 && py >= 0 && px < W && py < H) cov[size_t(py) * W + size_t(px)] = std::min(1.0f, cov[size_t(py) * W + size_t(px)] + a);
-            });
-            base += em * 1.25f;
+        auto rowsOf = [&](const SubDraw& l) {
+            std::vector<Row> rows;
+            const float em = 40.0f * float(std::max(l.size, 10)) / 100.0f;
+            size_t at = 0;
+            for (;;) {
+                const size_t nl = l.text.find('\n', at);
+                for (const std::string& r : tf->wrap(l.text.substr(at, nl == std::string::npos ? std::string::npos : nl - at), em, W - 120.0f))
+                    rows.push_back({r, em});
+                if (nl == std::string::npos) break;
+                at = nl + 1;
+            }
+            return rows;
+        };
+        auto drawRows = [&](const std::vector<Row>& rows, float top) {
+            for (const Row& r : rows) {
+                const float x = (float(W) - tf->width(r.text, r.em)) / 2.0f;
+                tf->draw(r.text, r.em, x, top + r.em * 0.8f, [&](int px, int py, float a) {
+                    if (px >= 0 && py >= 0 && px < W && py < H) cov[size_t(py) * W + size_t(px)] = std::min(1.0f, cov[size_t(py) * W + size_t(px)] + a);
+                });
+                top += r.em * 1.25f;
+            }
+        };
+        auto height = [](const std::vector<Row>& rows) {
+            float h = 0;
+            for (const Row& r : rows) h += r.em * 1.25f;
+            return h;
+        };
+        for (const int place : {int(subs::kPlaceDefault), int(subs::kPlaceBottom), int(subs::kPlaceTop)}) {
+            std::vector<Row> rows;
+            for (const SubDraw& l : lines)
+                if (l.place == place)
+                    for (const Row& r : rowsOf(l)) rows.push_back(r);
+            if (rows.empty()) continue;
+            const float h = height(rows);
+            float top = place == subs::kPlaceTop ? 0.08f * H : place == subs::kPlaceBottom ? 0.95f * H - h : 0.75f * H;
+            top = std::max(0.0f, std::min(top, float(H) - h));   // (a big size: kept on the screen)
+            drawRows(rows, top);
         }
+        for (const SubDraw& l : lines)
+            if (l.place == subs::kPlaceY) {
+                const std::vector<Row> rows = rowsOf(l);
+                const float h = height(rows);
+                drawRows(rows, std::max(0.0f, std::min(l.y / 100.0f * H - h / 2.0f, float(H) - h)));
+            }
         for (int y = 2; y < H - 2; ++y)   // white letters with a dark edge (2 pixels), as the game's own lines
             for (int x = 2; x < W - 2; ++x) {
                 float edge = 0;
@@ -1827,6 +2146,13 @@ void Hud::drawPause(int selection, int ww, int wh)
             const int y = 0xF8 + 28 * i;
             row(L[size_t(i) + 1], y, i == selection ? 0x23C : 0x19D);
             pauseRects_.push_back({210.0f, float(y - 4), 430.0f, float(y + 24)});
+            if (i == pauseGrey)   // (photomode: a greyed item: its row's letters at 45 %)
+                for (int yy = std::max(0, y - 4); yy < std::min(H, y + 26); ++yy)
+                    for (int x = 0; x < W; ++x)
+                        for (int c = 0; c < 3; ++c) {
+                            uint8_t& v = rgba_[(size_t(yy) * W + size_t(x)) * 4 + size_t(c)];
+                            v = uint8_t(v * 45 / 100);
+                        }
         }
         // relfix2 (user 2026-11-03): the menu's 24 / 32 fonts have no edge of their own (hard to read over bright
         // scenes): a black edge around them as the pause font's own (PAUSED, Continue, Exit): 1 pixel solid, a soft
@@ -2124,6 +2450,52 @@ void Hud::drawLivesCount(const Runtime& rt, int ww, int wh)
     }
 }
 
+// vr4 (user 2026-11-09: "just put it on top of the first row"): VR dual pistols with a magazine each (runtime.h
+// VrLeftGun): the left gun's rounds, one bullet (0x10) a round, as a second row directly above player 1's own (hud_ammo
+// draws those at cells 2 + 2 i, row 0x26: as drawSeatHud lays out player 3's, 0x25 rows higher): the same x places and
+// spacing, one bullet's height (its layout's rows) higher. Above them is the picture (the torches and "1P" are below,
+// players 3 / 4's bands at the top, RELOAD! in the middle rows). When the game shows player 1's rounds: in play
+// (scene state 2) with shots on, player 1 in play; the arcade's sheets through the private layer (no game banks), the
+// PC's own matching sprite with PC models
+void Hud::drawVrLeftRounds(const Runtime& rt, int ww, int wh)
+{
+    port::Mem& mem = rt.mem;
+    if (!rt.vrLeft.on || mem.at<int16_t>(G::game_mode) != 4 || !mem.mapped(kTileRam) || mem.u32(G::ammo_enabled) == 0)
+        return;
+    if (mem.at<uint8_t>(G::scene_state) != 2)
+        return;
+    const Player& pl = mem.at<Player>(G::players, 0u);
+    if (pl.state != 5)
+        return;
+    const bool pc = rt.pcModels && pcSprites_.loaded();
+    if (!pc && rt.pcModels)
+        return;
+    const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
+    const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
+    int rows = 2;   // (the bullet's height in cells, from its layout record; 2 when unreadable)
+    if (const uint32_t lay = mem.u32(0xA6590 + 0x10 * 12 + 8); lay != 0 && mem.mapped(lay))
+        rows = std::clamp(int(mem.at<uint16_t>(lay + 2)), 1, 4);
+    const int y = 0x26 - rows, n = std::min<int>(rt.vrLeft.rounds, rt.pm_on() ? 12 : 6);
+    seatRgba_.assign(size_t(W) * H * 4, 0);
+    bool any = false;
+    if (pc) {
+        if (const int id = kArcadeToPcSprite[0x10])
+            for (int i = 0; i < n; ++i, any = true)
+                pcSprites_.draw(seatRgba_, id, (2 + 2 * i) * 10, y * 10);
+    } else {
+        static PrivLayer l;
+        l.reset();
+        for (int i = 0; i < n; ++i)
+            any = l.put(mem, 0x10, 2 + 2 * i, y) || any;
+        if (any)
+            any = assets::Arcade2D::compose(l.tiles.data(), l.chars.data(), l.pal.data(), true, seatRgba_);
+    }
+    if (!any)
+        return;
+    const float x0 = anchorEdges ? leftEdge(W, H, ww, wh) : 0.0f;   // (widescreen with the corners at the edges: as P1's)
+    upload(seatRgba_, W, H, ww, wh, -x0);
+}
+
 // ---- Survival's and the weapons' HUD (survfix, user 2026-11-04: the weapons version's sprite letters were "horrible
 // and unreadable"; "the same font as the debug score"; docs/weapons.md "The HUD") ----
 //
@@ -2269,6 +2641,61 @@ float Hud::scoreText(const Runtime& rt, std::vector<uint8_t>& dst, int W, int H,
     // the shop; HOTD_SURVIVAL_PC_FONT=1: the PC's, to compare)
     static const bool pcFont = std::getenv("HOTD_SURVIVAL_PC_FONT") != nullptr;
     const bool pc = pcFont && rt.pcModels && pcSprites_.loaded();
+    // jabanner (2026-11-10: Japanese Survival's round banner and weapon lines were tiny, all stacked at the top: a
+    // translation the score font has no letters for went to one small overlay): such a line in the language's font
+    // (lang::fontFor: Noto for CJK / Thai / Arabic / Hebrew / Cyrillic / Greek; Latin-1 too) at the line's own place,
+    // its em 10 s canvas pixels (CJK: about the 8 s cell's height; Latin capitals 7 s, as the font's), shadow and
+    // outline as pasteGlyph's. ASCII lines: the font's glyphs, unchanged
+    if (!scoreFontText(s)) {
+        const render::TtfText* tf = lang::fontFor(s);
+        if (!tf)
+            tf = lang::anyFont();
+        if (!tf || tf->empty())
+            return 0.0f;
+        const float em = 10.0f * float(sc);
+        const float width = tf->width(s, em);
+        if (measure)
+            return width;
+        const float x0 = align == 1 ? x - width / 2.0f : align == 2 ? x - width : x;
+        std::vector<float> cov(size_t(W) * H, 0.0f);
+        int bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+        tf->draw(s, em, x0, y + 0.85f * em, [&](int px, int py, float a) {
+            if (px < 0 || py < 0 || px >= W || py >= H)
+                return;
+            float& c = cov[size_t(py) * W + size_t(px)];
+            c = std::min(1.0f, c + a);
+            bx0 = std::min(bx0, px), by0 = std::min(by0, py), bx1 = std::max(bx1, px), by1 = std::max(by1, py);
+        });
+        if (bx1 >= 0) {
+            const int lo = gGlyphOutline ? -1 : 0, hi = sc;   // (the shadow s pixels down and right; the outline 1 round)
+            for (int Y = std::max(0, by0 + lo); Y <= std::min(H - 1, by1 + hi); ++Y)
+                for (int X = std::max(0, bx0 + lo); X <= std::min(W - 1, bx1 + hi); ++X) {
+                    uint8_t* d = &dst[(size_t(Y) * W + X) * 4];
+                    const float a = cov[size_t(Y) * W + size_t(X)];
+                    if (a > 0.0f) {   // the letter: its colour over the shadow / what was there, by its coverage
+                        for (int c = 0; c < 3; ++c)
+                            d[c] = d[3] == 0 ? rgb[c] : uint8_t(float(rgb[c]) * a + float(d[c]) * (1.0f - a));
+                        d[3] = uint8_t(std::max(float(d[3]), 255.0f * a));
+                        continue;
+                    }
+                    if (d[3] != 0)
+                        continue;   // (the shadow never covers another glyph's pixels)
+                    float sh = 0.0f, ol = 0.0f;
+                    if (X - sc >= 0 && Y - sc >= 0)
+                        sh = cov[size_t(Y - sc) * W + size_t(X - sc)];
+                    if (gGlyphOutline)
+                        for (int j = -1; j <= 1; ++j)
+                            for (int i = -1; i <= 1; ++i)
+                                if (X + i >= 0 && Y + j >= 0 && X + i < W && Y + j < H)
+                                    ol = std::max(ol, cov[size_t(Y + j) * W + size_t(X + i)]);
+                    const float A = std::max(sh * 200.0f, ol * 230.0f);
+                    if (A >= 1.0f)
+                        d[0] = d[1] = d[2] = 0, d[3] = uint8_t(A);
+                }
+        }
+        textFitNote(s, x0, y, width, em, W, H);   // checks1 (--text-fit): past the canvas's edge
+        return width;
+    }
     std::vector<std::pair<const SeatImg*, int>> line;
     int width = 0;
     for (const char c : s) {
@@ -2308,17 +2735,14 @@ void Hud::drawSurvival(const Runtime& rt, int ww, int wh, int scale)
     // grey (what cannot be bought)
     static const uint8_t kWhite[3] = {255, 255, 255}, kGold[3] = {255, 214, 90}, kRed[3] = {255, 70, 50},
                          kGrey[3] = {165, 165, 165}, kSeat[4][3] = {{255, 110, 90}, {120, 170, 255}, {110, 230, 110}, {255, 230, 90}};
-    std::vector<std::string> fallback;
     std::vector<uint8_t> mid(size_t(W) * H * 4, 0);
     bool midAny = false;
     const int big = pc && std::getenv("HOTD_SURVIVAL_PC_FONT") ? 1 : 2;   // (the PC's letters are 1.6 times the arcade's cell)
     auto text = [&](std::vector<uint8_t>& dst, const std::string& s, float x, float y, int sc, int align, const uint8_t* rgb) {
         if (s.empty())
             return 0.0f;
-        if (!scoreFontText(s)) {
-            fallback.push_back(s);
-            return 0.0f;
-        }
+        // (jabanner: a translation the font has no letters for: scoreText draws it in the language's font, in place;
+        // it went to the overlay's one small block at the top)
         midAny = midAny || &dst == &mid;
         return scoreText(rt, dst, W, H, s, x, y, sc, align, rgb, false);
     };
@@ -2523,10 +2947,6 @@ void Hud::drawSurvival(const Runtime& rt, int ww, int wh, int scale)
             upload(img, W, H, ww, wh, left ? -x0 : x0);
         }
     }
-    if (!fallback.empty()) {   // (a translation the font has no letters for)
-        survival_.setText(fallback, std::max(1, scale - 1));
-        survival_.drawAnchored(ww, wh, ww * 0.5f, wh * 0.11f, 0.5f, 0.0f);
-    }
 }
 
 // rel130 (user 2026-11-05: The Typing of the Dead 0 labelled "Experimental / Proof of Concept"): its start notice, as
@@ -2552,6 +2972,107 @@ void Hud::drawTotdNote(const Runtime& rt, int ww, int wh)
     upload(mid, W, H, ww, wh);
 }
 
+#if HOTD_HORDE
+// horde2 (user 2026-11-05: "crowd feedback like the Remake, in the game's own font and colors"; game/horde.h), in the
+// score line's font as Survival's / the weapons' lines (survfix: the readable one): a kill's points rise from where the
+// creature was ("+100" white; with a multiplier "+300" gold, twice the size; gone in 0.8 s, blinking at the end); each
+// seat's chain in its points row (unused in Horde: players 1 / 2 above their weapon line in the bottom corners, 3 / 4
+// under their bands in the top corners) as "12 KILLS X3" (the multiplier gold, from 5 kills); a multi-kill's "3 KILL"
+// at the top centre, over the sky / ceiling, never the middle of the screen
+void Hud::drawHorde(const Runtime& rt, int ww, int wh)
+{
+    const HordeMode& h = rt.horde;
+    if (rt.mem.at<int16_t>(G::game_mode) != 4 || rt.mem.at<uint8_t>(G::scene_state) != 2 || rt.clear.active)
+        return;
+    const bool pc = rt.pcModels && pcSprites_.loaded();
+    if (rt.pcModels && !pc)
+        return;
+    const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
+    const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
+    const float u = pc ? 1.25f : 1.0f;
+    const float cell = 8.0f * u;
+    auto toX = [&](float ax) { return (ax + 248.0f) * u; };
+    auto toY = [&](float ay) { return (192.0f - ay) * u; };
+    static const uint8_t kWhite[3] = {255, 255, 255}, kGold[3] = {255, 214, 90}, kDim[3] = {165, 165, 165};
+    auto word = [](const char* en) {   // (a translation the font has no letters for: the English word)
+        const std::string t = lang::tr(en);
+        return scoreFontText(t) ? t : std::string(en);
+    };
+    std::vector<uint8_t> mid;
+    auto canvas = [&](std::vector<uint8_t>& c) {
+        if (c.empty())
+            c.assign(size_t(W) * H * 4, 0);
+    };
+    for (const HordeMode::Pop& p : h.pops) {
+        if (p.age >= HordeMode::kPopFrames - 10 && (p.age / 3) % 2 == 1)
+            continue;   // (blinks out)
+        canvas(mid);
+        const bool mult = p.points > 100;
+        const int sc = mult ? 2 : 1;
+        scoreText(rt, mid, W, H, "+" + std::to_string(p.points), toX(p.x), toY(p.y + float(p.age) * 0.7f) - 4.0f * float(sc) * u, sc, 1,
+                  mult ? kGold : kWhite, false);
+    }
+    int banner = 0, age = 0;
+    for (int s = 0; s < 4 && s < rt.seat_count(); ++s) {
+        const HordeMode::Chain& c = h.chain[s];
+        if (c.banner > banner || (c.banner == banner && c.banner > 0 && c.bannerAge < age))
+            banner = c.banner, age = c.bannerAge;
+    }
+    if (banner >= 2 && !(age >= HordeMode::kBannerFrames - 15 && (age / 4) % 2 == 1)) {
+        canvas(mid);
+        const int sc = age < 8 ? 3 : 2;   // (a punch: bigger, then settles)
+        const bool four = rt.seat_count() > 2;   // (players 3 / 4's bands in the top corners: one row lower, between them)
+        // qa2 (QA: "4 KILL"): DOUBLE KILL, TRIPLE KILL, then "N KILLS!" (the chain line's word)
+        const std::string bt = banner == 2 ? word("DOUBLE KILL") : banner == 3 ? word("TRIPLE KILL") : std::to_string(banner) + " " + word("KILLS") + "!";
+        scoreText(rt, mid, W, H, bt, toX(0), (four ? 3.0f : 2.0f) * cell - (sc - 2) * 4.0f * u,
+                  sc, 1, kGold, false);
+    }
+    // hordepub (user 2026-11-09: the upgrades for a chapter "announced with the game's own text style"): the reason in gold,
+    // then each seat's upgrade in white, in the score line's font under the banner's row; blinking out at the end
+    if (h.announceAge >= 0 && !(h.announceAge >= HordeMode::kAnnounceFrames - 30 && (h.announceAge / 4) % 2 == 1)) {
+        canvas(mid);
+        std::string got = h.announce[1];
+        for (const char* n : {"QUICK RELOAD", "BIG MAG", "MAX AMMO"})
+            for (size_t at = got.find(n); at != std::string::npos; at = got.find(n, at + 1)) {
+                const std::string t = word(n);
+                got.replace(at, std::strlen(n), t);
+                at += t.size() - 1;
+            }
+        const float row = (rt.seat_count() > 2 ? 5.0f : 4.0f) * cell;
+        scoreText(rt, mid, W, H, word(h.announce[0].c_str()), toX(0), row, 1, 1, kGold, false);
+        scoreText(rt, mid, W, H, got, toX(0), row + 1.5f * cell, 1, 1, kWhite, false);
+    }
+    if (!mid.empty())
+        upload(mid, W, H, ww, wh);
+    // the chains: each seat's points row (as drawSurvival's seat lines: widescreen at the window's edges)
+    const float x0 = anchorEdges ? leftEdge(W, H, ww, wh) : 0.0f;
+    const float lh = 1.5f * cell;
+    const float base = 0x24 * cell - (rt.mem.u32(0x51F42C) == 7 ? lh : 0.0f);
+    for (int s = 0; s < 4 && s < rt.seat_count(); ++s) {
+        const HordeMode::Chain& c = h.chain[s];
+        if (c.kills < 2 || rt.mem.at<Player>(rt.player_rec(s)).state != 5)
+            continue;
+        const bool left = s == 0 || s == 2, top = s >= 2;
+        std::vector<uint8_t> img(size_t(W) * H * 4, 0);
+        const float edge = left ? 2.0f * cell : 0x3D * cell;
+        const float y = top ? 8.0f * cell + lh : base;
+        // the last 1.5 s of the chain's time: grey (it is about to end)
+        const uint8_t* col = c.timer < 90 ? kDim : kWhite;
+        const std::string n = std::to_string(c.kills) + " " + word("KILLS");
+        const std::string m = c.mult >= 2 ? "X" + std::to_string(c.mult) : std::string();
+        const float nw = scoreText(rt, img, W, H, n, 0, 0, 1, 0, col, true);
+        const float mw = scoreText(rt, img, W, H, m, 0, 0, 1, 0, col, true);
+        if (left) {
+            scoreText(rt, img, W, H, n, edge, y, 1, 0, col, false);
+            scoreText(rt, img, W, H, m, edge + nw + cell, y, 1, 0, c.timer < 90 ? kDim : kGold, false);
+        } else {
+            scoreText(rt, img, W, H, m, edge, y, 1, 2, c.timer < 90 ? kDim : kGold, false);
+            scoreText(rt, img, W, H, n, edge - mw - (m.empty() ? 0.0f : cell), y, 1, 2, col, false);
+        }
+        upload(img, W, H, ww, wh, left ? -x0 : x0);
+    }
+}
+#endif
 
 // v1.3.1 (user 2026-11-07 "does rainbow account for p2, p3, p4?"): players 3 / 4's HUD colour: with Rainbow Blood's
 // HUD option the same kind of ramp (player 2's blue texels, shadow .. white-hot core) of the rainbow colour (the
@@ -2590,6 +3111,11 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
     const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
     for (int seat = 2; seat < 4; ++seat) {
         const Player& pl = mem.at<Player>(rt.player_rec(seat));
+        // charsel4 (user 2026-11-09): Rogan / G here keep player 1's / 2's own look (Game::look_seat): that player's
+        // flames, label art and notice colours, no green / yellow ramp. With Rainbow Blood's HUD option the seat's
+        // rainbow as before (it colours every player's HUD)
+        const int look = rt.look_seat(seat);
+        const bool own = look < 2 && !(rainbowBloodSettings().on && rainbowBloodSettings().hud >= 2 && !rt.greyPalette.on);
         if (pl.state != 5 && pl.state != 4 && pl.state != 9)
             continue;
         const bool blinkOn = mem.u32(G::frame_counter) % 0x3C < 0x2D;   // (45 of 60 frames, as the arcade's prompts)
@@ -2710,7 +3236,7 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
             for (int i = 0; i < n; ++i) {
                 pieces.push_back({left ? 4 * i + 6 : 0x34 - 4 * i, 0x2B + dy, 0x14, 1});
                 const uint32_t step = (mem.u32(0xCA6F0 + uint32_t(i) * 4) + mem.u32(G::frame_counter)) / 6 % 7;
-                pieces.push_back({left ? 4 * i + 7 : 0x35 - 4 * i, 0x2A + dy, step + 0xA8u, 1});
+                pieces.push_back({left ? 4 * i + 7 : 0x35 - 4 * i, 0x2A + dy, step + (own && look == 0 ? 0xB7u : 0xA8u), 1});
             }
         }
         // RELOAD! (0x36) blinking while the gun is empty, as hud_ammo_draw (empty +0x3E, lives, not in scene states 3 /
@@ -2788,7 +3314,15 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
                 for (int y = 0; y < H; ++y)
                     for (int x = (y & 1); x < W; x += 2)
                         all.px[(size_t(y) * W + x) * 4 + 3] = 0;
-            if (kind > 0) {
+            if (own && kind == 2 && look == 1) {   // (charsel4: G's notice in player 2's blue, as p2Notice's)
+                Recolour r;
+                r.op = Recolour::Ramp;
+                r.select = Recolour::RedDominant;
+                for (int k = 0; k < 5; ++k)
+                    for (int c = 0; c < 3; ++c)
+                        r.ramp[k][c] = kPlayer2BloodRamp[k][c];
+                recolourRgba(all.px.data(), all.px.size() / 4, r);
+            } else if (kind > 0 && !own) {
                 Recolour r = seatHudRecolour(rt, seat);
                 if (kind == 2)
                     r.select = Recolour::All;
@@ -2797,14 +3331,14 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
             paste(seatRgba_, W, H, all, 0, 0);
         }
         if (label) {   // "3P" / "4P" where players 1 / 2's "1P" / "2P" are (0xCA6D0: x 2 / 0x39)
-            SeatImg& lab = seatLabel_[seat - 2][pc ? 1 : 0];
+            SeatImg& lab = seatLabel_[seat - 2][pc ? 1 : 0][own && look == 0 ? 1 : 0];   // (charsel4: Rogan's from "1P")
             if (lab.px.empty()) {
-                const SeatImg p2 = spriteImg(mem, pc, pcSprites_, 0xF);   // player 2's "2P"
+                const SeatImg p2 = spriteImg(mem, pc, pcSprites_, own && look == 0 ? 0xE : 0xF);   // player 2's "2P" (charsel4: Rogan player 1's "1P")
                 const SeatImg dg = spriteImg(mem, pc, pcSprites_, uint32_t(mem.at<int16_t>(0xCA720 + uint32_t(seat + 1) * 2)));
                 if (!p2.px.empty() && !dg.px.empty()) {
                     // the "P": player 2's label right of the first empty column in its middle third
                     int cut = p2.w / 2;
-                    for (int x = p2.w / 3; x < p2.w * 2 / 3; ++x) {
+                    for (int x = own && look == 0 ? 1 : p2.w / 3; x < p2.w * 2 / 3; ++x) {
                         bool empty = true;
                         for (int y = 0; y < p2.h && empty; ++y)
                             empty = p2.px[(size_t(y) * p2.w + x) * 4 + 3] == 0;
@@ -2852,14 +3386,19 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
                         }
                     }
                     paste(lab.px, lab.w, lab.h, pp, dw + 1, 0);
-                    Recolour r = seatHudRecolour(rt, seat);
-                    r.select = Recolour::All;
-                    recolourRgba(lab.px.data(), lab.px.size() / 4, r);
                 }
             }
             if (!lab.px.empty()) {
+                // the seat's ramp each frame on a copy (smallfix 2026-11-09: the cached label was recoloured once, so
+                // with Rainbow Blood's HUD option 3P / 4P kept one colour while their flames cycled)
+                SeatImg tinted = lab;
+                if (!own) {   // (charsel4: Rogan / G's label as their art is)
+                    Recolour r = seatHudRecolour(rt, seat);
+                    r.select = Recolour::All;
+                    recolourRgba(tinted.px.data(), tinted.px.size() / 4, r);
+                }
                 const int x = left ? 2 * unit : (0x39 + 4) * unit - lab.w;   // its right edge about where "2P"'s is
-                paste(seatRgba_, W, H, lab, x, (0x2A + dy) * unit);
+                paste(seatRgba_, W, H, tinted, x, (0x2A + dy) * unit);
             }
         }
         // widescreen with the corners at the window's edges (display2): players 3 / 4 go with players 1 / 2's sides
@@ -2872,7 +3411,8 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
     // the 3-4 player mode, 1-2 players keep the arcade's look)
     uint32_t spr = 0;
     int nx = 0, ny = 0;
-    if (p2Notice(rt, spr, nx, ny)) {
+    for (int np = 0; np < 2; ++np)   // (charsel4: player 1's too when G sits there, player 2's not when Rogan does: blueNotice)
+    if (p2Notice(rt, np, spr, nx, ny)) {
         {
             SeatImg img;
             img.w = W;
@@ -3002,7 +3542,7 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     // PC models: the PC's own fade (pcFadeDraw), but the Magician's death fade too (issues5, GitHub #55: no PC fade
     // comes there, the picture stayed as it was)
     const int whiteLevel = noWhite ? -1 : rt.pcModels ? rt.paletteWhite() : rt.whiteFade >= 0 ? rt.whiteFade : rt.paletteWhite();
-    if (whiteLevel >= 0 && whiteLevel < 32) {
+    if (whiteLevel >= 0 && whiteLevel < 32 && !vrFades) {   // (vrfade: VR draws it over the whole eye: screenFade)
         // the 496 x 384 screen's shape in original 4:3; widescreen: the window's shape, so the flash fills the whole
         // picture (it only whitened the 4:3 middle, user 2026-10-17)
         const int H = 24, W = widescreen ? std::max(31, int(float(H) * float(areaW(ww, wh)) / float(std::max(wh, 1)) + 0.5f)) : 31;
@@ -3013,8 +3553,8 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
         upload(rgba_, W, H, ww, wh);
     }
     // the cut-scene bars (letterbox_task: 0..0x28 lines of the 384-line arcade screen, top and bottom)
-    static const bool noBars = std::getenv("HOTD_NO_BARS") != nullptr;   // (trailer footage: no cut-scene bars)
-    if (rt.letterbox > 0 && !noBars) {
+    static const bool envNoBars = std::getenv("HOTD_NO_BARS") != nullptr;   // (trailer footage: no cut-scene bars)
+    if (rt.letterbox > 0 && !envNoBars && !noBars) {   // (noBars: vr3, VR world cut-scenes)
         // issues5 (GitHub #58): the bars a solid fill of the window's own rows (letterbox x wh / 384), so they slide a
         // line at a time; they were a text panel (11 px a row + 9, render/overlay.cpp), i.e. in 11 px steps (choppier
         // the lower the resolution)
@@ -3041,13 +3581,26 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     if (rt.pcModels && !pcTried_)
         loadPcSprites();
     const bool paused = pauseSelection >= 0;
-    const std::vector<std::string> subs = paused || noText ? std::vector<std::string>() : subLines(rt);   // lang
-    subHide_ = !subs.empty();
+    const SubPlan subPlanNow = paused ? SubPlan() : subPlan(rt);   // lang, subs (Options > Gameplay > Subtitles)
+    subHide_ = subPlanNow.hide;
     if (paused) {
         // the pause (0x418CC8): no 2D sprites, subtitle or chapter-clear lines
     }
     else if (rt.pcModels && pcSprites_.loaded()) {
         if (pcUnderFrame_ != (long long)rt.frameCount) {   // (not when drawUnder drew it under the 3D)
+            // pcfix (GitHub #53): the staff roll's sheet is the arcade's black right part of the screen (the 3D window narrows
+            // to 8 .. 256 of 496: kind120_letterbox_open_frame); the PC draws only its credit box there, so the 3D showed
+            // around it. Black from the window's right edge to the screen's edge first, the PC's box over it
+            if (endingCard(rt, assets::PcSprites::kWidth, assets::PcSprites::kHeight) == 2) {
+                const int gw = int(std::lround(double(wh) * 496.0 / 384.0));
+                const int x0 = std::min(ww, (ww - gw) / 2 + int(std::lround(double(gw) * 256.0 / 496.0)));
+                gl::Viewport(0, 0, ww, wh);
+                gl::Enable(gl::SCISSOR_TEST);
+                gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                gl::Scissor(x0, 0, ww - x0, wh);
+                gl::Clear(gl::COLOR_BUFFER_BIT);
+                gl::Disable(gl::SCISSOR_TEST);
+            }
             drawPc2D(rt, ww, wh);
             if (const int sides = widescreen && wide != kWidePicture ? endingCard(rt, assets::PcSprites::kWidth, assets::PcSprites::kHeight) : 0)
                 blackSides(ww, wh, 0.0f, sides);   // credits43: the ending's 4:3 cards (the 2D is inside the 4:3 screen)
@@ -3072,11 +3625,17 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
         drawArsenalAmmo(rt, ww, wh);
     if (!paused && !clean && rt.mem.at<uint8_t>(G::max_lives) > 5)   // GitHub #25: "x N" beside the torch
         drawLivesCount(rt, ww, wh);
+    if (!paused && !clean && rt.vrLeft.on)   // vr4: VR dual pistols, a magazine each: the left gun's row of bullets
+        drawVrLeftRounds(rt, ww, wh);
     if (!paused && !clean && rt.boss.shown)   // Boss Mode: the fight's clock (0x418CC8)
         drawBossClock(rt, ww, wh);
     // Survival Mode (game/survival.h): the round line, the banner, the shop; the weapons: the seats' lines
     if (!paused && !clean && (rt.survival.active() || rt.weapons.live))
         drawSurvival(rt, ww, wh, scale);
+#if HOTD_HORDE
+    if (!paused && !clean && rt.horde.on())   // horde2: Horde's score pops, kill chains, multi-kill banner
+        drawHorde(rt, ww, wh);
+#endif
     if (!paused && !clean && totdNote)   // rel130: The Typing of the Dead 0's start notice
         drawTotdNote(rt, ww, wh);
     // the chapter clear (kind 176): its lines appear as the original's sprites do (420, 360, 300, 240 frames left)
@@ -3102,10 +3661,10 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
         clear_.drawAt(ww, wh, ww * 0.5f, wh * 0.45f);
     }
     pcSprites_.setBrown(false);
-    if (!subs.empty())
-        drawSubtitles(subs, ww, wh);
+    if (!subPlanNow.lines.empty())
+        drawSubtitles(subPlanNow.lines, ww, wh);
     subHide_ = false;
-    if (rt.pcModels)
+    if (rt.pcModels && !vrFades)   // (vrfade: VR draws it over the whole eye: screenFade)
         pcFadeDraw(rt.pcFadeLevel(), ww, wh);
     if (paused)
         drawPause(pauseSelection, ww, wh);
@@ -3147,7 +3706,18 @@ void Hud::drawSights(const Runtime& rt, int ww, int wh, const float aim[4][2])
             // player half a cycle (P2) or a quarter (P3 / P4) on, also with Colours: Together, so they stay apart
             static const float kSightPhase[4] = {0.0f, 0.5f, 0.25f, 0.75f};
             sightTintOn_[p] = (rainbowBloodSettings().hud & 1) && rainbowColour(rt, kSightPhase[p], sightTint_[p], true);
-            if (buildSeatSight(p, rt.pcModels, wh))
+            // charsel4: the colours of the look seat (Rogan player 1's, G player 2's in any seat; Game::look_seat): the
+            // sight, the text cross and the CPU tag
+            const int look = rt.look_seat(p);
+            if (look >= 0 && look < 4 && look != tagLook_[p]) {
+                tagLook_[p] = look;
+                const uint8_t* c = kPlayerRgb[look];
+                cpuTag_[p].setStyle(0, c[0], c[1], c[2]);
+                cpuTag_[p].setText({"CPU"}, 1);
+                cross_[p].setStyle(0, c[0], c[1], c[2]);
+                cross_[p].setText({"  |  ", "--+--", "  |  "}, 2);
+            }
+            if (buildSeatSight(p, rt.pcModels, wh, look))
                 drawSight(p, ww, wh, aim[p][0], aim[p][1]);
             else
                 cross_[p].drawAt(ww, wh, aim[p][0], aim[p][1]);
@@ -3278,7 +3848,7 @@ bool Hud::vrSight(const Runtime& rt, int seat, int wh, unsigned& tex, float& asp
     if (!showSights || game::sightStyleKept(sights[seat].style) == game::kSightOff)
         return false;   // gunfb: no crosshair
     const int32_t st = rt.mem.at<Player>(rt.player_rec(seat)).state;
-    if ((st != 5 && st != 8) || !buildSeatSight(seat, rt.pcModels, wh))
+    if ((st != 5 && st != 8) || !buildSeatSight(seat, rt.pcModels, wh, rt.look_seat(seat)))
         return false;
     tex = seatTex_[seat];
     aspect = seatSprite_[seat] ? float(seatW_[seat]) / float(std::max(1, seatH_[seat]))
@@ -3339,8 +3909,19 @@ out vec4 oColor;
 uniform sampler2D uTex;
 uniform float uAlpha;
 uniform float uShadow;
+uniform float uTintOn;   // smallfix2: Rainbow Blood: the layers' reds recolored to uTint (0..255), as Frontend::tint on the CPU
+uniform vec3 uTint;
 void main() {
     vec4 t = texture(uTex, vUV);
+    if (uTintOn > 0.5 && t.a > 0.0) {
+        vec3 c = t.rgb / t.a * 255.0;   // (straight color)
+        float wh = min(c.g, c.b);
+        float amt = max(0.0, c.r - wh) / 160.0;
+        // only the reds (green and blue alike): the key icons, pictures and other colors stay as drawn
+        float w = 1.0 - smoothstep(14.0, 40.0, abs(c.g - c.b));
+        vec3 r = clamp(uTint * amt + wh, 0.0, 255.0);
+        t.rgb = mix(c, r, w) / 255.0 * t.a;
+    }
     oColor = mix(t, vec4(0.0, 0.0, 0.0, t.a), uShadow) * uAlpha;
 }
 )";
@@ -3491,6 +4072,7 @@ void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
         uBgAlpha_ = gl::GetUniformLocation(bgProg_, "uAlpha");
         uFgRect_ = gl::GetUniformLocation(fgProg_, "uRect"), uFgAlpha_ = gl::GetUniformLocation(fgProg_, "uAlpha");
         uFgShadow_ = gl::GetUniformLocation(fgProg_, "uShadow");
+        uFgTintOn_ = gl::GetUniformLocation(fgProg_, "uTintOn"), uFgTint_ = gl::GetUniformLocation(fgProg_, "uTint");
         gl::GenTextures(1, &bgTex_);
         // compat (2026-10-29, NVIDIA's debug output: "texture object .. does not have a defined base level", every frame
         // of the dark fill while the live attract loads): a 1x1 black picture until a source is uploaded (the dark fill
@@ -3499,6 +4081,7 @@ void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
             static const uint8_t black[4] = {0, 0, 0, 255};
             gl::BindTexture(gl::TEXTURE_2D, bgTex_);
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
+            gl::texTag("remake black");
             gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, 1, 1, 0, gl::RGBA, gl::UNSIGNED_BYTE, black);
             texParams(false);
         }
@@ -3519,6 +4102,7 @@ void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
     gl::BindTexture(gl::TEXTURE_2D, L.tex ? L.tex : bgTex_);
     if (!L.tex && L.src && (L.srcGen != bgGen_ || L.src != bgSrc_ || L.sw != bgW_ || L.sh != bgH_)) {
         bgGen_ = L.srcGen, bgSrc_ = L.src, bgW_ = L.sw, bgH_ = L.sh;
+        gl::texTag("remake backdrop");
         if (L.grey)
             gl::TexImage2D(gl::TEXTURE_2D, 0, gl::R8, L.sw, L.sh, 0, gl::RED, gl::UNSIGNED_BYTE, L.src);
         else
@@ -3567,6 +4151,7 @@ void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
     auto upload = [&](unsigned tex, const std::vector<uint8_t>& rgba, int w, int h) {
         premultiply(rgba, size_t(w) * size_t(h), premul_, false);
         gl::BindTexture(gl::TEXTURE_2D, tex);
+        gl::texTag("remake layer");   // (blood, widgets, gallery, focus parts)
         gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, w, h, 0, gl::RGBA, gl::UNSIGNED_BYTE, premul_.data());
         gl::GenerateMipmap(gl::TEXTURE_2D);   // (a window smaller than the layer: smooth, not shimmering)
         texParams(true);
@@ -3616,6 +4201,8 @@ void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
     gl::BlendFunc(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);   // (premultiplied)
     gl::UseProgram(fgProg_);
     gl::Uniform1f(uFgShadow_, 0.0f);   // (menublocks: not the hand's shadow, whatever was left)
+    gl::Uniform1f(uFgTintOn_, L.tintOn ? 1.0f : 0.0f);   // (smallfix2: Rainbow Blood: the layers tinted here)
+    gl::Uniform3f(uFgTint_, L.tintRgb[0], L.tintRgb[1], L.tintRgb[2]);
     rect(uFgRect_, x0, y0, pw, ph);
     // misc18: a whole-picture layer drawn scissored to its tiles with pixels and their neighbours within the filter's
     // reach (2 texels magnified, more for the mip levels when smaller); the scissors cut the window along the same tile
@@ -3711,12 +4298,14 @@ void Hud::drawRemake(const Frontend::RemakeLayers& L, int ww, int wh)
         }
     }
     // the hand
+    gl::Uniform1f(uFgTintOn_, 0.0f);   // (the hand as it is)
     if (L.hand) {
         gl::BindTexture(gl::TEXTURE_2D, handTex_);
         if (L.handId != handId_) {
             handId_ = L.handId;
             std::vector<uint8_t> pm;
             premultiply(*L.hand, size_t(L.hiw) * size_t(L.hih), pm, true);
+            gl::texTag("remake hand");
             gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, L.hiw, L.hih, 0, gl::RGBA, gl::UNSIGNED_BYTE, pm.data());
             texParams(false);
             remakeUploadBytes += size_t(L.hiw) * size_t(L.hih) * 4;

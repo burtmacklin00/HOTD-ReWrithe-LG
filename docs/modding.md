@@ -2,8 +2,8 @@
 
 A mod is a folder with a small text file in it. You switch mods on and off, set their order and change their settings
 in the game: **Options > Mods** (both menu styles). No programming, no rebuild. This page explains the folder, the
-`mod.ini` file, the kinds of mod there are today (texture packs and the built-in Ragdoll, Rainbow Blood and Big Head
-mods), how to make your own
+`mod.ini` file, the kinds of mod there are today (texture packs, model packs and the built-in Ragdoll, Rainbow Blood
+and Big Head mods), how to make your own
 and how to share it.
 
 Mods only change **how the game looks**. They never change how it plays: the scores, the high scores, online co-op and
@@ -42,7 +42,7 @@ name = My Mod                 ; the name in the Mods list (up to ~22 letters sho
 author = you
 version = 1
 description = One line: what it does (the help line under the list)
-type = textures               ; textures (a texture pack: the default), or a built-in mod: ragdoll, rainbowblood, bighead
+type = textures               ; textures (a texture pack: the default), models (a model pack), or a built-in mod: ragdoll, rainbowblood, bighead
 default = on                  ; on / off: whether a new mod starts switched on (until the player switches it)
 models = both                 ; texture packs: arcade / pc / both, the model source the pictures are for
 depth = auto                  ; auto / sort / buffer: how this mod's models and pictures hide each other (below)
@@ -62,7 +62,7 @@ A `;` after a value (with a space before it) starts a comment too.
 |---|---|
 | `name`, `author`, `version` | Shown in the Mods list and its help line |
 | `description` | The help line when the mod's row is lit |
-| `type` | `textures`: a texture pack (pictures, models, colour rules). `ragdoll`, `rainbowblood`, `bighead`: the built-in Ragdoll, Rainbow Blood and Big Head mods (their code is in the game; the folder gives them their texts and settings) |
+| `type` | `textures`: a texture pack (pictures, models, colour rules). `models`: a model pack (the same kind, its `[model]` sections: "Model packs" below; its Mods row says Model pack). `ragdoll`, `rainbowblood`, `bighead`, `hermithead`: the built-in Ragdoll, Rainbow Blood, Big Head and Hermit Fly Head Mods (their code is in the game; the folder gives them their texts and settings) |
 | `default` | `off`: the mod starts switched off (good for a mod that changes a lot). Default `on` |
 | `models` | Texture packs: which model source the pictures are for |
 | `depth` | How the models this mod draws hide each other and the rest. `auto` (default): your custom models (OBJ) per pixel, models that only get your pictures as the game draws them (Arcade Sort). `sort`: the arcade's polygon sort (whole polygons in order; good for flat, layered arcade-style art). `buffer`: a per-pixel depth buffer (good for new, detailed shapes that cross other polygons). Only the models your mod changes are affected |
@@ -116,6 +116,9 @@ no arcade sort keys, so `sort` makes no difference to them: their depth always c
 
 A texture pack (`type = textures`, the default) replaces pictures and models and recolours textures: the full guide is
 [docs/mods.md](mods.md) (exporting your own textures, texture IDs, HD pictures, colour rules, custom OBJ models).
+
+Any mod can also carry subtitle files (`<mod>\subtitles\<language code>.txt`): the cut-scene captions' text, timing,
+size and place while the mod is On ([subtitles.md](subtitles.md)).
 
 ## The Ragdoll mod (built in)
 
@@ -297,6 +300,151 @@ polygon palette colour (entry 583) that it sets itself: blue (0xFEC0), then red 
 
 Arcade models: the palette entry per afterimage; PC models: their texels in that colour, at their own brightness.
 
+## The Hermit Fly Head Mod (built in)
+
+User 2026-11-09. The Hermit (the Chapter 3 boss) wears the game's own unused second head: model `boss31_kao` 0x1AC6
+in the arcade's chapter 3 models, two big glowing red eyes and a scaly top (docs/cut_content.md), in place of the
+eight-eyed head it uses (`boss3_kao` 0x1AD9). Off by default: Options > Mods > **Hermit Fly Head Mod: On** (or
+`--mod hermit-head`). No settings.
+
+- Nothing is made or edited: the head is the game's own model with its own textures (texture area 11, the Hermit's)
+  and the colour rows the fight sets. Both heads have the same size and pivot, so it sits where the old one did; the
+  fangs (`boss3_syo*`), the hit flash and Big Head work on it as on the old head.
+- **Arcade models only.** The 1998 PC files have no 0x1AC6 (and no other second head), so with the PC models the
+  Hermit keeps the PC's head; the mod changes nothing there.
+- Draw only: `GameView::addModel` draws 0x1AC6 for 0x1AD9 when the mod is on and the model source has it. Hit
+  detection, the weak point, the scores and online co-op are the game's own.
+
+## Model packs
+
+A model pack draws a game model as another mesh: a prop, a piece of the world, or one body part of a creature. It is a
+texture pack with `[model]` sections (`type = models` says so; `type = textures` works the same), so it follows the
+Mods page's On / Off and load order like the texture packs, and its change applies the next time a chapter starts.
+An example comes with the game, off by default: `data\mods\example-model\` (**Example: Model Pack**). It changes a
+dead researcher in the Chapter 1 courtyard (model `5e6`, the one lying farther along the path) into the other one's
+pose, turned a quarter.
+
+**Visual only.** The renderer draws the new mesh where the game draws the model. The game's hit areas, collision and
+logic are unchanged: a shot hits exactly what it hit before, the scores, the high scores and online co-op are the same
+with the pack on or off, and in online co-op each PC may use its own packs (nothing is sent or compared). Tested: the
+Chapter 1 test run ends on the same frame with the same score with the example on and off, with both model sets,
+headless and rendered (see "For developers").
+
+### Try the example
+
+1. Options > **Mods** > **Example: Model Pack: On** (or start with `--mod example-model`).
+2. Start Chapter 1. After the first zombies on the courtyard path, look at the two dead researchers on the grass: the
+   left one lies in another pose.
+
+### mod.ini
+
+```ini
+[mod]
+name = My Model Pack
+type = models
+default = off
+models = both                 ; the model sets this pack is for (arcade / pc / both)
+
+[model]                       ; one section per replacement ([model <any name>] works too)
+id = 5e6                      ; the model replaced: its object ID in hex (0x optional)
+file = models\crate.obj       ; .obj, .gltf or .glb inside the mod's folder, or game:<object ID>
+scale = 1                     ; one number, or x, y, z
+rotation = 0, 90, 0           ; degrees about x, then y, then z
+offset = 0, 0, 0              ; x, y, z, in the model's own units
+models = both                 ; arcade / pc / both: which Models setting this section is for
+```
+
+| Key | Meaning |
+|---|---|
+| `id` | The model to replace, by object ID in hex (`5e6`, `0x94F`). Required |
+| `file` | The new mesh: a file in the mod's folder (`.obj` with its `.mtl` and PNGs, `.gltf` with its `.bin` and PNGs, or `.glb`), or `game:<id>`: another model of the same chapter from the player's own game files. Required. A file outside the mod's folder is refused |
+| `scale`, `rotation`, `offset` | Applied in this order, in the model's own space (x right, y up, z forward). A negative scale mirrors the mesh. Default: no change |
+| `models` | `arcade`, `pc` or `both` (default): which Models setting the section is for, inside the pack's own `models =` |
+
+The mesh is drawn in the model's own space: the same origin and units as the original, so a model exported with
+`--export-models` lines up without any transform. A model the chapter does not have is skipped. When two packs replace
+the same model, the higher one on the Mods page wins; inside one pack, the first `[model]` for an ID wins, then the
+old way of naming a file `models\<label>_o<id>.obj` (docs/mods.md: still read, as an entry with no transform).
+
+**Materials.** As with OBJ models in texture packs (docs/mods.md "Custom models"): a material named as the export names
+it (`tex_<texture ID>-c<entry>` on the arcade, `page_p<page>` on the PC) draws the game's own texture with the game's
+colors and lighting; any other material draws its picture (OBJ `map_Kd`, glTF `baseColorTexture`, PNG only), or its
+color (OBJ `Kd`, glTF `baseColorFactor`). `game:<id>` keeps that model's own textures. Faces of a file are drawn from
+both sides; normals are made per face.
+
+**glTF 2.0.** `.gltf` (JSON, with a `.bin` file or `data:` URIs) or `.glb` (binary). The default scene's meshes are
+read with every node's transform (matrix or translation / rotation / scale); triangles, strips and fans; positions
+and the first texture coordinates; pictures as files, `data:` URIs or inside the `.glb`. Not used: skins and morph
+targets (a skinned mesh comes in its bind pose, with a message), normals (made per face), JPEG pictures (the
+material's color instead), sparse accessors (the file is refused). glTF's axes are taken as they are, the same as an
+OBJ's, so a model exported to OBJ, imported into Blender and exported again as glTF stays where it was.
+
+**Broken files.** A file that cannot be read (a bad face index, a truncated or malformed glTF, a buffer outside its
+file, more than a million triangles, a file over 64 MB) leaves its model as the game draws
+it and writes one line to the log (`mods: ... (model 5E6 left as it is)`). A `[model]` without `id` or `file`, or with
+a missing file, is left out with its mod.ini line number. Nothing stops the game.
+
+### Which IDs (arcade and PC models)
+
+The arcade and the PC models mostly use the same object IDs (the props, the world pieces, the creatures' parts: the
+example's `5e6` and `5e4` are the same in both). Some differ: the opening's car is `94f` (body) / `950` (door) /
+`953` (tire) in the arcade models but `1d36` (body) / `1d37` (door) in the PC models, and some models exist in only
+one set (the arcade's unused Hermit head `1ac6`). Write one `[model]` per set with `models = arcade` / `models = pc`
+when the IDs differ.
+
+How to find an ID:
+
+- `hotd --export-models <folder> --model-ids <id,...> [--models pc]` writes each model as `<label>_o<id>.obj`
+  (arcade labels are the game's own names, e.g. `sitai_ken_b_o05e6.obj`), a starting point for your own mesh.
+- `HOTD_IDSHOT=1 hotd --render --shot-at <frame> --shot-dir <folder> --frames <frame + 10>` (advanced, headless) lists
+  every model drawn on that frame (`render: id ... arcade 0x5e6 (sitai_ken_b) placement 0x5e6 at -150.0 -25.0 -1300.0`)
+  and writes `ids_f<frame>.png`, each model in its own flat color.
+
+### Making one from your own files
+
+The game's files are not shipped and must not be shared, so a pack either uses `game:<id>` (the mesh comes from each
+player's own files when the chapter loads, as the example does) or holds only what you made:
+
+1. `hotd --export-models C:\work\export --model-ids 5e4` (add `--models pc` for the PC models).
+2. Edit the `.obj` in any 3D tool (or export it as glTF). Keep it in the same space.
+3. Put your file in `data\mods\my-pack\models\` and point `file =` at it.
+4. Share only meshes and pictures you made, never the exported ones as they are.
+
+### Creatures and characters
+
+Every creature, person and boss is built from rigid **body parts**, each its own model ID, posed by the game's
+skeleton (zombie head `781`, the Chariot's parts, Sophie's parts...). A part can be replaced like a prop: give the new
+mesh in that part's own space (`--export-models` gives it: the joint at the origin, the part's own axes) and the game's
+skeleton moves it. The pivots, the part tree, the hit areas and the damage models (the `_dam` parts the game swaps in
+when a part is shot) stay the game's; replace the damage parts too if you want them to match.
+
+### Skinned characters (not yet: the design)
+
+One skinned mesh for a whole character (a glTF with a skin: joints and weights) is not drawn yet; such a file comes in
+its bind pose on the one part it replaces. What it needs, written down before anything ships half-working:
+
+- **What already maps.** Tenome's Typing of the Dead EX patch turns HOTD PC characters into packs per body part: each
+  HOTD part re-oriented onto the target skeleton's bone and stretched to its length (rigid parts, no weights). Our game
+  already poses the HOTD parts with HOTD's own skeleton, so that approach is exactly our per-part replacement above: it
+  needs no retargeting here.
+- **Joints.** A glTF skin's joints would be matched to the game's parts by name in mod.ini (`joint.<glTF joint> =
+  <part model ID>`), with the skeleton families the game has: 18-joint zombies, 20-joint humans (coat tails), the dogs
+  (20 parts), Ebitan (10), the 11-part small creatures, the bosses' own trees (Chariot, Hangedman, Hermit, Magician).
+  The part roles (head, chest, hips, limbs) come from the game's part role table (0x1184E0 on the arcade; the PC packs
+  it in 5 bytes), as the Big Head mod uses them.
+- **Bind pose.** The inverse bind matrices would be checked against the game's rest pose of that family (each part's
+  offset from its parent, from the skeleton data); a mismatch beyond a small tolerance refuses the file with a message.
+- **Drawing.** Each frame, the parts' matrices the game draws (`DrawModel::part` and its matrix in the draw list) give
+  the joint matrices; the renderer skins the mesh (4 weights per vertex) and hides the original parts of that body.
+  Shadows: the game's per-part shadows stay, or the skinned mesh draws its own flattened shadow.
+- **What it cannot follow.** Dismemberment (a severed head or arm becomes its own thrown model: the skinned mesh would
+  need the limb's vertices hidden and a separate piece thrown), the damage parts swapped per hit, the heads the game
+  turns at run time (Tenome's notes: the head matrix is replaced by a look-at, its mesh faces the other way), the
+  Ragdoll and Big Head mods' part edits (they would have to act on the joint matrices instead). Each of these needs its
+  own rule before skinned characters are shipped.
+- **Determinism.** All of this is in the renderer, after the game's frame, as the Ragdoll mod is: the hit areas stay the
+  parts', so the scores and online co-op cannot change.
+
 ## Custom crosshairs
 
 Your own crosshair pictures: put PNG files in the **crosshairs** folder in the settings folder (next to `launcher.ini`;
@@ -321,6 +469,8 @@ Then pick yours on the Crosshair row ("Custom: <name>").
   the drawn world's (a body sliding off a ledge drops at most 8 units; without a window: flat at the creature's
   height).
 - Texture packs: see the limits in [docs/mods.md](mods.md) (2D sprites not covered, the atlas size).
+- Model packs: one skinned mesh for a whole character is not drawn yet (one mesh per body part works); glTF skins,
+  morph targets, normals and JPEG pictures are not used; `game:<id>` takes a model of the same chapter only.
 
 ## Sharing a mod
 
@@ -336,6 +486,20 @@ the game's files (`--export-textures`) as they are, nor the game's files themsel
   `modDepthFor`: a custom model's pack, or the pack whose picture / colour rule a model's polygons draw); the renderer
   copies it to `GpuStage::modelDepth` and `Renderer::draw` sets each such item's `uKeyless` / `uHybrid` (render/renderer.cpp).
   `hotd --mods-test` checks it (`modDepthTest`: a small stage with a custom model, depth auto / buffer / sort).
+- Model packs (modelpacks, 2026-11-09): `findModPacks` reads `[model]` sections into `ModPack::modelRepls`
+  (`parseModelLine`; a section without id / file, or with a missing file, is left out with its line number).
+  `TexturePacks::build` turns each into `StageReplacements::models[id]` (the same path as the `models\<label>_o<id>.obj`
+  files, which act as entries without a transform): `readModelFile` (OBJ: `readObj`; glTF / GLB:
+  `assets/model_import.cpp` `readGltf`, our own JSON / glTF reader), scale, `importRotation`, offset; `game:<id>`
+  copies that model's meshes (preferred variant) with their own textures. The renderer draws a replaced model's
+  vertices instead of its meshes (render/renderer.cpp `upload`, `replModels`); nothing in the game reads them.
+  `hotd --mods-test`'s `modelPackTest` (9 checks): OBJ / glTF (data: URI and .bin) / GLB and the transform on a small
+  stage, `game:<id>`, `models = arcade` skipped on the PC models, and 13 malformed files / lines that must leave their
+  model alone (bad face index, bad vertex, empty OBJ, truncated / non-JSON / version 1 glTF, an accessor past its
+  bufferView, a buffer outside the folder, a broken GLB chunk, random bytes, a missing `game:` model, a file outside
+  the folder, a missing file). Determinism: the Chapter 1 runs (`--frames 40000 --autofire --mute --lives-kept 1`,
+  PC and `--models arcade`) give the same runtime and score with `--mod example-model` as with `--no-mods`, headless
+  and with `--render`. Pictures: `--render --shot-at 900` with `--mod example-model` / `--no-mods` (both model sets).
 - `src/main.cpp` `applyMods`: the On list (launcher.ini / `--mod`), texture packs to the renderer (`texturePacks()`), the
   Ragdoll mod's on / off and settings to `game::ragdollConfigure`. `modsRows` / `modSettingsPage` build the Mods page
   and each mod's Settings page (`game::Frontend::Extra` rows: both menu styles draw them, text through the lang lookup).

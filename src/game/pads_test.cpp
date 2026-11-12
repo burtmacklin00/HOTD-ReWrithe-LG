@@ -78,6 +78,7 @@ struct PadTest::Impl {
     VPad d, e;      // 4P (601-630): players 3 / 4's Xbox pads
     uint32_t shots4[2] = {}, reloads4[2] = {};
     float mark[2][2] = {};
+    int evdevSeen = 0;   // (linuxmice, 596: the mice counted before the switch)
     int rumbles0 = 0;
     int fixChecks = 0;   // padfix: the fix section's checks so far
     float ind[kIndTrials] = {};   // sens36: each independence trial's x motion
@@ -347,9 +348,41 @@ void PadTest::before(int i, Ctx& c)
         c.lightGuns.configure(c.cfg);
         c.lightGuns.reset();
     }
+    // linuxmice (597-600, GitHub #67): Linux's evdev events (recorded input_event type / code / value) for an absolute
+    // gun 9201 (ABS 0..1000 x 0..500: player 2) and a mouse 9202 (REL: player 1), parsed on every platform
+    auto ev = [&](uint64_t d, unsigned type, unsigned code, int value) { c.lightGuns.evdevEvent(d, type, code, value); };
+    if (i == 596) {   // (after 596's reset: P1 Mouse, P2 Mouse 2) two mice moved: counted only, then one crosshair each
+        markGuns();
+        ev(9301, 2, 0, 5), ev(9301, 0, 0, 0), ev(9302, 2, 1, 7), ev(9302, 0, 0, 0);
+        m.evdevSeen = c.lightGuns.evdevMiceSeen();
+        c.lightGuns.evdevMiceOn();
+    }
+    if (i == 597) {
+        c.cfg.p2Input = 3;
+        c.lightGuns.configure(c.cfg);
+        c.lightGuns.reset();
+        c.lightGuns.evdevRange(9201, 0, 1000, 0, 500);
+        ev(9201, 3, 0, 250), ev(9201, 3, 1, 250), ev(9201, 0, 0, 0);   // ABS_X 250, ABS_Y 250, SYN_REPORT
+    }
+    if (i == 598) {
+        markGuns();
+        ev(9202, 2, 0, 12), ev(9202, 2, 0, 8), ev(9202, 2, 1, -6), ev(9202, 0, 0, 0);   // REL_X 12 + 8, REL_Y -6: one packet
+        ev(9202, 2, 0, 50), ev(9202, 0, 3, 0), ev(9202, 2, 0, 70), ev(9202, 0, 0, 0);   // SYN_DROPPED: up to the report skipped
+    }
+    if (i == 599) {
+        ev(9201, 1, 0x110, 1), ev(9201, 0, 0, 0), ev(9201, 1, 0x110, 0), ev(9201, 0, 0, 0);   // BTN_LEFT down / up
+        ev(9201, 1, 0x110, 2), ev(9201, 0, 0, 0);   // (an auto-repeat: nothing)
+    }
+    if (i == 600) {   // pointed off the screen (0, 0 as several guns report it), the trigger: a reload
+        ev(9201, 3, 0, 0), ev(9201, 3, 1, 0), ev(9201, 1, 0x110, 1), ev(9201, 0, 0, 0);
+        ev(9201, 1, 0x110, 0), ev(9201, 0, 0, 0);
+    }
     // 601-630: the 4-seat section (docs/coop4.md): the 4P mode on in this game, players 3 / 4 on two more pads (their
     // light bars green / yellow), their start buttons join, their triggers shoot, a left trigger reloads; then off
     if (i == 601) {
+        c.cfg.p2Input = 0;   // (linuxmice: player 2's evdev gun off again)
+        c.lightGuns.configure(c.cfg);
+        c.lightGuns.reset();
         c.rt.coop4_enable();
         c.cfg.players = 4;
         c.cfg.p3Input = c.cfg.p4Input = 2;
@@ -612,6 +645,17 @@ void PadTest::after(int i, Ctx& c)
         c.expect(c.lightGuns.deviceOf(0) == 9101, "Assign: gun A moves on to the free player 1");
         c.counts(1, 0, 0, 0, 0, 0, "Assign: gun A's trigger shoots for player 1");
     }
+    if (i == 596) {
+        std::snprintf(b, sizeof b, "evdev: P1 Mouse / P2 Mouse 2: two mice counted (%d), then the first used = P1 (%llu), "
+                      "the second = P2 (%llu)", m.evdevSeen, (unsigned long long)c.lightGuns.deviceOf(0),
+                      (unsigned long long)c.lightGuns.deviceOf(1));
+        c.expect(m.evdevSeen == 2 && c.lightGuns.active() && c.lightGuns.deviceOf(0) == 9301 && c.lightGuns.deviceOf(1) == 9302, b);
+        moved(0, 0, 0, 0.01f, "evdev: the mice's motion before the switch: no crosshair moved by it");
+    }
+    if (i == 597) at(1, 0.25f * lw, 0.5f * lh, 0.01f, "evdev: the absolute gun's ABS_X / ABS_Y in its range: player 2 there");
+    if (i == 598) moved(0, 20, -6, 0.01f, "evdev: the mouse's REL_X / REL_Y summed per packet, a dropped packet skipped");
+    if (i == 599) c.counts(0, 1, 0, 0, 0, 0, "evdev: the gun's BTN_LEFT = one shot (its auto-repeat none)");
+    if (i == 600) c.counts(0, 0, 0, 1, 0, 0, "evdev: the gun at (0, 0) (off the screen): the trigger = reload");
     // the 4-seat section (before: 601-625)
     auto seat = [&](int p) { return int32_t(c.rt.mem.u32(c.rt.player_rec(p))); };
     if (i == 603) {

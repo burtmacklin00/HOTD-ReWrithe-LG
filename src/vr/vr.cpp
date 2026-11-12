@@ -43,10 +43,18 @@ bool Settings::load(const std::string& path)
         const size_t eq = line.find('=');
         if (eq == std::string::npos)
             continue;
-        const std::string k = trim(line.substr(0, eq)), v = trim(line.substr(eq + 1));
+        set(trim(line.substr(0, eq)), trim(line.substr(eq + 1)));
+    }
+    return true;
+}
+
+void Settings::set(const std::string& k, const std::string& v)
+{
+    {
         const float f = float(std::atof(v.c_str()));
         if (k == "follow") follow = v == "level" ? 1 : v == "follow" ? 0 : std::atoi(v.c_str());
         else if (k == "vignette") vignette = truthy(v);
+        else if (k == "quest_sim") questSim = truthy(v);   // (questsim: test-only)
         else if (k == "vignette_strength") vignetteStrength = f;
         else if (k == "vignette_turn") vignetteTurn = f;
         else if (k == "units_per_metre") unitsPerMetre = f > 0 ? f : unitsPerMetre;
@@ -54,25 +62,53 @@ bool Settings::load(const std::string& path)
         else if (k == "panel_depth_test") panelDepthTest = truthy(v);
         else if (k == "aim_distance") aimDistance = f > 0.5f ? f : aimDistance;
         else if (k == "laser") laser = truthy(v);
+        else if (k == "crosshair") crosshair = truthy(v);   // vrsight
         else if (k == "dual_pistols") dualPistols = truthy(v);
         else if (k == "crosshair_degrees") crosshairDegrees = f > 0 ? f : crosshairDegrees;
         else if (k == "reload_down") reloadDown = truthy(v);
         else if (k == "reload_pitch") reloadPitch = f;
-        else if (k == "left_hand") leftHand = truthy(v);
+        else if (k == "offscreen_reload") offscreenReload = v == "any" ? 1 : v == "below" ? 0 : std::clamp(std::atoi(v.c_str()), 0, 1);   // vr4
+        else if (k == "hud_distance") hudDistance = v == "fixed" ? 0 : v == "adaptive" ? 1 : std::clamp(std::atoi(v.c_str()), 0, 1);
+        else if (k == "aim_depth") aimDepth = v == "depth" ? 1 : v == "cpu" ? 2 : v == "fixed" ? 3 : v == "auto" ? 0 : std::clamp(std::atoi(v.c_str()), 0, 3);
+        else if (k == "shot_flash_at_hit") shotFlashAtHit = truthy(v);
+        else if (k == "refresh_rate") refreshRate = v == "auto" ? 0 : std::clamp(std::atoi(v.c_str()), 0, 240);
+        else if (k == "sustained_performance") sustainedPerformance = truthy(v);
+        else if (k == "auto_recentre") autoRecentre = v == "off" ? 0.0f : std::clamp(f, 0.0f, 600.0f);
+        else if (k == "hud_min_distance") hudMinDistance = std::clamp(f > 0 ? f : 0.7f, 0.3f, 3.0f);
+        else if (k == "shake_reload") shakeReload = truthy(v);
+        else if (k == "shake_sensitivity") shakeSensitivity = std::clamp(f > 0 ? f : 2.0f, 0.5f, 12.0f);   // (vrgest: g, was m/s)
+        else if (k == "flick_reload") flickReload = truthy(v);   // vrflick (docs/vr.md "Wrist flick to reload")
+        else if (k == "flick_sensitivity") flickSensitivity = std::clamp(f > 0 ? f : 300.0f, 150.0f, 1500.0f);
+        else if (k == "around") around = truthy(v);   // vr3 (docs/vr.md "All around you")
+        else if (k == "cutscenes") cutscenes = v == "cinema" ? 1 : v == "world" ? 0 : std::clamp(std::atoi(v.c_str()), 0, 1);
+        else if (k == "view") view = v == "screen" ? 1 : v == "immersive" ? 0 : std::clamp(std::atoi(v.c_str()), 0, 1);   // vrcomfort
+        else if (k == "cinema_distance") cinemaDistance = f > 0.5f ? f : cinemaDistance;
+        else if (k == "cinema_width") cinemaWidth = f > 0.3f ? f : cinemaWidth;
+        else if (k == "desktop_view")   // vrnull (docs/vr.md "The desktop window")
+            desktopView = v == "eye" ? 0 : v == "both" ? 1 : v == "spectator" ? 2 : std::clamp(std::atoi(v.c_str()), 0, 2);
+        else if (k == "left_hand")leftHand = truthy(v);
         else if (k == "gun_offset") three(v, gunOffset);
         else if (k == "gun_rotate") three(v, gunRotate);
         else if (k == "left_hand_offset") three(v, leftOffset);
         else if (k == "left_hand_rotate") three(v, leftRotate);
         else if (k == "ipd") ipd = f > 0.03f && f < 0.09f ? f : ipd;
-        else if (k == "menu_panel") menuPanel = v == "auto" ? menuPanel : truthy(v);   // quest (docs/quest.md)
+        else if (k == "menu_panel") {   // quest (docs/quest.md); vrflow: auto = on with a headset (main.cpp vrStart)
+            menuPanelIni = v == "auto" ? -1 : truthy(v) ? 1 : 0;
+            menuPanel = v == "auto" ? menuPanel : truthy(v);
+        }
         else if (k == "menu_distance") menuDistance = f > 0.5f ? f : menuDistance;
         else if (k == "menu_width") menuWidth = f > 0.3f ? f : menuWidth;
         else if (k == "resolution_scale") resolutionScale = std::clamp(f > 0 ? f : 1.0f, 0.5f, 1.5f);
         else if (k == "hud_lines") hudLines = std::clamp(std::atoi(v.c_str()), 360, 1440);
         else if (k == "arcade_sort") arcadeSort = v == "auto" ? arcadeSort : truthy(v);
         else if (k == "srgb_swapchain") srgbSwapchain = truthy(v);
+        else if (k == "foveation")   // questperf (docs/quest.md "Performance")
+            foveation = v == "off" ? 0 : v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : std::clamp(std::atoi(v.c_str()), 0, 3);
+        else if (k == "foveation_dynamic") foveationDynamic = truthy(v);
+        else if (k == "perf_log") perfLog = truthy(v);
+        else if (k == "perf_cycle") perfCycle = truthy(v);
+        else if (k == "dynamic_resolution") dynamicResolution = truthy(v);
     }
-    return true;
 }
 
 std::unique_ptr<Backend> make(const std::string& name)

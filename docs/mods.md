@@ -134,11 +134,11 @@ then put it in a pack's `models\` folder. The file name must end with `_o<object
     game's skeleton. Replace a part with a model in the **same part space**. The export gives you that space. Moving the
     pivot or merging parts is not possible, because the skeleton and the hit areas are the game's.
   - **Hit detection:** it never changes. Shots use the game's own collision.
-- glTF (`.glb`) is not read yet. Convert it to OBJ, or see "Next" below.
+- glTF 2.0 (`.gltf` / `.glb`), a scale / rotation / offset, `game:<id>` (another model of the player's own files) and
+  per-model-set IDs: a `[model]` section in `mod.ini` (docs/modding.md "Model packs", 2026-11-09).
 
 ## Next
 
-- glTF 2.0 (`.glb`) reading through the same path, with embedded PNGs.
 - Mip levels for large pictures. Pack pictures are filtered but not mip-mapped, so HD pictures shimmer a little far away.
 - The 2D sprites (HUD, the PC's blood drops) are not covered yet.
 - Arcade palette rules (recolour a palette entry, including animated ones like the fire lamps) without pictures.

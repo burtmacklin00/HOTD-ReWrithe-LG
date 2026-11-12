@@ -18,14 +18,14 @@ never see them): `port::gAttackHold` (an attack waits) and `port::gHitHold` (a h
 | Prompts | every enemy the CPU teammates would take as a target (`Bot::targetKind` / `targetThreat`: on the screen, damageable, in the fight) gets a prompt in a box over it | all three |
 | Word mix | most enemies one **word** (from all of `word_lists`, by length); tougher ones (hit points >= `tough_hp`, 200, not near) a **short phrase** (`tough_letters`); the toughest (>= `two_prompts_hp`, 400, not near) two prompts in a row; bosses **sentences** (`boss_lists`, `boss_letters`); bats, Murrers, frogs, dogs (`small_names`) **1-3 letters** (`small_letters`), thrown axes / barrels / knives 1-2 (`projectile_letters`) | TotD (Overkill: two prompts) |
 | Length by threat (totd2) | a word's letters by threat band: **near** (spawned within `near_depth` 30 of the camera, or at you within `near_seconds` 2 at the speed it comes closer: one jumping out next to you), **far** (beyond `far_depth` 70, later than `far_seconds` 5, no attack place taken: a slow walker far off), **mid** the rest; `word_letters_near / mid / far` per difficulty (Normal 3-4 / 4-5 / 5-7). The depth: the camera-space z at first sight; the speed: the CPU teammates' tracking of the enemy (`Bot::approach`, 8 frames before the prompt). Captors and enemies in a rescue scene (a researcher on the screen) take the near band's shortest | user 2026-11-03 |
-| Difficulty | Options > Difficulty picks the lengths and lists (one value per difficulty). Very Easy: 3-5 letter words, 14-20 letter boss sentences; Normal: 3-7 letter words, 7-11 letter phrases, 16-25 letter sentences; Very Hard: 4-10 letter words, phrases and sentences with capitals and punctuation, typed exactly as shown (`case_from_difficulty`, 3) | TotD |
+| Difficulty | Options > Difficulty picks the lengths and lists (one value per difficulty). Very Easy: 3-5 letter words, 14-20 letter boss sentences; Normal: 3-7 letter words, 7-11 letter phrases, 16-25 letter sentences; Very Hard: 4-10 letter words, phrases and sentences with capitals and punctuation (totdex: case ignored at every difficulty, as SEGA's judge; `case_from_difficulty` 3 types them as shown from Hard) | TotD |
 | Chapter | from `longer_from_chapter` (5: never, totd2) enemies take the next difficulty's lists | TotD (longer later) |
 | First letters | no two prompts held (on the screen or briefly off it) start with the same letter; one coming back into view with a taken letter gets another word | TotD |
 | Lock-on | the first letter locks onto the prompt starting with it; the box turns yellow | all three |
 | Letters | each correct letter is one shot at the enemy (hit, blood, part damage, points); its hit points are held up (30000) from the first letter so the letters cannot kill; the last letter's shot kills (hit points 1 first) | TotD (each key a shot) |
 | Interrupts (totd2) | bats, small creatures and projectiles are urgent: a letter that is not the locked word's next one but starts an urgent prompt breaks in; that one is typed, then the lock goes back to the word, its letters kept. An urgent prompt never starts with a letter still to type in the locked word | TotD |
 | Thrown things (totd2) | while a thrown axe / barrel / knife carries a prompt it flies at `projectile_speed` of its speed (Normal 0.4: velocity x k, gravity x k^2: the same arc, k times slower) | TotD (thrown things drift) |
-| Kill grade (totd2) | each kill gets S / A / B / C / D / F from its accuracy and speed over all its prompts, timed from when it could be typed (shown, or the last prompt done if later): `kill_grade_S..D` = accuracy %, WPM (S 100 % 50 WPM, A 100 % 36, B 85 % 27, C 70 % 19, D 50 % 11). Shown over the enemy for 1.25 s (gold S / A, white B / C, grey D / F; a boss sentence's under its panel), counted in the results' "Kills" row | TotD |
+| Kill grade (totd2) | each kill gets S / A / B / C / D / F from its accuracy and speed over all its prompts, timed from when it could be typed (shown, or the last prompt done if later): `kill_grade_S..D` = accuracy %, WPM (S 50 WPM, A 36, B 27, C 19, D 11; totdex: no accuracy needed and the letters counted as SEGA's key costs, "SEGA's rules and ours"). Shown over the enemy for 1.25 s (gold S / A, white B / C, grey D / F; a boss sentence's under its panel), counted in the results' "Kills" row | TotD |
 | Small targets | bats / Murrers / frogs / dogs and projectiles get no letter shots (a bat dies at any hit: its first letter killed it); the last letter fires once and waits 10 frames for the hit to show (its flags' hit bit); still not hit after 6 tries, the hit is given (flags bit 8 + player 1's bit, as a landed shot) so the word always kills or knocks the thing away | TotD |
 | Misses | a wrong letter (or one that matches nothing) is a miss: accuracy, combo broken; the lock stays; nothing is entered, so there is nothing to Backspace | all three |
 | Drop the lock | `drop_lock_keys`: 0 nothing, 1 Escape (default; Escape without a lock is the pause), 2 Escape and Backspace. Backspace alone does nothing (totd0 dropped the word on it: a typo's habitual Backspace threw progress away) | ours |
@@ -114,7 +114,7 @@ queue: the game's memory and frames are the same with or without them), over the
 | Sound | File | Default | What it is |
 |---|---|---|---|
 | a correct letter | `key.wav` | cue 28, GAMESNDS sample 13 (0.15 s) | the 1998 PC's name entry (records screen, screen 15) key sound: its frontend (0x420A60, from frontend_input 0x41DA18) plays cue 28 on Enter / Space / a click; the letter keys of 0x425188 play none. The same sample is the arcade's reload click (0xA01200) |
-| a wrong letter | `miss.wav` | cue 253, sample 60 (0.18 s) | a short low buzz from the PC bank (arcade code 0xA01467) |
+| a wrong letter | `miss.wav` | cue 48, sample 49 (0.28 s, ~260 Hz) | a short mid-low buzz from the PC bank (was cue 253, 83 Hz: too quiet; 2026-11-09) |
 | a word done | `ding.wav` | cue 140, `SOUND\O_LIFEUP.RBH` | the coin / life item chime (0xA01351); since 2026-11-05 `data/typing/ding.wav` is a real typewriter bell: "Typewriter, bell #2" (a Hermes Precisa 305) by Joseph SARDIN, BigSoundBank.com sound 2845, CC0 (public domain), trimmed to the ding (1.3 s) and mixed half clean / half an 8-bit 22 kHz copy for a mid-90s sound (the user's pick). Credit it in CREDITS.txt / NOTICE.md when TotD0 ships |
 
 The run prints once where each came from (`TOTD sound key: PC cue 28`, or the file). `HOTD_TOTD_NOSOUND=1`
@@ -343,6 +343,198 @@ QA notes (the real-event path, a window on the second monitor, no focus, muted; 
 - (open) A blocked strike's stagger does not always stop its motion (its hit then held: the strike reads as parried).
 - (open) The key / miss sounds are the PC bank's samples in both sound modes (only WAV files are converted). The reference's orbs carry phrases; ours G / H keys.
 
+## SEGA's rules and ours (totdex, 2026-11-09: Tenome's The Typing of the Dead EX)
+
+Reference: Tenome's **The Typing of the Dead EX – Modern Community Patch** (https://github.com/Tenome/Typing-of-the-Dead-EX,
+MIT), a hook mod for the Japanese PC release of SEGA's TotD EX (HOTD2's engine). Its `re/NOTES.md` holds what Tenome
+read from `Tod.exe` (the word picker, the typing judge, the word-finish grade and score, lives and the word level),
+its `mod/README.md` and `mod/docs/gameplay_options.txt` the mod's features. Read online (data only); no code, no SEGA
+data taken: the rules below are ideas, credited in NOTICE.md / README.
+
+| Rule | SEGA (Tod.exe, from Tenome's notes) | TotD 0 before | Now |
+|---|---|---|---|
+| Picking a word | random, never one of its **last 16 picks**; never a word whose first typing unit another word on the screen starts with | the first-letter rule only (Chapter 1's Chariot got "find the key" 3 times in a row) | `recent_words = 16`: the last 16 prompts are left out (a short list: then allowed); the first-letter rule as before |
+| How long a word stays | no timer on a word (its enemy's own attack decides); a few special modes have timers (180 / 480 frames) | the same (the grace before a strike is ours, docs "Attacks") | unchanged |
+| Words for enemies / parts | the word list by the enemy's flags (letters, kana, short words); the **word level** (0-15) picks the difficulty: it **drops 2 a hit**, items change it, it rises while you do well | lengths by the difficulty and the enemy's threat band, fixed for the game | **word level**: a hit drops it one level (`word_level_hit`), down to -2 (`word_level_min`): each level a creature's word one letter shorter (a tough one's phrase two; never under 2 letters); 8 creature words typed with no hit (`word_level_words`) raise it one level, never above the difficulty's own lengths (ours never goes harder than the difficulty) |
+| Typos | a wrong key is a miss (key stats), the word stays locked; **Shift let go early**: a key that misses is judged again as its shifted character when Shift was down for the key before | a miss, lock kept | the same, plus `shift_grace = 1` ("Help?" typed "Help/" counts; US key pairs) |
+| Capitals | the judge **upper-cases every key**: case never matters (Tenome's case-sensitive typing is a mod option) | capitals typed as shown from Hard (`case_from_difficulty 3`, "TotD" in the old table: wrong) | `case_from_difficulty = 5`: never (3 brings the old rule back) |
+| Dropping a word | Escape cancels it (Tenome's option: Backspace too) | `drop_lock_keys` (Escape; 2: Backspace too) | unchanged |
+| Retargeting | not in the notes (a locked word stays until done or cancelled) | ours: a projectile's / small creature's first letter breaks into the locked word (round 2) | unchanged (ours) |
+| Rank per word | speed only: frames / (difficulty x 0.01), where the difficulty is a sum of **key costs** (a s t h 3, most letters 4, c m n x z 5, p q 6, v 8, space 2, digits 9-11, symbols 12-14: Tenome's fit, 99.9 % of the words); x 1.1 under 20 (short words stricter), x 0.8 from 61 (long words easier); six grades at < 120 / 180 / 240 / 300 / 360 / more. Typos only cost time | accuracy and WPM (S and A needed 100 %), letters counted alike | `key_cost_grade = 1`: the kill's WPM counts its letters as key costs (4 = one letter) with the 1 / 1.1 and 1 / 0.8 factors; no accuracy needed (`kill_grade_*` accuracy 0); the WPM limits kept (they count the reaction from the word shown: SEGA's timer start is not in the notes) |
+| Score | per word: base by difficulty (10-35) + speed bonus by grade (45 special, then 35 / 20 / 15 / 10 / 5 / 0); the results add accuracy points (1200 at 100 %) and 150 a rescued person | the arcade's kill score + the combo bonus (`combo_bonus`) | + `rank_points` 35 / 20 / 15 / 10 / 5 / 0 a kill for S / A / B / C / D / F (the base points and the results' extra points not taken: the arcade's own kill score stays) |
+| Lives | 3, a hit costs one, 90 frames of grace after it | the arcade's | unchanged |
+
+**A bug found on the way** (the base build too): Chapter 1's (and Chapter 4's) **Chariot could never die**. Its
+sentences sat on its hit box (a part with no hit points of its own); the frame's bar (480) only went down when a
+sentence's shot landed on the hit box, and after its armour broke those shots stopped landing: the bar stayed at
+320 / 144 and the event waited for ever (headless: Hard 75 WPM seed 2 Chapter 1, Hard 75 seed 3 Chapter 4 in the base
+build; Normal 55 seed 1 once the picks changed). Now a part without hit points passes each sentence to the boss part
+with a bar on the screen (1 / `boss_sentences` of it, the totd3 rule; the shots go at that part, a landed shot's damage
+taken back), and a part with hit points is the one a sentence goes to first.
+
+Headless (`--totd-test`, 95 % accuracy, each chapter from its start; hits = lives lost; "stall" = the chapter never
+ended):
+
+| Run | Ch1 | Ch2 | Ch3 | Ch4 |
+|---|---|---|---|---|
+| base, Normal 55 WPM seed 1 | 0 | 3 | 4 | 6 |
+| now, Normal 55 WPM seed 1 | 0 | 3 | 2 | 9 |
+| base, Hard 75 WPM seed 2 | **stall** (the Chariot) | 3 | 5 | 7 |
+| now, Hard 75 WPM seed 2 | 1 | 3 | 5 | 19 |
+| base / now, Hard 75, Chapter 4, seeds 3 / 4 / 5 | | | | **stall** / 25, 14 / 15, 15 / 20 |
+
+Chapter 4's hits vary most with the seed (14-31 at Hard 75 with the same build: the Magician's fireballs, 5-27 of
+them); with `recent_words 0` the same seeds gave 31 / 14 / 14.
+
+### Live WPM and the Statistics page (after Tenome's statistics)
+
+- **Live WPM / Accuracy** (Options > Gameplay > Typing of the Dead 0, off by default; launcher.ini `totd_live`): a white
+  line "WPM nn  ACCURACY nn%" under PERFECT in play, the game so far (letters / 5 over the time a word was locked;
+  accuracy = correct keys / all keys typed at a word). `HOTD_TOTD_LIVE=1` turns it on for a run (testing).
+- **Statistics** (the same page > Statistics): this session (since the game started) and all games: WPM, accuracy,
+  words, games played, time typing, the most missed keys (the letter that should have come when a key missed, as
+  Tenome's) and the most missed words (the prompts with the most misses). Kept in the settings folder,
+  `totd_stats.txt` (key=value lines, the 200 most missed prompts as `word<TAB>prompt<TAB>misses`), written at each
+  chapter's end, every 30 s of play and when the game ends; Reset Statistics (two clicks) clears them. The scripted
+  typist's games are not counted (`HOTD_TOTD_STATS=1`: they are, for tests).
+- **Practice Your Misses** (totdrec, step 3 of the Tenome plan; the same page, off by default; launcher.ini
+  `totd_practice`): at a game's start the all-games statistics' most missed words (`practice_words`, 30) and keys
+  (`practice_keys`, 3, letters only) are taken; `practice_share` (0.35) of the creatures' words (zombies, tough ones,
+  captors, the Magician's fireballs) then come from them: half a missed word of about the right length (lengths
+  widened by 2 at most), half a list word with one of the missed letters; the usual rules hold (first letters, no two
+  alike on the screen, none of the last `recent_words`), and with none fitting the normal pick. Bosses' sentences and
+  the G / H keys are untouched. Off: the picks (and the seed's word order) exactly as before. `HOTD_TOTD_PRACTICE=
+  "word,word;keys"` gives the lists for a run (testing); the report prints `TOTD PRACTICE: n creature words, n your
+  missed words, n with your missed keys` (Chapter 1, Normal 55 WPM, "zombie,shadow,spider,cold coffee,quiet;qzx": 43,
+  1, 16). A short drill mode (a list of only your misses, no game) is left for the word packs step (4).
+
+## Word packs, Practice, Mutators, Speak the Words (totdpacks, 2026-11-09)
+
+Steps 4-5 of the Tenome plan: ideas from Tenome's **The Typing of the Dead EX** (MIT; its `mod/README.md`: word packs,
+in-order typing, practice, mutators; ideas only, no code). Single player only, as the rest of TotD 0.
+
+### Word packs
+
+- **Where**: `data/typing/packs/` under any data folder (the game's, a mod's): a folder per pack, or a single `.txt`
+  dropped there (a pack named after the file). Options > Gameplay > Typing of the Dead 0 > **Word Packs**: Built-in
+  Words and each pack found, each On / Off (one or several, mixed: each list the union; one stays on). launcher.ini
+  `totd_packs=builtin,mypack`; `HOTD_TOTD_PACKS=` the same for a run (testing). The report prints `TOTD packs: ...`.
+- **A list file**: one word / phrase / sentence a line, UTF-8 (a BOM is fine), `#` comments, tabs as spaces. The
+  prompts are drawn in the arcade's 8 x 8 font (printable ASCII): a line with any other character (é, ñ, Cyrillic,
+  kana ...) is **skipped** and the characters listed on the pack's help line ("the font lacks é ñ"). Any language
+  written in plain ASCII letters works (Latin-script languages without accents, transliterations, code, numbers).
+- **Sorting**: a file named like one of typing.ini's lists (`short`, `easy`, `words`, `long`, `phrases`,
+  `hard_phrases`, `boss_short`, `boss_easy`, `boss`, `boss_hard`; a copy of `data/typing/default` is a pack as it is)
+  or given one in pack.ini goes to that list whole. Every other line by its letters: a word (no space) up to 3
+  `short`, 4-5 `easy`, 6-8 `words`, 9+ `long`; a phrase up to 17 letters both phrase lists; a longer line the bosses'
+  sentences (`boss_easy` to 22, `boss` to 30, else `boss_hard`). The game then picks by length as always (each enemy's
+  letters by difficulty and threat), with all the word rules (unique first letters on the screen, none of the last 16,
+  case ignored, Shift grace).
+- **Missing lists**: chosen packs with no boss sentences at all take the built-in ones (`TOTD packs: ... (the built-in
+  boss sentences)`); any other list missing takes all the packs' lists but the bosses' (by length as always; before:
+  the longest list, so a pack of words gave its tough zombies boss sentences).
+- **pack.ini** (optional, in the pack's folder; `key = value`, `#` comments):
+
+| Key | Meaning |
+|---|---|
+| `name` | the name shown on the page (else the folder's) |
+| `language` | shown on the help line |
+| `<list> = a.txt, b.txt` | those files go to that list whole (e.g. `boss = sentences.txt`, `easy = kids.txt`) |
+| `min_letters` / `max_letters` | lines shorter / longer are skipped (counted on the help line) |
+| `order = text` | the pack is a **text typed in order** (below) |
+| `text = story.txt` | which files are the text (default: every file not given to a list) |
+| `chunk = 16` | a text's lines are cut at spaces into pieces of at most this many letters (4-60, default 18) |
+
+### A text typed in order (`order = text`)
+
+The creatures' words (zombies near / mid / far, tough ones, captors, a rescue scene's, the Magician's fireballs) are
+the text's next pieces, one after another, whatever their length; a story is typed through the chapter (and on in
+the next game: the place is kept in the settings folder's `totd_text.txt`, by the packs and the text's length; the
+scripted typist always starts at the beginning). The word rules stay: when the next piece's first letter is taken by
+a word on the screen (or the piece is up already) that creature gets a word of the lists and the piece waits for the
+next creature. Bosses keep their sentences (the packs' long lines or the built-in ones), the G / H keys and the bats'
+letters are untouched. The pieces are words for the lists too. A piece may start with G or H (the lists never do):
+that key goes to a quick target on its side first, else it now locks the word (before: ignored). Example:
+`data/typing/packs/example-story` (Example: The Night Shift, 18 lines in 16-letter pieces). The report prints
+`TOTD TEXT: n pieces served in order, next piece p of N, typed through n times`; Chapter 1 Normal 70 WPM:
+`41 pieces served`, 3 hits (the pieces are 12 letters on average, the built-in near / mid words 4-5).
+
+### Practice (the drill)
+
+More Modes > The Typing of the Dead 0 is now a group: **Play** (the game, as before), **Practice: Word Packs**,
+**Practice: Your Misses**, Back. A round: words float across the menu's screen from one side to the other in seven
+lanes (at most `drill_on_screen` 4 up, a new one every `drill_gap` seconds, at once when none is up), no attacks, no
+lives, no game; a word that reaches the far side untyped is lost. `drill_words` (30) words a round; each crosses in
+`drill_seconds` + `drill_per_letter` x its letters (Normal: 10 s + 0.25 s). The words: the chosen word packs' lists
+(mid to far lengths of the difficulty, every fifth a tough one's phrase; a text in order: its pieces, and its place
+goes on), or the all-games statistics' most missed words (Your Misses; a short list repeats; none yet: the packs').
+The keys as in play (first letter locks the word furthest along, wrong keys are misses, Shift grace, Escape drops the
+lock; Escape with nothing locked or the page's Exit ends the round). The top line: `PRACTICE n / 30   WPM nn
+ACCURACY nn%`. Then **Practice Results**: WPM, Accuracy, Words Typed, Words Missed (the lost words named), Wrong Keys,
+Most Missed Keys / Words, Practice Again. Practice is not counted in the Statistics.
+
+Tests: `--totd-practice-test packs|misses [--totd-typist wpm,acc,seed] [--difficulty d]` (no window; prints
+`TOTD PRACTICE` and `TOTD PRACTICE RULES`: ticks with two words of one first letter, list words again within
+`recent_words`; PASS: all shown, both 0, at most a fifth lost). `HOTD_TOTD_DRILL_AUTO=packs|misses` starts a round
+by itself in the menu with the scripted typist's keys through SDL's queue (with `HOTD_KEYS="200:Return;260:Return;
+900:shot=p"` and `--menu-style remake`: pictures in a hidden window). Normal, 50 WPM 95 %: 30 / 30 typed, 0 lost,
+61.6 WPM; the example text at Normal, 70 WPM: 27 typed, 3 lost (16-letter pieces).
+
+### Mutators
+
+Options > Gameplay > Typing of the Dead 0 > **Mutators** (all off by default; launcher.ini `totd_mutators=long,
+onelife ...`, `HOTD_TOTD_MUTATORS=` for a run; the report prints `TOTD mutators: ... (no high score table)`). For the
+game only (Practice has none).
+
+| Mutator (id) | What |
+|---|---|
+| Long Words Only (`long`) | the creatures' words (zombies, captors, a rescue scene's, fireballs) from the far band's longest length up (+3), a tough one's phrase from its longest (+4) |
+| Short Words Only (`short`) | those words at the near band's shortest (Normal 3 letters), a tough one a word too; Long and Short exclude each other |
+| One Life (`onelife`) | the game's lives code 0x11: starts with 1, at most 1 (continues as Options) |
+| No Backspace (`nobackspace`) | a word once begun cannot be dropped (Escape / Backspace do nothing; `Typing::dropKeys` 0) |
+| Double Speed (`double`) | the game's ticks twice as fast (creatures, attacks, boss windows, the graces in real time); your typing as it is |
+| Reversed Words (`reverse`) | every prompt (words, phrases, boss sentences, a text's pieces) backwards; the rules on the reversed words |
+
+**High scores**: a game with any mutator on enters **no** high score table: none is read or written, nobody is ranked
+(`Runtime::noRanking`: rank_insert ranks no one, so no name entry), the clear's name entry is off. The game itself is
+the same otherwise (the Statistics count it). Headless, Chapter 1, Normal, 70 WPM 95 % (`--totd-test`): long 94 words,
+mean zombie mid 7.5 letters, 2 hits; short all creature words 3 letters, 0 hits; onelife 0 hits, lives 1; nobackspace
+0 hits; double 15 hits (10 boss windows missed: twice the game's pace for a 70 WPM typist); reverse ("sub", "rot") 0
+hits; all PASS.
+
+### Speak the Words (accessibility)
+
+Options > Gameplay > Typing of the Dead 0 > **Speak the Words** (off by default; launcher.ini `totd_tts`,
+`HOTD_TOTD_TTS=1` for a run): each new prompt on the screen (creature words, phrases, boss sentences, Practice's
+words; not the G / H keys) is said by the operating system's own voice, `src/util/tts.*`. No voice files are bundled
+or made. Windows: SAPI through COM (`ISpVoice`, the system's default voice, rate +2) on a worker thread; macOS: `say`;
+Linux / other Unix: the first of `spd-say`, `espeak-ng`, `espeak` on PATH (run with an argument list, no shell);
+none found: the row is grey, "No system voice found". One text at a time; a backlog over 3 drops the oldest (the
+screen moved on). The scripted typist's runs never speak; `HOTD_TOTD_TTS_LOG=1` prints `TOTD SPEAK: <text>` for each
+prompt that would be said, and `--totd-practice-test` then prints `TOTD SPEECH: <backend>` (whether a voice could be
+made; nothing is said). This PC: `Windows speech (SAPI)`; Practice: 30 words said, Chapter 1 every prompt once (a box
+given again says its word again).
+
+## The user's playthrough of 2026-11-05 (totdrec, 2026-11-09)
+
+The user's recording (v1.3.0's TotD 0, all four chapters; "especially how the enemy animations line up when you fail
+to type in time"), every life lost looked at frame by frame: a zombie's hit lands with its swing's contact (7:22: the
+lunge's contact and the torch going out within 0.1 s), and the late ones were words not finished in time (12:30, 20:28:
+one letter left). The one that was wrong: **an agile one (kind 70) out of the picture's edge, its box gone with it,
+leapt in and bit before a word could be read** (14:34, 15:13). Still so on main: headless Chapter 2, Normal 55 WPM, a
+kind 70 on a wall off the screen (no box from frame 2791) struck at 2803 and hit at 2835.
+
+| Rule | Now |
+|---|---|
+| A creature with a word but its box off the screen | begins no attack (as one with no word yet), for `offscreen_hold` (3 s) at most since its box went: no event waits on it for ever |
+| Its hit | lands only once its box has been on the screen `strike_seen` (0.8 / 0.7 / 0.6 / 0.5 / 0.4 s) in a row; one that leaps in from outside bites for nothing (`HOTD_TOTD_OLDFRESH=1`: the old rule) |
+| The report | `TOTD CREATURE HITS: n with the box up, n with no box on the screen`; `HOTD_TOTD_UNSHOWN=1` prints each unshown hit, `HOTD_TOTD_TRACE=1` the near creatures' state / step at each attack |
+
+Headless, Normal 55 WPM 95 % seed 1, hits per chapter (unshown in brackets): before 0 / 3 (1) / 6 / 7, now 0 / 5 (0) /
+6 / 8; 40 WPM seed 2: 2 / 8 / 13 / game over before, 2 / 8 / 14 / game over now (40 WPM is under Normal's typist). No
+creature hit with its box off the screen in any run. Open: the Magician's fireball boxes over his sentence; a short
+grace for a word with one letter left (SEGA's rule has none).
+
 ## Attacks (totd1: "enemies attack too fast, even on Normal")
 
 TotD: a zombie walks up, then gives a clear window before it hits; its attack waits on a timer you can see.
@@ -484,7 +676,9 @@ projectile 1.4, boss 19.9 (totd1 Normal: words 6.4, phrases 11, boss 37).
   are held by the boss rule). Some projectiles are seen but never typed (Chapter 4: 45 shown, 28 typed): they reach the
   player or leave the screen before the typist reads them; their hits are not counted as a failure.
 - Boss "quiz" segments (TotD's answer prompts).
-- A dictionary chooser in the menu; a per-language dictionary picked with the language.
+- (totdpacks) Done: the Word Packs page (a dictionary chooser). Open: a per-language pack picked with the language;
+  prompts with accented / non-Latin letters (the arcade font is ASCII and the judge compares bytes: a font with those
+  glyphs and UTF-8 typing would be needed).
 - Box frames / typewriter art from the user (the font is now the game's own).
 - (totd6) Not like the PC TotD yet: its top-left gauge (what it measures is not known from the video) and the
   missions' top-centre time / "Rest n" counter (we have no missions); the boss countdown ("3, 2, 1, 0") and quiz

@@ -28,6 +28,9 @@ template <class P> void Game<P>::hud_lives_draw(uint32_t task)
         // they come back lit (their base flashes in as a new one's). Max Lives 5 or less: as the arcade
         const int n = std::min<int>(mem.template at<uint8_t>(G::max_lives), kTorchPlaces);
         const bool count = int32_t(mem.u32(pl + 0xC)) > kTorchPlaces;
+        // charsel4: the flames' colour by look_seat (Rogan player 1's red ones 0xB7 / 0xBE, G player 2's blue ones
+        // 0xA8 / 0xAF in either seat); their places stay the seat's
+        const bool red = look_seat(p) == 0;
         for (int i = 0; i < n; ++i) {
             const uint32_t lit = kTorches + uint32_t(p) * 10 + uint32_t(i) * 2, burn = lit + 1;
             if (count && i > 0) {
@@ -51,17 +54,17 @@ template <class P> void Game<P>::hud_lives_draw(uint32_t task)
                 const int8_t b = mem.template at<int8_t>(burn);
                 if (b < 42) {
                     const int step = int(int8_t((b / 6) % 8));
-                    sprite_draw_anim(kTileRam, 1, 0, p == 0 ? xo : xt, 0x2A, uint32_t(step + (p == 0 ? 0xBE : 0xAF)));
+                    sprite_draw_anim(kTileRam, 1, 0, p == 0 ? xo : xt, 0x2A, uint32_t(step + (red ? 0xBE : 0xAF)));
                     mem.template at<int8_t>(burn) = int8_t(b + 1);
                 } else {
-                    sprite_draw(kTileRam, p == 0 ? xo : xt, 0x2A, p == 0 ? 0xBE : 0xAF);
+                    sprite_draw(kTileRam, p == 0 ? xo : xt, 0x2A, red ? 0xBE : 0xAF);
                 }
             } else {
                 const uint32_t step = (mem.u32(0xCA6F0 + uint32_t(i) * 4) + mem.u32(G::frame_counter)) / 6 % 7;
                 if (p == 0)
-                    sprite_draw_anim(kTileRam, 1, 0, 4 * i + 7, 0x2A, step + 0xB7);
+                    sprite_draw_anim(kTileRam, 1, 0, 4 * i + 7, 0x2A, step + (red ? 0xB7 : 0xA8));
                 else
-                    sprite_draw_anim(kTileRam, 1, 0, 0x35 - 4 * i, 0x2A, step + 0xA8);
+                    sprite_draw_anim(kTileRam, 1, 0, 0x35 - 4 * i, 0x2A, step + (red ? 0xB7 : 0xA8));
                 if (fresh)
                     sprite_draw_anim(kTileRam, 1, 0, p == 0 ? 4 * i + 6 : 0x34 - 4 * i, 0x2B, 0x14);
             }
@@ -267,7 +270,7 @@ template <class P> void Game<P>::hud_player_full_draw(uint32_t task)
             sprite_draw(kTileRam, 2, 0x2A, 0xE);
             for (int i = 0; i < n; ++i) {
                 sprite_draw(kTileRam, 6 + 4 * i, 0x2B, 0x14);
-                sprite_draw(kTileRam, 7 + 4 * i, 0x2A, 0xB7);
+                sprite_draw(kTileRam, 7 + 4 * i, 0x2A, look_seat(p) == 0 ? 0xB7 : 0xA8);   // (charsel4: the look seat's flames)
             }
             // (PC Mode: up to 12 bullets, hud_ammo_draw; the arcade's six cleared, bullets 7-12 stayed over the
             // cut-scenes: user 2026-10-26, Sophie's "bullet icons stretch over in cut-scenes")
@@ -278,7 +281,7 @@ template <class P> void Game<P>::hud_player_full_draw(uint32_t task)
             sprite_draw(kTileRam, 0x39, 0x2A, 0xF);
             for (int i = 0; i < n; ++i) {
                 sprite_draw(kTileRam, 0x34 - 4 * i, 0x2B, 0x14);
-                sprite_draw(kTileRam, 0x35 - 4 * i, 0x2A, 0xA8);
+                sprite_draw(kTileRam, 0x35 - 4 * i, 0x2A, look_seat(p) == 0 ? 0xB7 : 0xA8);
             }
             if (mem.u32(G::ammo_enabled) != 0)
                 for (int x = 0x3B; x >= (pm_on() ? 0x25 : 0x31); x -= 2)

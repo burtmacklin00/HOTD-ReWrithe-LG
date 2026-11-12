@@ -6,6 +6,7 @@
 // changes a normal game (Game::scene_started / scene_starts are written by cam_job18 and only read here).
 #pragma once
 
+#include "game/free_cam.h"
 #include "game/runtime.h"
 #include "net/rollback.h"
 #include "render/renderer.h"
@@ -110,46 +111,17 @@ public:
     // Watching, after each game frame: the scene's end (its bodies done and the shooting on again, or 40 s) -> Over
     void afterFrame(Runtime& rt);
     bool replay(Runtime& rt);   // the save-state again (Watching from the lead-in)
-    void stop() { phase = Phase::Off; paused = slow = freeCam = freeFast = castOpen = false; }
+    void stop() { phase = Phase::Off; paused = slow = castOpen = false; cam.stop(); }
 
     // Free Cam (key F, a pad's stick click; user 2026-10-22, for trailer footage): draws only. The 3D picture is seen
-    // from a camera of our own (GameView::camOverride) that starts where the scene's camera is; the game, its camera
-    // and the scene go on underneath (paused: a photo mode). Off: the scene's camera again at once
-    bool freeCam = false;
-    bool freeFast = false;   // ipolish: a pad's left-stick click: the speed x4 until clicked again (Free Cam off: off)
+    // from a camera of our own (game/free_cam.h, GameView::camOverride; photomode: shared with Photo Mode) that starts
+    // where the scene's camera is; the game, its camera and the scene go on underneath (paused: a photo mode). Off: the
+    // scene's camera again at once. cam.fast: a pad's left-stick click (x4); cam.slow: C / Back (1/4 speed, eased)
+    FreeCam cam;
     bool hintsOff = false;   // H: the key hints hidden (recording; kept for the session)
     bool fx[3] = {true, true, true};   // Hit Sparks / Gun Muzzle Flash / Blood Particles (main.cpp sets them from the options)
-    Camera freeCamera;   // its place, yaw / pitch (Camera::basis) and field of view
-    struct FreeCamInput {
-        float move[3] = {};   // right, up, forward: -1..1 each (keys WASD / QE / arrows, the left stick, the triggers)
-        float look[2] = {};   // the turn this frame: right, up (radians: the mouse drag, the right stick x dt)
-        float zoom = 0;       // wheel notches: + narrower (zoom in)
-        bool fast = false, fine = false;   // Shift x4, Ctrl x0.25
-    };
-    static constexpr float kFreeCamSpeed = 60.0f;   // world units a second (the arcade's: a body is about 17 high)
-    bool freeSlow = false;   // C / Back: Free Cam at 1/4 speed, eased in and out (cinematic shots)
-    float slowMove_[3] = {}, slowLook_[2] = {};   // (the eased input)
-    void freeCamToggle(const Camera& sceneCam)
-    {
-        freeCam = !freeCam;
-        freeFast = false;
-        freeSlow = false;
-        for (float& f : slowMove_) f = 0;
-        for (float& f : slowLook_) f = 0;
-        if (freeCam) {
-            freeCamera = sceneCam;
-            freeCamera.nearZ = kFreeCamNear;
-            freeCamera.perPixelDepth = true;
-        }
-    }
-    // rpolish (user 2026-10-26: "near-plane clipping cuts foreground bodies", f14218): close up, Draw Depth's Arcade
-    // Sort (one depth per polygon, the Model 2's sort keys, made for the game's own cameras) drew a body's big polygons
-    // over its nearer parts (a jacket over the head, a hand through the gun). Free Cam draws with per-pixel depth
-    // whatever Draw Depth says, and a near plane of 0.1 (the game's 1 put everything nearer at one depth: depth
-    // clamp). Free Cam only: the scene's own camera keeps the setting and 1 (the decal layers' depth precision)
-    static constexpr float kFreeCamNear = 0.1f;
-    void freeCamStep(const FreeCamInput& in, float dt);
-    const Camera* freeCamNow() const { return freeCam && (phase == Phase::Watching || phase == Phase::Over) ? &freeCamera : nullptr; }
+    void freeCamToggle(const Camera& sceneCam) { cam.toggle(sceneCam); }
+    const Camera* freeCamNow() const { return cam.on && (phase == Phase::Watching || phase == Phase::Over) ? &cam.camera : nullptr; }
     std::vector<std::string> lines(const Runtime& rt) const;   // the window's text over the picture
     std::vector<std::string> hintLines() const;                // Clean View's small hint (the keys)
 

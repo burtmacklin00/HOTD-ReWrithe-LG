@@ -175,6 +175,10 @@ public:
         const std::vector<uint8_t>* splat = nullptr;
         int spw = 0, sph = 0;
         uint64_t splatGen = 0;
+        // smallfix2 (user 2026-11-09: a smooth Rainbow Blood without lag): the layers above are drawn in the reference red;
+        // tintOn: the shader recolors their reds to tintRgb (0..255, the blood colour at the red's level) every frame
+        bool tintOn = false;
+        float tintRgb[3] = {160, 12, 8};
     };
     const RemakeLayers& remakeLayers() const { return layers_; }
     // lang (translations, game/lang.h): the language changed (Options > Language, F5): the drawn texts are redrawn
@@ -262,6 +266,12 @@ public:
     std::function<void()> startBossMode, startPcMode;
     // The Typing of the Dead 0 (game/typing.h): More Modes' item (null: left out)
     std::function<void()> startTotd;
+    // totdpacks: its Practice (true: from Practice Your Misses' list, false: the chosen word packs); set: the item opens
+    // its own group (Play, Practice: Word Packs, Practice: Your Misses, Back), null: the item starts the game
+    std::function<void(bool fromMisses)> startTotdPractice;
+    bool totdNoVr = false;   // a VR run (user 2026-11-09): The Typing of the Dead 0 greyed, "Not available in VR"
+    bool coopNoVr = false;   // fix140a: a VR run (user 2026-11-10: single player only): Co-op greyed, "Not available in VR"
+    bool vrNote = false;     // vr3: a VR run: the main menu's controls line says to put the headset on when the game starts
     std::function<std::string()> sonicValue;    // Sonic Mode's value ("Off" ...; null: the item is left out)
     std::function<void()> onSonic;              // Sonic Mode clicked: the next preset (the item is rebuilt)
     // Survival Mode (game/survival.h; More Modes): "Survival" asks the players and starts the arena shown on the item below it
@@ -269,6 +279,14 @@ public:
     std::function<std::string()> survivalArenaValue;
     std::function<void()> onSurvivalArena;
     std::function<void()> startSurvival;
+#if HOTD_HORDE
+    // Horde Mode (game/horde.h; More Modes): "Horde" asks the players and starts the arcade game from Chapter 1 with
+    // the extra creatures (startHorde; user 2026-11-03: "the normal arcade game with more enemies, not a chapter
+    // select"), "Horde Size: <name>" (a click: the next size). Null: the items are left out
+    std::function<void()> startHorde;
+    std::function<std::string()> hordeSizeValue;
+    std::function<void()> onHordeSize;
+#endif
 
     // screen 17 (ours): the Gallery (game/gallery.h; the main menu's "Gallery", grey while openGallery is unset): the
     // hall without the logo (0xD1), "Gallery" at the top, the categories down the left (white 24, the shown one yellow;
@@ -504,16 +522,15 @@ public:
     int pcSeats = 2;                        // 2: the PC's two panels; 4: the four panels
     bool pcReady[4] = {}, pcCpu[4] = {};
     bool pcModeAllReady() const;
-    // charsel (user 2026-11-06): the Character Select of Arcade / Chapter Select (looks only), the classic menu style's
-    // cards: screen 16 with charSel set: "Character Select", per player in the game a card (one player: the 1P card
-    // front and centre; two: side by side; Players 3 / 4: P1 / P2's cards, the others keep Rogan 2 / G 2) with the
-    // portrait and the name between the arrows (no ratings: the arcade's rules), Start, Default Characters, Exit.
-    // onCharSelectStart(defaults): the picks in pcChars[0..charSelPlayers) (defaults: none, the arcade's Rogan / G)
+    // charsel (user 2026-11-06/07): the Character Select of Arcade / Chapter Select (looks only): PC Mode's own screen
+    // 16 as it is, in both menu styles, with charSel set: "Character Select", the panels of the players in the game only
+    // (1-2 players: PC Mode's two stones, P1 alone with one player; 3-4: its four quarter panels in the seat colours),
+    // the portrait and the name between the arrows (no ratings / Ready / CPU: the arcade's rules), Start, Default
+    // Characters, Exit. onCharSelectStart(defaults): the picks in pcChars[0..charSelPlayers) (defaults: none)
     void charSelectOpen(int players);
     bool charSel = false;
     int charSelPlayers = 1;
     std::function<void(bool)> onCharSelectStart;
-    void charSelectPanel(Widget* panel, int p);
     // Boss Mode (THOTD.EXE 0x422B90, screen 7; from the main menu's Boss Mode): background 0xA8, "Boss Mode" (0x42, white
     // 32, centred) at the top, the five boss pictures as buttons (0xE3..0xE7, hovered 0xE8..0xEC; flags 0x100060):
     // Chariot top left (16, 16), Hangedman top right (0x270 - w, 16), Hermit bottom left (16, 0x1D0 - h), Magician
@@ -626,6 +643,7 @@ public:
         std::vector<std::string> choices;
         std::function<void(const std::string&)> pick;   // remakefix: sets that value at once (null: the click steps to it)
         bool raw = false;   // lang: its name is translated already (a line of a wrapped message)
+        bool info = false;  // totdex: a value only shown (the typing statistics): the Remake style draws no chevron
         // optui: the current value's index in choices (-1: none of them; null: the one equal to value()), and setting
         // choices[k] at once (null: pick / the click's steps)
         std::function<int()> choiceNow;
@@ -975,7 +993,8 @@ private:
     uint32_t bloodHue_ = 0xA00C08;       // this frame's blood colour at the red's level (0xA00C08: red, unchanged)
     uint32_t tint(uint32_t c) const;     // one of the menu's reds in the blood colour
     uint32_t paperInk(uint32_t c) const;   // blood2: tint(c) for letters on the paper (a light colour darkened: readable)
-    uint32_t bloodColour() const;        // bloodRgb / options.blood as a colour at the red's level
+    uint32_t bloodColour(bool smooth = false) const;   // bloodRgb / options.blood as a colour at the red's level (smooth: Rainbow Blood's continuous cycle)
+    bool rTint_ = false;   // smallfix2: Rainbow Blood on the GPU menu: the layers are drawn in the reference red, the shader tints them
     void rBlend(int x, int y, uint32_t rgb, float a);   // a pixel (canvas pixels) blended over
     // grungy small caps (align 0 left, 1 centre, 2 right; x, y units, y = top); fx: kTxOutline a dark outline (about
     // 1.5 pixels at 1080 lines), kTxShadow a soft drop shadow
@@ -1027,6 +1046,9 @@ public:
     int promptChoice = 0;
     int buttonStyle = 0;   // padglyphs: Controls > Button Style (pad_prompts.h PromptPack: 0 Xelu, 1 Kenney, 2 Simple)
     bool iconOutline = false;   // menus3: Controls > Icon Outline: Xelu's icons with the light rim (prerel's), default Off
+    // vrprompts (user 2026-11-10): a VR run's controller (pad_prompts.h kPsVrTouch ..; 0: none, the flat game): every
+    // prompt names its buttons, over Button Icons; the host sets it every frame (main.cpp vrPromptStyle)
+    int vrStyle = 0;
 
 private:
     // the frame's layers (each redrawn only when it changes): the widgets without the hover (staticSig_: the tree), the

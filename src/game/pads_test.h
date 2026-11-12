@@ -15,7 +15,7 @@ namespace hotd::game {
 class PadTest {
 public:
     static constexpr int kFirst = 331, kLast = 1170;
-    static constexpr int kChecks = 108;   // (relfix: the shake hold check left out) (601-630: the 4-seat section, 626: 4P steps with two seats (hangfix); 652-1166: padfeel, the aim's feel)   // the checks its cases make (expect / counts calls through Ctx), kFirst..kLast
+    static constexpr int kChecks = 114;   // (relfix: the shake hold check left out) (linuxmice: 596-600, evdev) (601-630: the 4-seat section, 626: 4P steps with two seats (hangfix); 652-1166: padfeel, the aim's feel)   // the checks its cases make (expect / counts calls through Ctx), kFirst..kLast
     struct Ctx {
         Runtime& rt;
         GunState* guns;

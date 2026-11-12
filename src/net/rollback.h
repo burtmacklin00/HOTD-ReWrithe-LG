@@ -49,6 +49,7 @@ private:
     bool sprites2d__ = false, coverOff__ = false;
     std::vector<uint32_t> pcCells_, pcClip_;
     std::map<std::pair<int, int>, std::string> pcTexts_;
+    std::map<std::pair<int, int>, std::pair<int, uint64_t>> pcTextIds_;   // (subs)
     std::vector<game::Runtime::PcNameModel> pcNameModels_;
     std::vector<uint8_t> cellSide_, cellText_, cellHud_;
     float light_[3] = {}, focal_ = 496.0f;
@@ -72,6 +73,22 @@ private:
     int bossMode_ = 0;
     uint32_t bossEvents_ = 0;
     bool bossNext_ = false, bossNoContinue_ = false, startAtSection0_ = false;
+    // Survival Mode (offered online since protocol 22, docs/netplay.md "Survival online"): the whole mode (rounds,
+    // timers, the shop, every seat's points, the director's random stream, its creatures, the engage watch ..) and the
+    // weapons (each seat's weapons, magazines, reserves, reloads, perks, the switch requests, their random stream); the
+    // lead-in's music code. Copied whole: a field added to either later is kept without a change here
+    std::unique_ptr<game::SurvivalMode> survival_;
+    std::unique_ptr<game::Weapons> weapons_;
+    uint32_t survivalMusic__ = 0;
+    // the Magician's Hand's bolts in flight and explosions (port/game.h WeaponBolt / WeaponBlast; blastslots)
+    game::Runtime::WeaponBolt weaponBolts_[8];
+    game::Runtime::WeaponBlast weaponBlast_[game::Runtime::kWeaponBlasts];
+    // (handsync, user 2026-11-09: online Survival desynced when the Hand fired) the explosions' clock (port/game.h
+    // weaponFrame: set after each frame, read by the next one's explosions as their frame and age): a restore left
+    // the newest predicted frame's, so a re-simulated explosion got a later frame and hit on other frames than the
+    // first run's. And each seat's shot (set before the frame; left as it was while the seat is not playing)
+    uint64_t weaponFrame_ = 0;
+    game::Runtime::WeaponShot weaponShot_[4];
 };
 
 } // namespace hotd::net

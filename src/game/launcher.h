@@ -207,6 +207,18 @@ inline int sonicParse(const std::string& s)   // -1: not a preset ("arcade" / "0
     return -1;
 }
 
+// smallfix (user 2026-11-09): Gameplay's cheats, Invincibility and Infinite Ammo. Not LaunchConfig's: Off at every
+// launch, never in launcher.ini, never in the online settings. Never online: the menu greys them while this PC hosts /
+// joins (`online`, set by the host each frame) and every online game runs with them off on both PCs (main.cpp
+// applyCheats). A game played with one on goes into no high-score table (Runtime::cheated)
+struct Cheats {
+    bool invincible = false, infiniteAmmo = false;
+    bool inGame = false;   // the Settings were opened from a game's pause (user 2026-11-09: cheats only before a game)
+    bool online = false;   // this PC hosts / joins / plays online now (the menu's grey rows)
+    bool any() const { return invincible || infiniteAmmo; }
+};
+Cheats& cheats();
+
 struct LaunchConfig {
     std::string arcade;          // a zip or a folder with the ROMs (any names)
     std::string pc;              // the PC game's folder or a .zip of it (pczip)
@@ -217,6 +229,7 @@ struct LaunchConfig {
     // data\pc_spanish), 2 English; voice= / spanishpc= (the setup's Extras page sets spanishpc=)
     int voice = 0;
     bool reloadVoice = true;     // spanish: Audio > Reload Voice (the "Reload!" of an empty gun; reloadvoice=)
+    int soundChip = 0;           // sound2 (user 2026-11-09): Audio > Sound Chip, 0 Accurate (the SCSP fixes), 1 MAME (soundchip=)
     std::string spanishPc;
     int players = 1;             // in play at the start (the other joins with its start button); 3 / 4: the experimental
                                  // 4P mode (docs/coop4.md)
@@ -436,8 +449,9 @@ struct LaunchConfig {
     }
     static constexpr const char* kBigHead = "big-head";
     bool modIsOn(const std::string& id) const { return std::find(modsOn.begin(), modsOn.end(), id) != modsOn.end(); }
-    void modOff(const std::string& id)
+    void modOff(const std::string& id)   // (only if on: Big Head is off by default, so not in modsOn is off)
     {
+        if (!modIsOn(id)) return;
         modsOn.erase(std::remove(modsOn.begin(), modsOn.end(), id), modsOn.end());
         if (std::find(modsOff.begin(), modsOff.end(), id) == modsOff.end()) modsOff.push_back(id);
     }
@@ -447,12 +461,37 @@ struct LaunchConfig {
             if (std::find(modsOff.begin(), modsOff.end(), id) == modsOff.end()) modsOff.push_back(id);
         modsOn.clear();
     }
+    // vr4 (user 2026-11-09): Gameplay > Dual Pistols (VR), a VR run's row only: -1 not set (vr.ini dual_pistols decides),
+    // 0 off, 1 on (launcher.ini vrdual=)
+    int vrDual = -1;
+    // vrsight (user 2026-11-10): Gameplay > Laser (VR) / Crosshair (VR), a VR run's rows only: -1 not set (vr.ini laser /
+    // crosshair decide), 0 off, 1 on (launcher.ini vrlaser= / vrcrosshair=)
+    int vrLaser = -1, vrCrosshair = -1;
+    // questfb (user 2026-11-10: "add hands on the menu by default but allow people to turn them off"): Gameplay > Hands
+    // in Menus (VR), a VR run's row only: -1 not set (on), 0 off, 1 on (launcher.ini vrmenuhands=)
+    int vrMenuHands = -1;
+    // vrcomfort (user 2026-11-10, a player's wish: comfort options in game, vr.ini is hard to reach on the Quest):
+    // Gameplay > View (VR) (0 immersive, 1 screen: vr.ini view), Screen Distance (VR) (2 / 3 / 4 / 6 metres: vr.ini
+    // cinema_distance / menu_distance), Screen Size (VR) (0 small, 1 medium, 2 large: the screen's width 0.9 / 1.33 /
+    // 1.8 x its distance), Cut-scenes (VR) (0 world, 1 screen: vr.ini cutscenes), Comfort Vignette (VR) (0 off, 1 on:
+    // vr.ini vignette); VR runs' rows only, -1 not set: vr.ini decides (launcher.ini vrview= / vrscreendist= /
+    // vrscreensize= / vrcutscenes= / vrvignette=)
+    int vrView = -1, vrScreenDist = -1, vrScreenSize = -1, vrCutscenes = -1, vrVignette = -1;
     // setup2: the version that last ran with these settings (launcher.ini lastversion=; another one: What's New once)
     std::string lastVersion;
     bool attractGore = true;     // Gameplay "Attract Gore": the attract demo blows parts off as the 1998 PC (port::gAttractGore)
     bool scoreDisplay = false;   // scoredisp: the arcade's score line (title code LLLRR's SCORE:%05d) in every offline game
     bool bossCodenames = false;  // spanish3: Gameplay > Boss Names: Full (false) / Codenames Only (the Spanish CD's cards; bossnames=)
-    bool charSelect = false;     // charsel: Gameplay > Character Select (the classic menu style: the cards before an Arcade / Chapter Select game; charselect=)
+    // subs (game/subtitles.h, docs/subtitles.md): Gameplay > Subtitles: 0 Off, 1 Original, 2 Custom (the subtitle file's
+    // lines; none: Original exactly); Subtitle Size in percent (subtitles= 0 / 1 / 2, the words also read; subtitlesize=)
+    int subtitles = 2;
+    int subtitleSize = 100;
+    bool totdLive = false;       // totdex: Gameplay > Typing of the Dead 0 > Live WPM / Accuracy (totd_live=; off by default)
+    bool charSelect = true;      // charsel: Gameplay > Character Select (the cards before an Arcade / Chapter Select game, both menu styles; charselect=; On by default: user 2026-11-10 for v1.4.0)
+    bool totdPractice = false;   // totdrec: Gameplay > Typing of the Dead 0 > Practice Your Misses (totd_practice=; off by default)
+    std::string totdPacks = "builtin";   // totdpacks: Gameplay > Typing of the Dead 0 > Word Packs (totd_packs=: ids, comma list; game/typing_packs.h)
+    std::string totdMutators;   // totdpacks: Gameplay > Typing of the Dead 0 > Mutators (totd_mutators=: ids, game/typing.h TypingMutators; empty: none)
+    bool totdTts = false;   // totdpacks: Gameplay > Typing of the Dead 0 > Speak the Words (totd_tts=; the system voice, util/tts.h; off by default)
     // skipfix (user 2026-10-27): the cut-scenes' hold-to-skip (main.cpp; only scenes the arcade cannot skip, the bars
     // up); Gameplay "Hold to Skip Cut-scenes", launcher.ini holdskip=
     bool holdSkip = true;
@@ -490,6 +529,11 @@ struct LaunchConfig {
     // netname=, netinfo=
     std::string netName;
     int netInfo = 1;
+    // the join code's hole punching (docs/online_howto.md "Play without port forwarding"): netstun= 1 asks public STUN
+    // servers for this PC's internet address (the only outside contact; 0: as before, UPnP / port forwarding only);
+    // stunservers= the servers in fallback order (empty: net::kDefaultStun)
+    bool netStun = true;
+    std::string stunServers;
     // online PC Mode (docs/netplay.md "PC Mode online"): the Host page's Game Mode (netpcmode= 0 arcade / 1 PC Mode) and
     // this PC's characters (netpcchar=a,b: the first / second seat, 1-6, 0 Auto; the Host and Join pages share them)
     bool netPcMode = false;
@@ -635,7 +679,7 @@ public:
         shotFile = png;
         windowed = true;
         const bool ok = runCheck();
-        step_ = kFiles;
+        step_ = std::getenv("HOTD_SETUP_SHOT_OPTIONS") ? kOptions : kFiles;   // (vr3, testing: the Options page)
         render(int(wantW), int(wantH));
         return ok;
     }
@@ -671,6 +715,7 @@ private:
     int step_ = kWelcome;
     std::string installDir_;
     bool optDesktop_ = true, optStartMenu_ = true, optSteam_ = false, optMusic_ = true;
+    bool optVr_ = false;   // vr3: Create a VR shortcut (off by default)
     // the zones' checks (one thread each) and the install / the update download (their own threads)
     mutable std::mutex zoneMutex_;
     Zone zone_[3];               // (spanish2: 2 = the Extras page's Spanish PC copy, optional)

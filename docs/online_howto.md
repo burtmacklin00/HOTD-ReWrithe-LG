@@ -4,6 +4,45 @@ Up to four PCs play together directly (peer to peer). There is no server and no 
 short **code**; the others **join** by typing that code. Everything between the PCs is encrypted; without the code
 nobody can join. (Technical details: docs/netplay.md in the source code.)
 
+## Play without port forwarding
+
+You usually need **no port forwarding** and no router settings. The code works the same way as before, it just
+connects in more homes now:
+
+1. Host: **Host a Game** -> **Start Hosting**. The **Internet** line says "Getting your address..." for a second,
+   then **Hole punching** (or "Open: ..." when your router opened the port by itself with UPnP). Copy **Your Code** and
+   send it to your friend.
+2. Friend: **Join a Game** -> paste the code -> **Join**. Most of the time this is all: you are in the waiting room.
+3. Only if the friend's page says "**No direct answer yet**": it shows a **Reply Code** (20 letters and digits). The
+   friend clicks **Copy Reply Code** and sends it back to the host. The host pastes it in the waiting room
+   (**Paste Reply Code**, or Ctrl+V), and both games now "knock" on each other's router for 10 seconds. The friend
+   shows up in the list a moment later ("Waiting for your friend..." meanwhile).
+   **A whole squad (up to 4 PCs): one paste.** Everyone who gets "No direct answer yet" posts their reply code in
+   your group chat. The host selects the chat messages (names, times and other text can come along), copies them and
+   pastes once: the game finds every reply code in it ("3 reply codes found: punching...") and each friend shows up as
+   they connect. A code with a typo is skipped; a code already used is ignored. Someone late? Copy and paste again:
+   only the new codes are added. When you come back to the game's window after copying, it also notices reply codes
+   on the clipboard by itself (only then, and it ignores everything that is not a reply code).
+4. Still nothing ("**Couldn't connect: your networks block direct connections**"): one of you is behind a strict or
+   carrier-grade NAT (mobile hotspots, some internet providers). Try UPnP or port forwarding (section 5), or let the
+   other player host. If the host's page says "Your network may block direct connections", swapping who hosts often
+   helps.
+
+What this does: your PC asks a public **STUN** server (by default Google's or Cloudflare's) "what is my internet
+address?", and puts the answer in the code. That question is the only contact with anything outside your PCs: there
+is no server of ours, no account, no lobby, and no relay (we run nothing; your game's traffic never goes through
+anyone else). Don't want it? Online Co-op -> **Address Lookup** -> **Off**: the game then works as before (UPnP or
+port forwarding only). The servers are in `launcher.ini` (`stunservers=`, comma separated, tried in that order;
+`netstun=0` = Off).
+
+Your code and the reply code contain your internet address: **share them only with friends**. The game never writes
+your internet address (or anyone else's) to `hotd.log`: public addresses show as `public#XXXX`, so the log is safe to
+attach to a bug report.
+
+There is **no relay**: when both networks block direct connections, the game cannot help (a relay would need a server
+running somewhere). Use UPnP / port forwarding, a VPN that puts both PCs on one network (e.g. a "LAN party" VPN), or
+let the other player host.
+
 ## The short version
 
 1. Host: main menu -> **Co-op** -> **Online Co-op** -> **Host a Game** -> **Start Hosting**. You see **Your Code**,
@@ -112,8 +151,8 @@ The host's router has to let the game in on **UDP port 47800** (only UDP, no TCP
 Port 47777 is only for the LAN list: never forward it. When hosting stops, the game closes its port (and removes the
 UPnP rule).
 
-Will not work: when the **host** is on a mobile hotspot or an internet connection without its own public address
-(carrier-grade NAT). Then let someone else host, or play on the same network.
+Port forwarding is only needed when the code does not connect by itself (see "Play without port forwarding" at the top).
+Hardest case: both PCs behind a mobile hotspot or carrier-grade NAT. Then let someone else host, or play on the same network.
 
 ## 6. In the game
 

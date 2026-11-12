@@ -8,6 +8,8 @@ none of it runs (the input test, the chapters' end frames unchanged).
 
 ## The weapons
 
+(survhand, 2026-11-10, players: "I thought Magician's balls were powerful but they made me lose in Survival mode": 8000 points bought 12 shots, a 2 s reload in the middle, gone once used up, and a light gun's auto best fired it only after every other weapon. The balance runs, `HOTD_SURVIVAL_BUYER=hand|smg|dual|shotgun`, 18 rounds, 8 seeds, lives lost a run (lives kept) in the courtyard / arena 2 / arena 3: the old Hand 90 / 97 / 135, the SMG 74 / 94 / 133, the Double Pistols 47 / 63 / 82, the shotgun 65 / 95 / 108, the default buyer 31 / 48 / 51; the new Hand 25 / 39 / 36, its late rounds still costing lives.)
+
 | | Magazine | Reserve | Reload | Fire | Damage | Special | Survival price | Drop weight |
 |---|---|---|---|---|---|---|---|---|
 | Handgun | 6 | never runs out | 36 frames (`Weapons::Drops`: at once, the arcade's) | a pull | 100 % | the game's own | - | - |
@@ -15,11 +17,11 @@ none of it runs (the input test, the chapters' end frames unchanged).
 | Assault Rifle | 30 | 4 | 84 | held: every 6 frames; bursts of 4 | 140 % | | 2500 | 3 |
 | Double Pistols | 16 | 5 | 60 | a pull | 200 % | a second gun: a second ray 14 units right of the aim, its own flash (both on one creature: one hit, hence the 200 %) | 1500 | 3 |
 | Shotgun | 6 | 5 | 90 | a pull | 130 % | 6 pellets (rays) up to 24 units round the aim, hitting only within 170 units | 3000 | 3 |
-| Magician's Hand | 4 | 2 | 120 | a pull | 350 % | the Magician's own fireball flies along the aim to the first creature, item or wall / ground it meets and explodes: every creature within 45 takes a hit (350 % near, 40 % at the edge), items in it are shot | 8000 | 1 |
+| Magician's Hand | 6 | 5 | 75 | a pull | 550 % | the Magician's own fireball flies along the aim to the first creature, item or wall / ground it meets and explodes: every creature within 50 takes a hit (550 % near, 40 % at the edge), items in it are shot; used up it stays held, empty (`keep_empty`), until Ammo / Max Ammo fill it | 8000 | 1 |
 
 Damage is part_hit's own (the part's damage table, the difficulty bonus) times the percent, per seat
 (`Game::weapon_damage`, after the 4P scaling). A weapon whose magazine and reserve are empty is gone: back to the best
-weapon held (the handgun at last). Survival's perks: Quick Reload halves every reload, Big Mag makes every magazine
+weapon held (the handgun at last); the Magician's Hand (`keep_empty = 1`) stays held, empty. The light guns' auto best (`auto_rank`): the Hand 6, the rifle 5, the SMG 4, the shotgun 3, the double pistols 2. Survival's perks: Quick Reload halves every reload, Big Mag makes every magazine
 x 1.5.
 
 **How the shot works.** The game's own shot stays: the input's trigger fires `player_shoot` (one round, the ray, the
@@ -35,13 +37,13 @@ ragdolls' walls and ground; headless: the floor height of the creature nearest t
 there. (survfix3, user 2026-11-05: the Hand did no damage: the shot test holds no walls or ground, so every
 shot that missed a creature's small spheres, and every shot at the ground or a wall near one, flew 300 units on and
 burst out of everyone's reach.) The target, and `weapon_extra_shots` launches a bolt
-(`Game::WeaponBolt`, world space) from 30 units ahead of the camera along the aim to it, 8 units a frame. In flight
+(`Game::WeaponBolt`, world space) from 30 units ahead of the camera along the aim to it, 24 units a frame (`kWeaponBoltSpeed`, at most 12 frames). In flight
 it is the Magician's fireball: `magician_fireball`'s looping models 0x1CAB..0x1CB9 (a model a frame, growing to his
 1.75; textures from his room's area 12 as his hand's), drawn by the weapons' overlay. On arrival
 (`weapon_bolts_update`, each frame in `shot_resolve`) the explosion (`weapon_blast_at`): the creatures within the
 radius (45) take the seat's hit in their own `enemy_part_hits` (`weapon_blast_hit`, this frame or the next; the
 shot's own percent (kept in the bolt) at full within 30 % of the radius of the part's sphere, falling to 40 % at the
-radius (`blastPct`, used by `weapon_damage`); an item the bolt flew to (a prop, a crate, a scene item) is hit on
+radius (`blastPct` per seat, used by `weapon_damage`; up to 8 explosions at once in `weaponBlast[]`, summed per seat on a creature); an item the bolt flew to (a prop, a crate, a scene item) is hit on
 arrival as `shot_hit_nearest` hits it, and every other shootable object without a body within the radius gets the
 seat's hit flags (`weapon_blast_items`: they break / drop / are shot down as by a shot); once a
 creature, at its part nearest the point that takes damage: never the body's root, which `part_hit` never reaches, nor
@@ -120,13 +122,21 @@ shop's nine, the dropped pickups) turns on one clock: the same angle and bob at 
 
 ## Drops (`Weapons::Drops`)
 
-The weapons' second mode (used by an unreleased mode, docs/unreleased/):
+The weapons' second mode (Horde Mode: docs/horde.md "Weapons"):
 - A killed creature drops a **pickup** one time in 9 (at most 6 lying): a weapon by its `drop_weight`, its model turning
   where the creature was (about 30 pixels across at any distance), for 7 s (blinking at the end). A shot at it takes it
-  (the shot is not fired; the life item's pick-up sound 0xA01351): a new weapon goes into the hand full, one already
-  held gets its reserve full.
-- Weapons and ammo carry over to the next chapter; out of lives (continue / game over) the seat is back to the handgun.
+  (the shot is not fired; the life item's pick-up sound 0xA01351): a new weapon goes into the hand full; one already
+  held gets **ammo only** (hordepub, user 2026-11-09: "picking up ammo must not switch you to that gun"): half its full
+  reserve (a magazine at least) added to its reserve, the gun in the hand stays (it used to switch from the handgun).
+- Weapons and ammo carry over to the next chapter and **through a continue** (hordepub, user 2026-11-09: the seat is no
+  longer put back to the handgun when it is out of lives; its weapon in the hand gets its own magazine back when it
+  plays again: `weapons: 1P plays again with the rifle (2 weapons kept)`).
 - The handgun reloads at once as in the arcade; the others take their reload time.
+- **Bosses** (hordepub, user 2026-11-09: "the Magician's Hand does not damage the Magician"): the Hand's explosions hit
+  creatures in `enemy_part_hits`; the bosses with their own hit test (the Magician's `magician_hit`, the Chariot without
+  its armour: `chariot_part_damage`) now take an explosion near them as a shot at their nearest damageable part
+  (`weapon_blast_boss`: the Magician's parts 4 / 6 / 11 / 13, any part while he guards so it sparks; the Chariot's parts
+  with a plate left), with their own damage. The Hangedman and the Hermit use `enemy_part_hits` (hit before too).
 
 ## Testing helpers
 

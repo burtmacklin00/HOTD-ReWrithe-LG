@@ -55,6 +55,7 @@ void RuntimeState::save(game::Runtime& rt)
     sprites2d__ = rt.sprites2d_, coverOff__ = rt.coverOff_;
     pcCells_ = rt.pcCells, pcClip_ = rt.pcClip;
     pcTexts_ = rt.pcTexts;
+    pcTextIds_ = rt.pcTextIds;
     pcNameModels_ = rt.pcNameModels;
     cellSide_ = rt.cellSide, cellText_ = rt.cellText, cellHud_ = rt.cellHud;
     std::copy(rt.light, rt.light + 3, light_);
@@ -79,6 +80,15 @@ void RuntimeState::save(game::Runtime& rt)
     boss_ = rt.boss;
     bossMode_ = rt.boss_mode, bossEvents_ = rt.boss_events;
     bossNext_ = rt.boss_next, bossNoContinue_ = rt.bossNoContinue, startAtSection0_ = rt.startAtSection0;
+    if (!survival_) survival_ = std::make_unique<game::SurvivalMode>();
+    *survival_ = rt.survival;
+    if (!weapons_) weapons_ = std::make_unique<game::Weapons>();
+    *weapons_ = rt.weapons;
+    survivalMusic__ = rt.survivalMusic_;
+    std::copy(rt.weaponBolts, rt.weaponBolts + 8, weaponBolts_);
+    std::copy(rt.weaponBlast, rt.weaponBlast + game::Runtime::kWeaponBlasts, weaponBlast_);
+    weaponFrame_ = rt.weaponFrame;
+    std::copy(rt.weaponShot, rt.weaponShot + 4, weaponShot_);
     valid = true;
 }
 
@@ -122,6 +132,7 @@ void RuntimeState::restore(game::Runtime& rt) const
     rt.sprites2d_ = sprites2d__, rt.coverOff_ = coverOff__;
     rt.pcCells = pcCells_, rt.pcClip = pcClip_;
     rt.pcTexts = pcTexts_;
+    rt.pcTextIds = pcTextIds_;
     rt.pcNameModels = pcNameModels_;
     rt.cellSide = cellSide_, rt.cellText = cellText_, rt.cellHud = cellHud_;
     std::copy(light_, light_ + 3, rt.light);
@@ -146,6 +157,13 @@ void RuntimeState::restore(game::Runtime& rt) const
     rt.boss = boss_;
     rt.boss_mode = bossMode_, rt.boss_events = bossEvents_;
     rt.boss_next = bossNext_, rt.bossNoContinue = bossNoContinue_, rt.startAtSection0 = startAtSection0_;
+    rt.survival = *survival_;
+    rt.weapons = *weapons_;
+    rt.survivalMusic_ = survivalMusic__;
+    std::copy(weaponBolts_, weaponBolts_ + 8, rt.weaponBolts);
+    std::copy(weaponBlast_, weaponBlast_ + game::Runtime::kWeaponBlasts, rt.weaponBlast);
+    rt.weaponFrame = weaponFrame_;
+    std::copy(weaponShot_, weaponShot_ + 4, rt.weaponShot);
 }
 
 } // namespace hotd::net

@@ -130,6 +130,15 @@ the same way, in the game's own bitmap fonts (Latin-1: no `lang.font`; French wr
 Latin-1 lacks). Labels are shortened to fit (German especially); `--lang-check` for each: no text too wide that English
 does not also have.
 
+17 more (langs2, 2026-11-10), every key, machine-translated (AI) the same way: in the game's own fonts (Latin-1, no
+`lang.font`) `nl.txt` (Dutch), `sv.txt` (Swedish), `da.txt` (Danish), `nb.txt` (Norwegian Bokmal), `fi.txt` (Finnish),
+`pt-pt.txt` (European Portuguese), `ms.txt` (Malay), `fil.txt` (Filipino); in Noto Sans with `lang.upper = 0`
+`cs.txt` (Czech), `ro.txt` (Romanian), `hu.txt` (Hungarian), `uk.txt` (Ukrainian), `bg.txt` (Bulgarian), `el.txt`
+(Greek); `th.txt` (Thai, `NotoSansThai-Bold.ttf`), `zh-tw.txt` (Traditional Chinese, `NotoSansTC-Bold.otf`) and
+`fa.txt` (Persian, right-to-left, `NotoSansArabic-Bold.ttf`). en.txt also holds the 28 texts the `--export-lang` tour
+does not reach (the PC menu's Very Easy / Very Hard, key caps, the model viewer's names ...: main.cpp's extra list), so
+every language translates them.
+
 In play, the PC font's words (the PC models' **Continues n**, **Press SPACE to skip Demo**, the PC pause's
 **PAUSED / Continue / Exit**) are drawn as text in the language when one is chosen (the PC font only has the
 English letters); English keeps the PC's pictures.
@@ -152,7 +161,8 @@ sub.37.1 = 아직 안에 사람들이 남아 있어. 구해 줘.
 
 A translated subtitle is drawn in your font (white with a dark edge, low in the picture) instead of the game's own
 line, in both model sources (arcade / PC). Untranslated lines stay the game's own. (Options > Gameplay > Game Text
-Japanese switches the game to the arcade's own Japanese subtitles and voice-message pictures instead.)
+Japanese switches the game to the arcade's own Japanese subtitles and voice-message pictures instead.) To also change
+a subtitle's timing, size or place, write a subtitle file with the same ids: [subtitles.md](subtitles.md).
 
 ## Pictures with words
 

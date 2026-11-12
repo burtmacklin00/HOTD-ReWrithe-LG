@@ -458,9 +458,9 @@ std::vector<std::string> SceneView::lines(const Runtime& rt) const
         std::snprintf(b, sizeof b, "Fast-forward ... frame %llu  Esc back", (unsigned long long)rt.frameCount);
         v.push_back(b);
     } else if (phase == Phase::Over) {
-        v.push_back(overLine(freeCam, padType));
+        v.push_back(overLine(cam.on, padType));
     } else {
-        v.push_back(keysLine(paused, slow, freeCam, padType, freeFast, freeSlow));
+        v.push_back(keysLine(paused, slow, cam.on, padType, cam.fast, cam.slow));
     }
     if (phase == Phase::Watching || phase == Phase::Over)
         v.push_back(fxLine(fx));
@@ -474,8 +474,8 @@ std::vector<std::string> SceneView::hintLines() const
 {
     if (hintsOff)
         return {};
-    std::vector<std::string> v = {phase == Phase::Over ? overLine(freeCam, padType)
-                                                       : keysLine(paused, slow, freeCam, padType, freeFast, freeSlow)};
+    std::vector<std::string> v = {phase == Phase::Over ? overLine(cam.on, padType)
+                                                       : keysLine(paused, slow, cam.on, padType, cam.fast, cam.slow)};
     if (phase != Phase::Seeking)
         v.push_back(fxLine(fx));
     if (castOpen)
@@ -484,35 +484,6 @@ std::vector<std::string> SceneView::hintLines() const
     return v;
 }
 
-void SceneView::freeCamStep(const FreeCamInput& in, float dt)
-{
-    if (!freeCam)
-        return;
-    dt = std::clamp(dt, 0.0f, 0.1f);   // (a long frame, a breakpoint: no jump)
-    FreeCamInput s = in;
-    if (freeSlow) {   // a quarter of the move and the turn, eased (time constant 0.45 s: starts and stops gently)
-        const float a = 1.0f - std::exp(-dt / 0.45f);
-        for (int k = 0; k < 3; ++k)
-            slowMove_[k] += (in.move[k] * 0.25f - slowMove_[k]) * a, s.move[k] = slowMove_[k];
-        for (int k = 0; k < 2; ++k)
-            slowLook_[k] += (in.look[k] * 0.25f - slowLook_[k]) * a, s.look[k] = slowLook_[k];
-    } else {
-        for (int k = 0; k < 3; ++k) slowMove_[k] = in.move[k];
-        const float an = 1.0f - std::exp(-dt / 0.06f);   // the mouse look eased a little too (the turn is kept, only spread over a few frames)
-        for (int k = 0; k < 2; ++k)
-            slowLook_[k] += (in.look[k] - slowLook_[k]) * an, s.look[k] = slowLook_[k];
-    }
-    Camera& c = freeCamera;
-    c.yaw += s.look[0];
-    c.pitch = std::clamp(c.pitch + s.look[1], -1.55f, 1.55f);
-    // the wheel: the field of view a notch at a time (10 % narrower / wider), 5-110 degrees
-    if (in.zoom != 0)
-        c.fovY = std::clamp(c.fovY * std::pow(0.9f, in.zoom), 0.087f, 1.92f);
-    float right[3], up[3], fwd[3];
-    c.basis(right, up, fwd);
-    const float v = kFreeCamSpeed * dt * (s.fast ? 4.0f : 1.0f) * (s.fine ? 0.25f : 1.0f);
-    for (int k = 0; k < 3; ++k)
-        c.pos[k] += v * (s.move[0] * right[k] + s.move[1] * up[k] + s.move[2] * fwd[k]);
-}
+// (photomode: Free Cam's step is FreeCam::step, game/free_cam.cpp, shared with Photo Mode)
 
 } // namespace hotd::game

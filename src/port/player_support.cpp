@@ -26,7 +26,7 @@ template <class P> uint32_t Game<P>::projectile_hit_player(uint32_t point, int s
             if (p >= 0 && p < seat_count()) {
                 const int32_t st = int32_t(mem.u32(player_rec(p)));
                 const bool canHit = mem.template at<int16_t>(G::game_mode) != 4 || st == 1 || st == 4 || st == 5;
-                if (canHit && mem.u32(invuln_at(p)) == 0 &&
+                if (canHit && !this->cheatInvincible && mem.u32(invuln_at(p)) == 0 &&   // (smallfix: Invincibility)
                     mem.template at<int16_t>(G::game_mode) != 3) {
                     const uint32_t pl = player_rec(p);
                     mem.template at<uint8_t>(G::hits_counter) = uint8_t(mem.template at<uint8_t>(G::hits_counter) - 1);

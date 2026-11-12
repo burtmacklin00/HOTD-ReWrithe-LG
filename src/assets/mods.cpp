@@ -1,5 +1,6 @@
 #include "assets/mods.h"
 
+#include "assets/model_import.h"
 #include "util/png.h"
 #include "util/png_read.h"
 
@@ -9,6 +10,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -111,16 +113,8 @@ std::string arcadeHash(const TextureSet& ts, int sheet, int x, int y, int w, int
 
 // custom models: a Wavefront OBJ (v / vt / f, polygons fanned to triangles, negative indices; usemtl + mtllib: newmtl,
 // Kd, map_Kd). Positions are the original model's own space (hotd --export-models writes it)
-struct ObjMaterial {
-    std::string name;      // newmtl (the export's: tex_<texture ID>-c<palette entry> / page_p<page>: the original texture)
-    std::string picture;   // map_Kd, absolute
-    float kd[3] = {1, 1, 1};
-};
-struct ObjModel {
-    struct Tri { float p[3][3]; float t[3][2]; int mat; };
-    std::vector<Tri> tris;
-    std::vector<ObjMaterial> mats;
-};
+using ObjMaterial = ImportMaterial;   // modelpacks: the shared mesh form (assets/model_import.h)
+using ObjModel = ImportModel;
 
 // relprep (compliance): a file a mod's OBJ / MTL names stays inside the mod's folder: a relative path without "..",
 // no drive or root (a mod never reads other files of the PC); "" = refused
@@ -139,6 +133,10 @@ bool readObj(const std::string& path, ObjModel& out, std::string& err)
 {
     std::ifstream f(path);
     if (!f) { err = path + ": cannot open"; return false; }
+    {   // modelpacks: a broken / hostile file fails cleanly (model_import.h limits)
+        std::error_code ec;
+        if (fs::file_size(path, ec) > kImportMaxFileBytes) { err = path + ": too large (64 MB at most)"; return false; }
+    }
     const fs::path dir = fs::path(path).parent_path();
     std::vector<std::array<float, 3>> v;
     std::vector<std::array<float, 2>> vt;
@@ -180,6 +178,7 @@ bool readObj(const std::string& path, ObjModel& out, std::string& err)
         if (k == "v") {
             std::array<float, 3> p{};
             s >> p[0] >> p[1] >> p[2];
+            if (!s || !std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) { err = path + ": bad vertex: " + line; return false; }
             v.push_back(p);
         } else if (k == "vt") {
             std::array<float, 2> t{};
@@ -219,10 +218,74 @@ bool readObj(const std::string& path, ObjModel& out, std::string& err)
                 t.mat = cur;
                 out.tris.push_back(t);
             }
+            if (out.tris.size() > kImportMaxTriangles) { err = path + ": more than 1048576 triangles"; return false; }
         }
     }
     if (out.tris.empty()) { err = path + ": no faces"; return false; }
     return true;
+}
+
+// modelpacks: a replacement mesh file by its extension (.obj, .gltf / .glb)
+bool readModelFile(const std::string& path, ObjModel& out, std::string& err)
+{
+    const std::string ext = lower(fs::path(path).extension().string());
+    if (ext == ".obj") return readObj(path, out, err);
+    if (ext == ".gltf" || ext == ".glb") return readGltf(path, out, err);
+    err = path + ": not an .obj, .gltf or .glb file";
+    return false;
+}
+
+// modelpacks: 1 or 3 numbers (commas or spaces between); false: not that
+bool parseFloats(const std::string& v, float out[3], bool allowOne)
+{
+    std::string s = v;
+    for (char& c : s) if (c == ',') c = ' ';
+    std::istringstream in(s);
+    float f[4];
+    int n = 0;
+    while (n < 4 && in >> f[n]) {
+        if (!std::isfinite(f[n])) return false;
+        ++n;
+    }
+    if (in.fail() && !in.eof()) return false;   // (a word that is not a number)
+    if (n == 3) { out[0] = f[0], out[1] = f[1], out[2] = f[2]; return true; }
+    if (n == 1 && allowOne) { out[0] = out[1] = out[2] = f[0]; return true; }
+    return false;
+}
+
+// modelpacks: a hex object ID (0x optional); 0 = not one
+uint32_t parseObjectId(const std::string& v)
+{
+    std::string s = lower(trim(v));
+    if (s.rfind("0x", 0) == 0) s = s.substr(2);
+    char* end = nullptr;
+    const unsigned long id = s.empty() || s.size() > 8 ? 0 : std::strtoul(s.c_str(), &end, 16);
+    return end && !*end ? uint32_t(id) : 0;
+}
+
+// modelpacks: one key of a [model] section
+bool parseModelLine(const ModPack& p, ModPack::ModelRepl& m, const std::string& k, const std::string& v)
+{
+    if (k == "id") return (m.id = parseObjectId(v)) != 0;
+    if (k == "file") {
+        if (lower(v).rfind("game:", 0) == 0) return (m.gameId = parseObjectId(v.substr(5))) != 0;
+        m.file = importInsideDir(p.dir, v);
+        if (m.file.empty()) {
+            std::fprintf(stderr, "mods: %s: file = %s: outside the mod's folder (refused)\n", p.id.c_str(), v.c_str());
+            return true;   // (already said; the section is left out for having no file)
+        }
+        return true;
+    }
+    if (k == "scale") return parseFloats(v, m.scale, true);
+    if (k == "offset") return parseFloats(v, m.offset, false);
+    if (k == "rotation" || k == "rotate") return parseFloats(v, m.rotation, false);
+    if (k == "models") {
+        const std::string s = lower(v);
+        m.targets = s == "pc" ? 1 : s == "arcade" ? 2 : s == "both" ? 3 : 0;
+        if (!m.targets) { m.targets = 3; return false; }
+        return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -435,6 +498,11 @@ static ModPack builtinCosmetic(const std::string& type)
                     // (user 2026-11-07: the menu's blood its own setting, Off by default: each color change draws the
                     // whole menu again)
                     {"menu", "Menu Blood | Off | Off, Rainbow | The main menu's blood in the rainbow too (it changes color every few seconds: the menu is drawn again each time)"}};
+    } else if (type == "hermithead") {
+        // (user 2026-11-09: the Hermit's unused second head with the glowing red eyes, boss31_kao; game/cosmods.h)
+        p.id = "hermit-head";
+        p.name = "Hermit Fly Head Mod";
+        p.description = "The Hermit (the Chapter 3 boss) wears the game's own unused second head, with two big glowing red eyes (arcade models only; visual only)";
     } else {
         p.id = "big-head";
         p.name = "Big Head";
@@ -457,14 +525,14 @@ std::vector<ModPack> findMods(const std::vector<std::string>& roots)
     // the built-in's missing settings after its own
     // (cosmods: the same for Rainbow Blood / Big Head, e.g. Creature Blood)
     for (ModPack& p : all)
-        if (p.type == "ragdoll" || p.type == "rainbowblood" || p.type == "bighead")
+        if (p.type == "ragdoll" || p.type == "rainbowblood" || p.type == "bighead" || p.type == "hermithead")
             for (const ModSetting& b : (p.type == "ragdoll" ? builtinRagdoll() : builtinCosmetic(p.type)).settings)
                 if (std::none_of(p.settings.begin(), p.settings.end(), [&](const ModSetting& q) { return q.key == b.key; }))
                     p.settings.push_back(b);
     bool added = false;
     if (std::none_of(all.begin(), all.end(), [](const ModPack& p) { return p.type == "ragdoll"; }))
         all.push_back(builtinRagdoll()), added = true;
-    for (const char* t : {"rainbowblood", "bighead"})   // cosmods
+    for (const char* t : {"rainbowblood", "bighead", "hermithead"})   // cosmods
         if (std::none_of(all.begin(), all.end(), [t](const ModPack& p) { return p.type == t; }))
             all.push_back(builtinCosmetic(t)), added = true;
     if (added)
@@ -501,18 +569,33 @@ std::vector<ModPack> findModPacks(const std::vector<std::string>& roots)
             p.name = p.id;
             std::ifstream ini(d.path() / "mod.ini");
             std::string line, section = "mod";
+            int lineNo = 0;
             while (std::getline(ini, line)) {
+                ++lineNo;
                 for (const char* c : {" ;", "\t;"})   // a comment after the value (docs/mods.md's examples)
                     if (const size_t sc = line.find(c); sc != std::string::npos) line.resize(sc);
                 line = trim(line);
                 if (line.empty() || line[0] == ';' || line[0] == '#') continue;
                 if (line[0] == '[') {
                     section = lower(trim(line.substr(1, line.find(']') - 1)));
+                    // modelpacks: every [model] header (also [model <anything>]) starts one replacement
+                    if (section == "model" || section.rfind("model ", 0) == 0 || section.rfind("model.", 0) == 0 ||
+                        section.rfind("model:", 0) == 0) {
+                        section = "model";
+                        p.modelRepls.emplace_back();
+                        p.modelRepls.back().line = lineNo;
+                    }
                     continue;
                 }
                 const size_t eq = line.find('=');
                 if (eq == std::string::npos) continue;
                 const std::string k = lower(trim(line.substr(0, eq))), v = trim(line.substr(eq + 1));
+                if (section == "model") {
+                    if (!parseModelLine(p, p.modelRepls.back(), k, v))
+                        std::fprintf(stderr, "mods: %s: mod.ini line %d: [model] %s = %s: not understood (docs/modding.md \"Model packs\")\n",
+                                     p.id.c_str(), lineNo, k.c_str(), v.c_str());
+                    continue;
+                }
                 if (section == "mod") {
                     if (k == "name") p.name = v;
                     else if (k == "author") p.author = v;
@@ -523,8 +606,10 @@ std::vector<ModPack> findModPacks(const std::vector<std::string>& roots)
                         p.targets = m == "pc" ? 1 : m == "arcade" ? 2 : 3;
                     } else if (k == "type") {
                         p.type = lower(v);
-                        if (p.type != "textures" && p.type != "ragdoll" && p.type != "rainbowblood" && p.type != "bighead")
-                            std::fprintf(stderr, "mods: %s: type = %s: textures, ragdoll, rainbowblood or bighead (docs/modding.md)\n",
+                        if (p.type == "models" || p.type == "model") p.type = "textures";   // modelpacks: a model pack is a texture pack's kind
+                        if (p.type != "textures" && p.type != "ragdoll" && p.type != "rainbowblood" && p.type != "bighead" &&
+                            p.type != "hermithead")
+                            std::fprintf(stderr, "mods: %s: type = %s: textures, ragdoll, rainbowblood, bighead or hermithead (docs/modding.md)\n",
                                          p.id.c_str(), v.c_str());
                     } else if (k == "default") {
                         const std::string m = lower(v);
@@ -568,11 +653,25 @@ std::vector<ModPack> findModPacks(const std::vector<std::string>& roots)
                     }
                     p.pngs.emplace(normaliseId(id), it->path().string());
                 }
+            // modelpacks: a [model] needs an id and a file (or game:<id>); a broken one is left out with a message
+            std::set<std::string> named;   // the files [model] sections name (not also read by their file name below)
+            for (auto it = p.modelRepls.begin(); it != p.modelRepls.end();) {
+                const char* why = !it->id ? "no id = <object ID in hex>" : it->file.empty() && !it->gameId ? "no file = <.obj / .gltf / .glb> or game:<object ID>" : nullptr;
+                if (!why && !it->file.empty() && !fs::is_regular_file(fs::path(it->file), ec)) why = "its file is missing";
+                if (why) {
+                    std::fprintf(stderr, "mods: %s: mod.ini line %d: [model] left out: %s\n", p.id.c_str(), it->line, why);
+                    it = p.modelRepls.erase(it);
+                    continue;
+                }
+                if (!it->file.empty()) named.insert(lower(fs::path(it->file).lexically_normal().string()));
+                ++it;
+            }
             // custom models: models\<label>_o<object ID in hex>.obj (with its .mtl and PNGs)
             const fs::path mdl = d.path() / "models";
             if (fs::is_directory(mdl, ec))
                 for (auto it = fs::recursive_directory_iterator(mdl, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
                     if (ec || !it->is_regular_file(ec) || lower(it->path().extension().string()) != ".obj") continue;
+                    if (named.count(lower(it->path().lexically_normal().string()))) continue;
                     const std::string stem = lower(it->path().stem().string());
                     const size_t us = stem.find_last_of('_');
                     const std::string id = us == std::string::npos ? stem : stem.substr(us + 1);
@@ -647,7 +746,7 @@ StageReplacements TexturePacks::build(const StageData& stage) const
     const int bit = stage.source == Source::PC ? 1 : 2;
     bool any = false;
     for (const ModPack& p : active_)
-        any |= (p.targets & bit) && (!p.pngs.empty() || !p.rules.empty() || !p.objs.empty());
+        any |= (p.targets & bit) && (!p.pngs.empty() || !p.rules.empty() || !p.objs.empty() || !p.modelRepls.empty());
     if (!any) return r;
     r.sets.resize(stage.textureSets.size());
     std::map<const ReplImage*, uint32_t> index;
@@ -788,11 +887,80 @@ StageReplacements TexturePacks::build(const StageData& stage) const
         if (!byId.count(e.id)) byId[e.id] = &e;
     for (const ModPack& p : active_) {
         if (!(p.targets & bit)) continue;
-        for (const auto& [id, path] : p.objs) {
+        // modelpacks: the [model] sections first (for this model source), then models\<label>_o<id>.obj as they are
+        std::vector<ModPack::ModelRepl> jobs;
+        for (const ModPack::ModelRepl& m : p.modelRepls)
+            if (m.targets & bit) jobs.push_back(m);
+        for (const auto& [oid, file] : p.objs) {
+            ModPack::ModelRepl m;
+            m.id = oid, m.file = file;
+            jobs.push_back(m);
+        }
+        for (const ModPack::ModelRepl& job : jobs) {
+            const uint32_t id = job.id;
+            const std::string& path = job.file;
             if (r.models.count(id) || !stage.models.count(id)) continue;
+            // scale, then rotate, then move (the model's own space); a mirroring scale turns the triangles over
+            float rot[9];
+            importRotation(job.rotation, rot);
+            const bool mirror = job.scale[0] * job.scale[1] * job.scale[2] < 0;
+            auto xf = [&](const float in[3], float o[3]) {
+                const float s[3] = {in[0] * job.scale[0], in[1] * job.scale[1], in[2] * job.scale[2]};
+                for (int c = 0; c < 3; ++c) o[c] = rot[c * 3] * s[0] + rot[c * 3 + 1] * s[1] + rot[c * 3 + 2] * s[2] + job.offset[c];
+            };
+            if (job.gameId) {
+                // game:<id>: another model of this stage (the player's own files), its meshes of the preferred variant as
+                // the export takes them, with their own textures and colours
+                auto src = stage.models.find(job.gameId);
+                if (src == stage.models.end() || src->second.triangleCount() == 0) {
+                    std::fprintf(stderr, "mods: %s stage %d: model %X: game:%X is not in this stage (left as it is)\n",
+                                 sourceName(stage.source), stage.stage, unsigned(id), unsigned(job.gameId));
+                    continue;
+                }
+                std::vector<Vertex> verts;
+                for (const Mesh& me : src->second.meshes) {
+                    if (me.variant >= 0 && me.variant != src->second.preferredVariant) continue;
+                    for (size_t i = 0; i + 2 < me.vertices.size(); i += 3) {
+                        Vertex tri[3] = {me.vertices[i], me.vertices[i + 1], me.vertices[i + 2]};
+                        for (Vertex& v : tri) {
+                            float pp[3];
+                            xf(v.pos, pp);
+                            // the normal: rotated, by the inverse scale (a non-uniform scale keeps it upright on the surface)
+                            float n[3] = {v.normal[0] / (job.scale[0] ? job.scale[0] : 1), v.normal[1] / (job.scale[1] ? job.scale[1] : 1),
+                                          v.normal[2] / (job.scale[2] ? job.scale[2] : 1)};
+                            float rn[3];
+                            for (int c = 0; c < 3; ++c) rn[c] = rot[c * 3] * n[0] + rot[c * 3 + 1] * n[1] + rot[c * 3 + 2] * n[2];
+                            const float len = std::sqrt(rn[0] * rn[0] + rn[1] * rn[1] + rn[2] * rn[2]);
+                            for (int c = 0; c < 3; ++c) {
+                                v.pos[c] = pp[c];
+                                v.normal[c] = len > 0 ? rn[c] / len : 0.0f;
+                            }
+                        }
+                        if (mirror) std::swap(tri[1], tri[2]);
+                        verts.insert(verts.end(), tri, tri + 3);
+                    }
+                }
+                if (verts.empty()) continue;
+                r.models[id] = std::move(verts);
+                if (modDepthFor(p, true) >= 0) r.modelDepth[id] = modDepthFor(p, true);   // depthopt (auto: buffer)
+                std::fprintf(stderr, "mods: %s stage %d: model %X drawn as game model %X (%zu triangles)\n", sourceName(stage.source),
+                             stage.stage, unsigned(id), unsigned(job.gameId), r.models[id].size() / 3);
+                continue;
+            }
             ObjModel om;
             std::string err;
-            if (!readObj(path, om, err)) { std::fprintf(stderr, "mods: %s\n", err.c_str()); continue; }
+            if (!readModelFile(path, om, err)) { std::fprintf(stderr, "mods: %s (model %X left as it is)\n", err.c_str(), unsigned(id)); continue; }
+            for (ObjModel::Tri& t : om.tris) {
+                for (auto& pt : t.p) {
+                    const float in[3] = {pt[0], pt[1], pt[2]};
+                    xf(in, pt);
+                }
+                if (mirror) {
+                    for (int c = 0; c < 3; ++c) std::swap(t.p[1][c], t.p[2][c]);
+                    std::swap(t.t[1][0], t.t[2][0]);
+                    std::swap(t.t[1][1], t.t[2][1]);
+                }
+            }
             struct Mat { int64_t key = -1; Vertex base{}; bool native = false; float w = 1, h = 1; };
             std::vector<Mat> mats(om.mats.size());
             auto ownKey = [&](size_t m) -> int64_t {
@@ -806,6 +974,10 @@ StageReplacements TexturePacks::build(const StageData& stage) const
                 const ObjMaterial& om2 = om.mats[m];
                 Mat& mt = mats[m];
                 std::shared_ptr<const ReplImage> img = om2.picture.empty() ? nullptr : load(om2.picture);
+                if (om2.image) {   // modelpacks: a glTF's embedded picture (the atlas holds up to 2048 x 2048)
+                    if (om2.image->width <= 2048 && om2.image->height <= 2048) img = om2.image;
+                    else std::fprintf(stderr, "mods: %s: material %s: embedded picture larger than 2048 x 2048 (left out)\n", path.c_str(), om2.name.c_str());
+                }
                 const std::string name = lower(om2.name);
                 // the export's own material: the original texture
                 if (stage.source == Source::Arcade && name.rfind("tex_", 0) == 0 && name.find("-c") != std::string::npos) {
@@ -973,6 +1145,145 @@ int modDepthTest()
     if (parseModDepth(" Buffer") != 0 || parseModDepth("sort") != 1 || parseModDepth("auto") != -1 || parseModDepth("x") != -2 ||
         modDepthFor(p, false) != -1 || modDepthFor(p, true) != 0)
         ++failed, std::printf("mods test: depth: the values   FAILED\n");
+    fs::remove_all(root, ec);
+    return failed;
+}
+
+int modelPackTest(int& checks)
+{
+    // modelpacks: one mod folder in the temp folder with a [model] section per case, each replacing its own model of a
+    // small PC stage (models 1..15; model 2 is a one-triangle game model for game:2). Good files must give their model
+    // the expected first vertex; malformed ones must leave their model alone (a message, no crash)
+    int failed = 0;
+    std::error_code ec;
+    const fs::path root = fs::temp_directory_path(ec) / ("hotd_model_pack_test_" + std::to_string(std::rand()));
+    const fs::path dir = root / "modelpack";
+    fs::create_directories(dir / "models", ec);
+    auto write = [&](const std::string& name, const std::string& data) {
+        std::ofstream o(dir / name, std::ios::binary);
+        o.write(data.data(), std::streamsize(data.size()));
+    };
+    // one triangle (0,0,0) (1,0,0) (0,1,0) as glTF: 36 bytes of positions, 6 of u16 indices, 2 of padding
+    std::string bin(44, '\0');
+    const float pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    const uint16_t idx[3] = {0, 1, 2};
+    std::memcpy(&bin[0], pos, 36);
+    std::memcpy(&bin[36], idx, 6);
+    auto b64 = [](const std::string& s) {
+        static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string o;
+        for (size_t i = 0; i < s.size(); i += 3) {
+            const uint32_t n = uint32_t(uint8_t(s[i])) << 16 | (i + 1 < s.size() ? uint32_t(uint8_t(s[i + 1])) << 8 : 0) |
+                               (i + 2 < s.size() ? uint32_t(uint8_t(s[i + 2])) : 0);
+            o += t[n >> 18 & 63];
+            o += t[n >> 12 & 63];
+            o += i + 1 < s.size() ? t[n >> 6 & 63] : '=';
+            o += i + 2 < s.size() ? t[n & 63] : '=';
+        }
+        return o;
+    };
+    auto gltfJson = [](const std::string& bufferUri, int posCount) {
+        std::string j = "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,\"scenes\":[{\"nodes\":[0]}],"
+                        "\"nodes\":[{\"mesh\":0,\"translation\":[0,5,0]}],"
+                        "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1}]}],"
+                        "\"buffers\":[{\"byteLength\":44" + (bufferUri.empty() ? std::string() : ",\"uri\":\"" + bufferUri + "\"") + "}],"
+                        "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6}],"
+                        "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":" + std::to_string(posCount) + ",\"type\":\"VEC3\"},"
+                        "{\"bufferView\":1,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}]}";
+        return j;
+    };
+    auto glb = [&](const std::string& json, uint32_t binLenField) {
+        std::string js = json;
+        while (js.size() % 4) js += ' ';
+        std::string o;
+        auto u32 = [&](uint32_t v) { o.append(reinterpret_cast<const char*>(&v), 4); };
+        u32(0x46546C67u), u32(2), u32(uint32_t(12 + 8 + js.size() + 8 + bin.size()));
+        u32(uint32_t(js.size())), u32(0x4E4F534Au);
+        o += js;
+        u32(binLenField), u32(0x004E4942u);
+        o += bin;
+        return o;
+    };
+    write("models/tri.obj", "mtllib tri.mtl\nusemtl red\nv 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n");
+    write("models/tri.mtl", "newmtl red\nKd 1 0 0\n");
+    write("models/tri.gltf", gltfJson("data:application/octet-stream;base64," + b64(bin), 3));
+    write("models/tri_file.gltf", gltfJson("tri.bin", 3));
+    write("models/tri.bin", bin);
+    write("models/tri.glb", glb(gltfJson("", 3), uint32_t(bin.size())));
+    // malformed
+    write("models/badindex.obj", "v 0 0 0\nv 1 0 0\nf 1 2 9\n");
+    write("models/badvertex.obj", "v 0 zero 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    write("models/empty.obj", "# nothing\n");
+    write("models/truncated.gltf", gltfJson("tri.bin", 3).substr(0, 120));
+    write("models/notjson.gltf", "this is not a glTF file");
+    write("models/v1.gltf", "{\"asset\":{\"version\":\"1.0\"},\"meshes\":[]}");
+    write("models/overrun.gltf", gltfJson("tri.bin", 300));   // the accessor runs past its bufferView
+    write("models/outside.gltf", gltfJson("../escape.bin", 3));
+    write("models/brokenchunk.glb", glb(gltfJson("", 3), 0x7FFFFFF0u));
+    write("models/random.glb", std::string("glTF\x02\0\0\0\xff\xff", 10));
+    write("mod.ini",
+          "[mod]\nname = Model Pack Test\ntype = models\n"
+          "[model]\nid = 3\nfile = models/tri.obj\nscale = 2\nrotation = 0, 90, 0\noffset = 1 0 0\n"   // (1,0,0) -> (1,0,-2)
+          "[model gltf]\nid = 0x4\nfile = models/tri.gltf\n"            // node translation: (0,5,0) first
+          "[model]\nid = 5\nfile = models/tri.glb\nscale = 1, 2, 1\n"   // (0,10,0)
+          "[model]\nid = 6\nfile = game:2\noffset = 0, 0, 3\n"          // game model 2's (7,8,9) -> (7,8,12)
+          "[model]\nid = 7\nfile = models/tri_file.gltf\nmodels = arcade\n"   // not for the PC models: left alone
+          "[model]\nid = 8\nfile = models/badindex.obj\n"
+          "[model]\nid = 9\nfile = models/truncated.gltf\n"
+          "[model]\nid = a\nfile = models/notjson.gltf\n"
+          "[model]\nid = b\nfile = models/overrun.gltf\n"
+          "[model]\nid = c\nfile = models/outside.gltf\n"
+          "[model]\nid = d\nfile = models/brokenchunk.glb\n"
+          "[model]\nid = e\nfile = models/random.glb\n"
+          "[model]\nid = f\nfile = models/v1.gltf\n"
+          "[model]\nid = 10\nfile = models/badvertex.obj\n"
+          "[model]\nid = 11\nfile = models/empty.obj\n"
+          "[model]\nid = 12\nfile = game:999\n"
+          "[model]\nid = 13\nfile = ../../outside.obj\n"
+          "[model]\nfile = models/tri.obj\n"                            // no id: left out
+          "[model]\nid = 14\nfile = models/missing.obj\n"
+          "[model]\nid = 15\nfile = models/tri_file.gltf\nscale = big\n");   // a bad value: said, the rest kept
+    StageData st;
+    st.source = Source::PC;
+    for (uint32_t k = 1; k <= 0x15; ++k) st.models[k].key = k;
+    {
+        Mesh me;
+        me.vertices.resize(3);
+        for (int i = 0; i < 3; ++i) me.vertices[size_t(i)].pos[0] = 7, me.vertices[size_t(i)].pos[1] = 8, me.vertices[size_t(i)].pos[2] = 9;
+        me.vertices[1].pos[0] = 8;
+        st.models[2].meshes.push_back(me);
+    }
+    const std::vector<ModPack> packs = findModPacks({root.string()});
+    TexturePacks tp;
+    tp.setActive(packs);
+    const StageReplacements r = tp.build(st);
+    auto near = [](const float* a, float x, float y, float z) { return std::fabs(a[0] - x) < 1e-4f && std::fabs(a[1] - y) < 1e-4f && std::fabs(a[2] - z) < 1e-4f; };
+    auto expect = [&](const char* what, bool ok) {
+        ++checks;
+        if (!ok) ++failed;
+        std::printf("mods test: model packs: %-58s %s\n", what, ok ? "ok" : "FAILED");
+    };
+    auto vert = [&](uint32_t id, size_t i) -> const float* {
+        auto m = r.models.find(id);
+        return m != r.models.end() && m->second.size() > i ? m->second[i].pos : nullptr;
+    };
+    expect("mod.ini: type = models is a texture pack, 17 of 20 [model] kept", packs.size() == 1 && packs[0].type == "textures" &&
+           packs[0].modelRepls.size() == 17);
+    expect("OBJ with scale 2, rotation 0 90 0, offset 1 0 0", vert(3, 1) && near(vert(3, 1), 1, 0, -2));
+    expect("glTF (data: URI buffer), its node's translation", vert(4, 0) && near(vert(4, 0), 0, 5, 0) && near(vert(4, 1), 1, 5, 0));
+    expect("GLB, scale 1 2 1", vert(5, 0) && near(vert(5, 0), 0, 10, 0));
+    expect("game:2 with offset 0 0 3", vert(6, 0) && near(vert(6, 0), 7, 8, 12) && near(vert(6, 1), 8, 8, 12));
+    expect("models = arcade: not on the PC models", !r.models.count(7));
+    expect("glTF with a .bin file, a bad scale value ignored", vert(0x15, 0) && near(vert(0x15, 0), 0, 5, 0));
+    bool none = true;
+    for (uint32_t id : {8u, 9u, 0xAu, 0xBu, 0xCu, 0xDu, 0xEu, 0xFu, 0x10u, 0x11u, 0x12u, 0x13u, 0x14u})
+        if (r.models.count(id)) none = false, std::printf("mods test: model packs: malformed model %X was loaded\n", unsigned(id));
+    expect("13 malformed files / lines: their models left alone", none);
+    {
+        ImportModel im;
+        std::string err;
+        expect("readGltf: a broken GLB chunk gives a message", !readGltf((dir / "models" / "brokenchunk.glb").string(), im, err) && !err.empty());
+    }
     fs::remove_all(root, ec);
     return failed;
 }

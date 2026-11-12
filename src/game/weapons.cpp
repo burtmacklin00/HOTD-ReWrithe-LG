@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -23,6 +24,7 @@ using G = A::G;
 namespace {
 constexpr uint32_t kGunOnly = 0xF1000719;     // the players' gun hand without the hand (assets/arcade_loader.h kGunOnlyKey)
 constexpr uint32_t kMagicianHand = 0x1C6C;    // boss4_ter01: the Magician's right hand (the Gallery's t76 skeleton)
+constexpr uint32_t kCoin = 0x3B5;             // kinka: the gold coin (prop_drop_gold_coin; Survival's QUICK RELOAD sign)
 constexpr uint32_t kFireballFirst = 0x1CAB, kFireballLast = 0x1CB9;   // magician_fireball's looping models (in flight)
 constexpr int kMagicianArea = 12;             // the Magician's room's texture area (his parts' textures: view.cpp actorAreas)
 constexpr uint32_t kCueShotP1 = 0xA01208, kCueShotP2 = 0xA01207, kCueReload = 0xA01200, kCueTake = 0xA01351;
@@ -61,11 +63,19 @@ std::vector<WeaponDef> defaults()
     shotgun.scale = 1.25f, shotgun.price = 3000, shotgun.drop = 3, shotgun.rank = 3;
     WeaponDef& hand = v[kHand];
     hand.key = "hand", hand.name = "MAGICIAN'S HAND";
-    hand.magazine = 4, hand.reserveMags = 2, hand.reload = 120, hand.damage = 350, hand.area = 45.0f, hand.projectile = true;
+    // survhand (players 2026-11-10: "they made me lose in Survival"): 8000 points bought 12 shots (4 + 2 x 4, a 2 s
+    // reload) and the Hand was gone when used up, the light guns' auto best picked it last; the balance runs (Hand
+    // buyer, 3 arenas x 8 seeds, 18 rounds) lost 90 / 97 / 135 lives (the Double Pistols' 47 / 63 / 82). Now 6 + 5 x 6
+    // shots, a 1.3 s reload, 550 % in a 50 radius, kept empty (Ammo / Max Ammo fill it), the top auto rank: 25 / 39 / 36
+    hand.magazine = 6, hand.reserveMags = 5, hand.reload = 75, hand.damage = 550, hand.area = 50.0f, hand.projectile = true;
+    hand.keepEmpty = true;
     hand.model = kMagicianHand, hand.pickupModel = kMagicianHand, hand.scale = 0.8f;
     hand.fireSound = "hand_fire", hand.fireGameCue = 0xA01463;   // (magician_fireball's throw: the PC's cue 249)
+    // (tests 2026-11-09: as data/weapons.ini, user 2026-11-05 "make it louder": the stand-in cue 249 at 1.8; the
+    // built-in table had kept cue 30 at 1.0, heard only without the ini)
+    hand.fireCue = 249, hand.fireVolume = 1.8f;
     hand.reloadSound = "hand_reload", hand.reloadPitch = 0.5f;
-    hand.price = 8000, hand.drop = 1, hand.rank = 1;
+    hand.price = 8000, hand.drop = 1, hand.rank = 6;
     // Light Gun Edition (Killer Mods): the machine gun (heavier than the SMG: a bigger magazine, faster, a lower shot)
     // and the rocket launcher (one rocket a load, 5 in reserve; each one fired blows up every zombie on the screen:
     // Runtime::lg_fired)
@@ -74,13 +84,13 @@ std::vector<WeaponDef> defaults()
     mg.magazine = 50, mg.reserveMags = 4, mg.reload = 96, mg.period = 4, mg.burst = 5, mg.damage = 110;
     mg.fireSound = "machinegun_fire", mg.fireCue = 30, mg.firePitch = 1.0f, mg.fireClip = 0.38f, mg.fireVolume = 1.0f;
     mg.reloadSound = "machinegun_reload", mg.reloadPitch = 0.6f;
-    mg.price = 0, mg.drop = 0, mg.rank = 6;
+    mg.price = 0, mg.drop = 0, mg.rank = 7;
     WeaponDef& rk = v[kRocket];
     rk.key = "rocket", rk.name = "ROCKET LAUNCHER";
     rk.magazine = 1, rk.reserveMags = 5, rk.reload = 60, rk.damage = 100;
     rk.fireSound = "rocket_fire", rk.fireGameCue = 0xA01463;   // (the Magician's fireball throw, as the Hand's)
     rk.reloadSound = "rocket_reload", rk.reloadPitch = 0.5f;
-    rk.price = 0, rk.drop = 0, rk.rank = 7;
+    rk.price = 0, rk.drop = 0, rk.rank = 8;
     return v;
 }
 
@@ -236,6 +246,7 @@ bool loadWeapons(const std::string& path, std::string* log)
         else if (k == "range") w->range = std::max(0.0f, fl);
         else if (k == "area") w->area = std::max(0.0f, fl);
         else if (k == "projectile") w->projectile = u != 0;
+        else if (k == "keep_empty") w->keepEmpty = u != 0;
         else if (k == "dual") w->dual = std::clamp(fl, 0.0f, 100.0f);
         else if (k == "model") w->model = u;
         else if (k == "pickup_model") w->pickupModel = u;
@@ -268,6 +279,36 @@ uint32_t Weapons::next()
 {
     rng_ = rng_ * 1103515245u + 12345u;
     return (rng_ >> 8) & 0xFFFFFF;
+}
+
+uint64_t Weapons::digest() const
+{
+    uint64_t h = 0xCBF29CE484222325ull;   // (FNV-1a over the logic fields' values)
+    auto mix = [&h](uint64_t v) {
+        for (int i = 0; i < 8; ++i, v >>= 8)
+            h = (h ^ (v & 0xFF)) * 0x100000001B3ull;
+    };
+    mix(uint64_t(mode) | uint64_t(live) << 8 | uint64_t(rng_) << 32);
+    for (int p = 0; p < 4; ++p) {
+        const Seat& s = seat[p];
+        mix(uint64_t(autoBest[p]) | uint64_t(uint32_t(request[p])) << 32);
+        for (int w = 0; w < kWeapons; ++w)
+            mix(uint64_t(s.own[w]) | uint64_t(uint32_t(s.mag[w])) << 8 | uint64_t(uint32_t(s.reserve[w])) << 32);
+        mix(uint64_t(uint32_t(s.cur)) | uint64_t(uint32_t(s.reload)) << 32);
+        mix(uint64_t(uint32_t(s.timer)) | uint64_t(uint32_t(s.burst)) << 32);
+        mix(uint64_t(s.quick) | uint64_t(s.bigMag) << 1 | s.shotFrame << 8);
+    }
+    mix(pickups.size());
+    for (const Pickup& k : pickups) {
+        uint32_t b[3];
+        std::memcpy(b, k.pos, sizeof b);
+        mix(b[0] | uint64_t(b[1]) << 32);
+        mix(b[2] | uint64_t(uint32_t(k.weapon)) << 32);
+        mix(uint32_t(k.frames));
+    }
+    mix(uint64_t(uint32_t(dropped)) | uint64_t(uint32_t(taken)) << 32);
+    mix(uint32_t(reloadSeat));
+    return h;
 }
 
 void Weapons::begin(Runtime& rt, Mode m)
@@ -547,12 +588,30 @@ void Weapons::gunInput(Runtime& rt, int p, bool& trigger, bool onScreen, bool he
     if (mode == Drops && trigger && onScreen && shots)
         if (const int i = pickupAt(rt, x, y); i >= 0) {
             const int w = pickups[size_t(i)].weapon;
+            const bool up = pickups[size_t(i)].upgrade;
             pickups.erase(pickups.begin() + i);
             ++taken;
             trigger = false;
-            const bool fresh = give(rt, p, w);
-            if (fresh || s.cur == kPistol)
+            if (up) {   // hordepub: an upgrade (Survival's perks, its shop's order)
+                notice[p] = givePerk(rt, p);
+                noticeUntil[p] = rt.frameCount + 90;
+                rt.sound_cue(kCueTake);
+                if (rt.log)
+                    rt.log("weapons: " + std::to_string(p + 1) + "P took an upgrade (" + notice[p] + ") at frame " + std::to_string(rt.frameCount));
+                setShot(rt, p, false);
+                return;
+            }
+            // hordepub (user 2026-11-09: "picking up ammo must not switch you to that gun"): only a new weapon goes in
+            // the hand; one already held gets ammo: half its full reserve (a magazine at least) added to its reserve,
+            // the gun in the hand unchanged (it switched to it from the handgun before)
+            const bool fresh = !s.own[w];
+            if (fresh) {
+                give(rt, p, w);
                 select(rt, p, w);
+            } else if (def(w).reserveMags >= 0) {
+                const int full = reserveFull(p, w);
+                s.reserve[w] = std::min(full, s.reserve[w] + std::max(magazine(p, w), full / 2));
+            }
             notice[p] = fresh ? def(w).name : def(w).name + " AMMO";
             noticeUntil[p] = rt.frameCount + 90;
             rt.sound_cue(kCueTake);
@@ -634,8 +693,10 @@ void Weapons::afterFrame(Runtime& rt)
     if (!on())
         return;
     rt.weaponFrame = rt.frameCount;
+    // (hordepub: a held pickup's time runs only while the shots are on: a rescue's gift waits through its scene)
+    const bool shotsOn = rt.mem.at<int16_t>(G::game_mode) == 4 && rt.mem.u32(G::shot_enable) != 0;
     for (size_t i = 0; i < pickups.size();)
-        if (--pickups[i].frames <= 0)
+        if ((!pickups[i].hold || shotsOn) && --pickups[i].frames <= 0)
             pickups.erase(pickups.begin() + ptrdiff_t(i));
         else
             ++i;
@@ -643,19 +704,36 @@ void Weapons::afterFrame(Runtime& rt)
         Seat& s = seat[p];
         port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
         if (pl.state != 5) {
-            // Drops: out of lives (the continue / game over): back to the handgun, as the Remake's death
-            if (mode == Drops && pl.lives <= 0 && (s.cur != kPistol || std::count(s.own + 1, s.own + kWeapons, true) > 0))
-                resetSeat(rt, p);
+            // Drops (Horde): out of lives (the continue / game over): the weapons are kept (hordepub, user 2026-11-09:
+            // "keep weapons after a continue"; they were reset to the handgun as the Remake's death): the magazine in the
+            // hand as it was last frame, put back when the seat plays again (the game's continue loads the handgun's)
+            if (mode == Drops && pl.lives <= 0)
+                s.down = true;
             continue;
+        }
+        if (s.down) {
+            s.down = false;
+            const int m = magazine(p, s.cur);
+            pl.rounds = uint8_t(s.cur == kPistol ? m : std::min(s.mag[s.cur], m));
+            pl.empty = pl.rounds == 0 ? 1 : 0;
+            s.reload = 0, s.timer = 0, s.burst = 0;
+            rt.survivalRounds[p] = m;
+            if (rt.log)
+                rt.log("weapons: " + std::to_string(p + 1) + "P plays again with the " + def(s.cur).key + " (" +
+                       std::to_string(std::count(s.own, s.own + kWeapons, true)) + " weapons kept) at frame " + std::to_string(rt.frameCount));
         }
         if (!live)
             continue;
         s.mag[s.cur] = pl.rounds;
         rt.survivalRounds[p] = magazine(p, s.cur);
+        if (shotsOn)   // (the balance runs' line: summary's held=)
+            ++heldFrames[s.cur], reloadingFrames[s.cur] += s.reload > 0 ? 1 : 0;
         // a weapon with nothing left (its magazine and reserve): gone, back to the best one with ammo (the handgun)
         if (s.cur != kPistol && !endless(s.cur) && pl.rounds == 0 && s.reserve[s.cur] == 0 && s.reload == 0) {
             const int gone = s.cur;
-            s.own[gone] = false;
+            // (survhand: a keep_empty weapon, the Magician's Hand, stays held empty: Ammo / Max Ammo fill it again)
+            s.own[gone] = def(gone).keepEmpty;
+            s.mag[gone] = 0;
             s.cur = kPistol;   // (select() keeps the old magazine: the gun is gone)
             const int b = best(p);
             s.cur = b;
@@ -683,45 +761,93 @@ void Weapons::kill(Runtime& rt, uint32_t obj, int killer)
     static const int forceDrop = std::getenv("HOTD_WEAPONS_DROP") ? std::atoi(std::getenv("HOTD_WEAPONS_DROP")) : -1;
     if (mode != Drops || (forceDrop < 0 && next() % kDropChance != 0) || pickups.size() >= 6)
         return;
+    int w = pickDrop();
+    if (forceDrop > 0 && forceDrop < kWeapons)
+        w = forceDrop;
+    if (w < 0)
+        return;
+    // where it was last drawn (its camera-space centre, Obj +0x38: the body's middle), 10 units nearer (in front of the
+    // body, not inside it)
+    const float v[3] = {rt.mem.f32(obj + 0x38), rt.mem.f32(obj + 0x3C), rt.mem.f32(obj + 0x40)};
+    const float dist = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (v[2] < 5.0f || dist < 1.0f)
+        return;   // (not drawn in front of the camera)
+    const float pull = std::max(0.5f, 1.0f - 10.0f / dist);
+    const float c[3] = {v[0] * pull, v[1] * pull, v[2] * pull};
+    dropAt(rt, c, w, kPickupFrames, false, "a kill");
+}
+
+int Weapons::pickDrop()
+{
     int total = 0;
     for (int w = 0; w < kWeapons; ++w)
         total += def(w).drop;
     if (total <= 0)
-        return;
+        return -1;
     int r = int(next() % uint32_t(total)), w = 0;
     for (; w < kWeapons; ++w)
         if ((r -= def(w).drop) < 0)
             break;
-    if (forceDrop > 0 && forceDrop < kWeapons)
-        w = forceDrop;
-    if (w >= kWeapons)
-        return;
-    // where it was last drawn (its camera-space centre, Obj +0x38: the body's middle) back into the world by the view
-    // matrix (camera = R world + t: world = R^T (camera - t)), so the pickup stays there as the camera moves
+    return w < kWeapons ? w : -1;
+}
+
+// a pickup at a camera-space place, back into the world by the view matrix (camera = R world + t: world = R^T (camera -
+// t)), so it stays there as the camera moves
+bool Weapons::dropAt(Runtime& rt, const float cam[3], int weapon, int frames, bool hold, const char* why, bool upgrade)
+{
+    if (upgrade)
+        weapon = kPistol;
+    if (mode != Drops || weapon < 0 || weapon >= kWeapons || pickups.size() >= kMaxPickups)
+        return false;
     Pickup k{};
+    k.upgrade = upgrade;
     const float* m = rt.camera;
     float c[3];
-    float v[3] = {rt.mem.f32(obj + 0x38), rt.mem.f32(obj + 0x3C), rt.mem.f32(obj + 0x40)};
-    const float dist = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-    if (v[2] < 5.0f || dist < 1.0f)
-        return;   // (not drawn in front of the camera)
-    const float pull = std::max(0.5f, 1.0f - 10.0f / dist);   // (10 units nearer: in front of the body, not inside it)
     for (int a = 0; a < 3; ++a)
-        c[a] = v[a] * pull - m[9 + a];
+        c[a] = cam[a] - m[9 + a];
     for (int j = 0; j < 3; ++j)
         k.pos[j] = m[3 * j] * c[0] + m[3 * j + 1] * c[1] + m[3 * j + 2] * c[2];
-    k.weapon = w;
-    k.frames = kPickupFrames;
+    k.weapon = weapon;
+    k.frames = frames;
+    k.hold = hold;
     pickups.push_back(k);
     ++dropped;
     if (rt.log) {
         float sx = 0, sy = 0;
         const bool seen = pickupScreen(rt, int(pickups.size()) - 1, sx, sy);
-        char b[160];
-        std::snprintf(b, sizeof b, "weapons: a %s pickup at frame %llu (world %.0f %.0f %.0f, screen %s%.0f %.0f; camera y %.0f)", def(w).key.c_str(),
-                      (unsigned long long)rt.frameCount, k.pos[0], k.pos[1], k.pos[2], seen ? "" : "behind ", sx, sy, rt.mem.f32(G::camera_pos + 4));
+        char b[200];
+        std::snprintf(b, sizeof b, "weapons: %s pickup (%s) at frame %llu (world %.0f %.0f %.0f, screen %s%.0f %.0f; camera y %.0f)",
+                      (upgrade ? std::string("an upgrade") : "a " + def(weapon).key).c_str(), why, (unsigned long long)rt.frameCount, k.pos[0], k.pos[1], k.pos[2],
+                      seen ? "" : "behind ", sx, sy, rt.mem.f32(G::camera_pos + 4));
         rt.log(b);
     }
+    return true;
+}
+
+std::string Weapons::givePerk(Runtime& rt, int p)
+{
+    Seat& s = seat[p & 3];
+    port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
+    ++upgrades;
+    if (!s.quick) {
+        s.quick = true;
+        return "QUICK RELOAD";
+    }
+    if (!s.bigMag) {   // (as Survival's BIG MAG: every magazine x 1.5, the one in the hand full at once)
+        s.bigMag = true;
+        rt.survivalRounds[p & 3] = magazine(p, s.cur);
+        if (pl.state == 5) {
+            pl.rounds = uint8_t(magazine(p, s.cur));
+            pl.empty = 0;
+            s.mag[s.cur] = pl.rounds;
+        }
+        for (int k = 1; k < kWeapons; ++k)
+            if (s.own[k])
+                s.reserve[k] = std::max(s.reserve[k], reserveFull(p, k));
+        return "BIG MAG";
+    }
+    refill(rt, p);   // (both held: Max Ammo, every weapon held full)
+    return "MAX AMMO";
 }
 
 bool Weapons::cue(Runtime& rt, uint32_t c)
@@ -741,7 +867,9 @@ bool Weapons::cue(Runtime& rt, uint32_t c)
     };
     if (c == kCueShotP1 || c == kCueShotP2) {
         // player_shoot's shot (players 1 / 3: 0xA01208; 2 / 4: 0xA01207): the seat that fired this frame
-        for (int p = c == kCueShotP1 ? 0 : 1; p < 4; p += 2) {
+        for (int p = 0; p < 4; ++p) {
+            if (rt.shot_cue(p) != c)   // (charsel4: Rogan / G their own cue in any seat, look_seat)
+                continue;
             const Seat& s = seat[p];
             if (s.shotFrame != rt.frameCount || s.cur == kPistol)
                 continue;
@@ -809,7 +937,7 @@ bool Weapons::worldRay(const Runtime& rt, const float o[3], const float d[3], fl
                 best = tt, hit = true;
         };
         for (const int oi : w->active) {
-            if (oi < 0 || size_t(oi) >= w->objs.size())
+            if (oi < 0 || size_t(oi) >= w->objs.size() || (rt.onlineGame && size_t(oi) >= w->statics))
                 continue;
             const RagdollWalls::Obj& ob = w->objs[size_t(oi)];
             // its box first (slabs, a unit of slack)
@@ -887,9 +1015,10 @@ void Weapons::overlay(const Runtime& rt, std::vector<DrawModel>& out) const
             continue;
         c[1] += 1.0f * bob;
         const WeaponDef& d = def(k.weapon);
-        const uint32_t model = d.pickupModel ? d.pickupModel : kGunOnly;
+        // (hordepub: an upgrade: the gold coin, Survival's QUICK RELOAD sign's model, twice the gun's scale as there)
+        const uint32_t model = k.upgrade ? kCoin : d.pickupModel ? d.pickupModel : kGunOnly;
         // (about 30 pixels across at any distance: the creatures fall far off)
-        const float size = std::max(2.5f, c[2] * 0.026f);
+        const float size = std::max(2.5f, c[2] * 0.026f) * (k.upgrade ? 2.0f : 1.0f);
         if (std::getenv("HOTD_WEAPONS_TRACE"))
             std::printf("pickup draw frame %llu: camera %.1f %.1f %.1f size %.1f model %#x\n", (unsigned long long)rt.frameCount, c[0], c[1], c[2], size, model);
         out.push_back(turning(model, c, angle, model == kMagicianHand ? size * 0.4f : size));
@@ -939,7 +1068,13 @@ std::string Weapons::summary() const
     for (const Seat& st : seat)
         sw += st.switches;
     std::snprintf(b, sizeof b, " switches=%d pickups=%d/%d", sw, taken, dropped);
-    return "weapons(shots/reloads/kills)=" + s + b;
+    std::string held = " held(frames/reloading)";   // (survhand: the balance runs)
+    for (int w = 0; w < kWeapons; ++w) {
+        char t[64];
+        std::snprintf(t, sizeof t, "%s%s=%lld/%lld", w ? "," : "=", def(w).key.c_str(), heldFrames[w], reloadingFrames[w]);
+        held += t;
+    }
+    return "weapons(shots/reloads/kills)=" + s + b + held + (mode == Drops ? " upgrades=" + std::to_string(upgrades) : std::string());
 }
 
 } // namespace hotd::game

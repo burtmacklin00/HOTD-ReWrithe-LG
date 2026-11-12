@@ -31,10 +31,22 @@ SPECIAL THANKS
 The MAME team ........................ the Model 2 hardware knowledge, and the SCSP sound
                                        core (BSD-3-Clause)
 Karl Stenerud ........................ Musashi, the 68000 core of the sound board (MIT)
+The mednafen team .................... its hardware-tested Saturn SCSP, studied for the arcade
+                                       sound's accuracy fixes (GPL; a reference only, no code
+                                       taken: https://github.com/libretro-mirrors/mednafen-git)
 RUNESA ............................... the secret-codes tip
 Saturn Memories (YouTube) ............ "The Typing of the Dead [PC] by SEGA" playthrough:
                                        The Typing of the Dead 0's design reference
                                        (watched only; no footage is included)
+Tenome ............................... The Typing of the Dead EX - Modern Community Patch
+                                       (github.com/Tenome/Typing-of-the-Dead-EX, MIT): its
+                                       notes on SEGA's TotD rules and its typing statistics
+                                       inspired TotD 0's rules, live WPM and Statistics page;
+                                       its model packs (OBJ meshes by model ID, HOTD PC
+                                       characters turned into packs from the player's own
+                                       copy) inspired ReWrithe's model packs, and the patch
+                                       inspired our Photo Mode (F8) (ideas only; no code is
+                                       included)
 3lc3z4r (YouTube: Cez4rPlay) ......... the Spanish PC version (Doblaje espanol): his copy
                                        for the research, its list of differences and the
                                        reference playthrough "The House Of The Dead (PC) -
@@ -51,6 +63,9 @@ SDL3 (zlib licence)
 stb_vorbis by Sean Barrett (public domain)
 dr_mp3 by David Reid (public domain)
 Monocypher by Loup Vaillant and contributors (CC0)
+STUN (online without port forwarding): written from IETF RFC 5389 (test vector: RFC 5769);
+  the public STUN servers of Google (stun.l.google.com) and Cloudflare (stun.cloudflare.com)
+  answer the "what is my address" question; no code of theirs is included
 Noto Sans KR / JP / Arabic / Hebrew, The Noto Project Authors, Google and Adobe
   (SIL Open Font License 1.1)
 Xelu's Free Controller & Key Prompts by Nicolae "Xelu" Berbece (Those Awesome Guys),

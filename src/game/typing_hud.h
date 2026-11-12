@@ -21,11 +21,18 @@ public:
     void draw(const Runtime& rt, const Typing& t, int ww, int wh,
               const std::function<void(float ax, float ay, float& px, float& py)>& toWindow, float alpha = 1.0f);
     void shutdown();
+    // totdpacks: Practice (Typing::drillStart): its words over the menu's screen (the arcade picture's 496 x 384 fitted
+    // in the window), "PRACTICE n / N" and the WPM / accuracy so far at the top. No Runtime: the game's font only once
+    // a game loaded it (else SDL's 8 x 8 font)
+    void drawDrill(const Typing& t, int ww, int wh);
     // the label's picture (RGBA, w x h): the prompt in a box, the typed letters red, the next one underlined; wraps a
     // long prompt onto two lines. Public for the headless picture test (--totd-label-test)
     static std::vector<uint8_t> labelImage(const Typing::Label& l, int scale, int& w, int& h);
     // totd7: the boxes' one-pixel drop shadow (typing.ini box_shadow, HOTD_TOTD_SHADOW=1; off by default)
     static inline bool shadow = false;
+    // totdex (user 2026-11-09, after Tenome's Typing of the Dead EX): a live "WPM nn  ACCURACY nn%" line under PERFECT
+    // (Gameplay > Typing of the Dead 0 > Live WPM / Accuracy; off by default): the game so far
+    static inline bool liveLine = false;
     // totd7 (the report): boxes drawn, boxes whose place would have been past the picture's edge (now kept inside), boxes
     // still past it after that (must be 0)
     static inline uint64_t boxStats[3] = {};
@@ -48,7 +55,11 @@ private:
         int w = 0, h = 0;  // totd5: its picture's size (the layout pass)
     };
     std::deque<Slot> slots_;
-    Overlay line_, results_, perfect_;
+    Overlay line_, results_, perfect_, live_, drill_;
+    bool drillReady_ = false;
+    std::string drillKey_;
+    bool liveReady_ = false;
+    std::string liveKey_;
     bool perfectReady_ = false;
     std::string perfectKey_;
     std::string resultsKey_;   // qa1: the results' picture (scale and lines) now shown

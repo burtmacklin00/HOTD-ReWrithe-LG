@@ -39,5 +39,7 @@ bool angleAvailable();         // libGLESv2.dll / libEGL.dll found beside the ga
 
 // gl.cpp's load() on ES: the functions, with the ES replacements installed. Returns the first missing name, or null
 const char* loadES();
+// questui: the name the ES layer's upload log gives the next uploads ("menu tex: <name> ..."; Android, HOTD_TEX_LOG=1)
+void texTag(const char* name);
 
 } // namespace gl

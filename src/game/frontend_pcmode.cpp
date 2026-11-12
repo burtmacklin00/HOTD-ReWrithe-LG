@@ -16,6 +16,9 @@ namespace hotd::game {
 namespace {
 using Chars = port::Game<port::A>;
 // 0x420080's ratings: label 0x58 / 0x59 / 0x5A (Low / Medium / High) by two thresholds (0x5CE4B4.. in THOTD.EXE)
+// charcards (user 2026-11-10): Character Select's cards without the ratings: the 2-seat card's picture moved down by
+// half the rows' room (centred above the name), the 4-seat panel's contents centred in its frame (PC Mode: as it is)
+constexpr int kCsPicDy = 60, kCsPanel4Dy = 0x2E;
 int rating(float v, float lo, float hi) { return !(lo < v) ? 0x58 : (v <= lo || hi < v) ? 0x5A : 0x59; }
 
 // namefit: a name still too wide in the PC's small font (`shown`: nm as drawn, its translation): a short one
@@ -122,10 +125,10 @@ void Frontend::pcModePanel(Widget* panel, int p)
         const auto& c = Chars::pm_table(ch);
         Widget* pic = widgetNew();
         addChild(panel, pic);
-        setRect(pic, 0, 0, 0, 100);
+        setRect(pic, 0, charSel ? kCsPicDy : 0, 0, 100);   // (charcards: no ratings, the picture centred above the name)
         setImage(pic, pcPortraitId(ch, false), -1, 0x100020);
         const std::vector<std::string> notes = pcExtraNotes(ch);   // pmextra: the lines under the name
-        for (size_t i = 0; i < notes.size(); ++i) {
+        for (size_t i = 0; i < notes.size() && (!charSel || i < 1); ++i) {   // (charsel: the group only; "Plays as" is PC Mode's rules)
             Widget* n = widgetNew();
             addChild(panel, n);
             setRect(n, 0, 0x14A + int(i) * 24, 0, 0);   // (under the name: the PC's portrait fills the room above the rows)
@@ -135,6 +138,8 @@ void Frontend::pcModePanel(Widget* panel, int p)
             n->fitW = 0xF8 - 40;   // (a translation kept off Start / Exit in the middle)
         }
         auto row = [&](int y, int labelId, const std::string* text, int valueLabel) {
+            if (charSel)
+                return;   // charsel: the same card without the ratings (the arcade's rules)
             Widget* l = widgetNew();
             addChild(panel, l);
             setRect(l, 0, y, 0, 0);
@@ -197,10 +202,6 @@ void Frontend::pcModeStep(int p, int dir)
 void Frontend::screenPcMode()
 {
     walking_ = false;   // (called from a widget's handler: the walk stops, as the other screen builders' callers do)
-    if (charSel) {   // charsel: the Character Select's cards (charSelectOpen)
-        charSelectOpen(charSelPlayers);
-        return;
-    }
     if (style == kStyleRemake) {   // remakepages: the Remake layout (frontend_remake_pages.cpp)
         remakePcMode();
         return;
@@ -212,14 +213,14 @@ void Frontend::screenPcMode()
     setRect(root, 0, 0, 0, 0);
     setImage(root, 0xA4, -1, 0x20000A);
     if (pcSeats == 4) {   // ours (4P): a quarter panel per seat, P1 / P2 in the stones' top halves, P3 / P4 below
-        for (int p = 0; p < 4; ++p) {
+        for (int p = 0; p < (charSel ? charSelPlayers : 4); ++p) {   // (charsel: the players in the game)
             Widget* cell = widgetNew();
             addChild(root, cell);
             setRect(cell, p % 2 == 0 ? 0x10 : 0x150, p < 2 ? 0x30 : 0xE6, 0x120, 0xB0);
             pcModePanel4(cell, p);
         }
     } else {
-        for (int p = 0; p < 2; ++p) {
+        for (int p = 0; p < (charSel ? charSelPlayers : 2); ++p) {   // (charsel, one player: P1's card alone)
             Widget* panel = widgetNew();
             addChild(root, panel);
             setRect(panel, p == 0 ? 0x20 : 0x168, 0x40, 0xF8, 0x14A);
@@ -230,6 +231,29 @@ void Frontend::screenPcMode()
     addChild(root, title);
     setRect(title, 0, 0x10, 0, 0);
     setLabel(title, 2, 0x10020);   // "PC Mode", white 32, centred
+    if (charSel) {   // charsel: "Character Select", Start / Default Characters / Exit (in place of Start / Exit)
+        setText(title, "Character Select", 0x10020);
+        title->fitW = kWidth - 40;
+        for (int i = 0; i < 3; ++i) {
+            Widget* w = widgetNew();
+            addChild(root, w);
+            setRect(w, 0, 0x198 + i * 0x18, 0, 0);   // (three rows under the stones: 24 apart, Exit still on screen)
+            if (i == 1)
+                setText(w, "Default Characters", 0x20020);
+            else
+                setLabel(w, i == 0 ? 0x4F : 0x24, 0x20020);   // "Start" / "Exit"
+            setHandlers(w, [this, i](Widget&) {
+                walking_ = false;
+                if (i == 2)
+                    screenMainMenu();
+                else if (onCharSelectStart)
+                    onCharSelectStart(i == 1);
+            }, &Frontend::hitText);
+            if (i == 2)
+                w->tag = 1;   // (Escape)
+        }
+        return;
+    }
     if (pcSeats == 4) {   // ours: who is still picking (the game starts when nobody is), in place of Start
         std::string wait;
         for (int p = 0; p < 4; ++p)
@@ -261,87 +285,6 @@ void Frontend::screenPcMode()
     ex->tag = 1;   // 0x427CB0: Escape
 }
 
-// ---- charsel: the Character Select of Arcade / Chapter Select (frontend.h charSelectOpen), the classic cards ----
-
-// a card: "Player N" in the seat's colour, the portrait, the extras' lines, the name between the arrows (no ratings:
-// the game keeps the arcade's rules)
-void Frontend::charSelectPanel(Widget* panel, int p)
-{
-    if (pcChars[p] <= 0)
-        pcChars[p] = p % 2 == 0 ? 1 : 2;
-    const int ch = pcChars[p];
-    Widget* who = widgetNew();
-    addChild(panel, who);
-    setRect(who, 0, 0x108, 0, 0);   // (under the portrait, where PC Mode has its ratings)
-    setText(who, "Player " + std::to_string(p + 1), 0x20020);
-    Widget* pic = widgetNew();
-    addChild(panel, pic);
-    setRect(pic, 0, 0, 0, 100);
-    setImage(pic, pcPortraitId(ch, false), -1, 0x100020);
-    const std::vector<std::string> notes = pcExtraNotes(ch);
-    for (size_t i = 0; i < notes.size() && i < 1; ++i) {   // (the group only: "Plays as" is PC Mode's rules)
-        Widget* n = widgetNew();
-        addChild(panel, n);
-        setRect(n, 0, 0x14A, 0, 0);
-        setText(n, notes[i], 0x20020);
-        n->draw = &Frontend::drawTextLit;
-        n->fitW = 0xF8 - 40;
-    }
-    Widget* name = widgetNew();
-    addChild(panel, name);
-    setRect(name, 0, 0x130, 0, 0);
-    pcNameText(name, ch, 0xF8 - 56);
-    for (int d = 0; d < 2; ++d) {
-        Widget* a = widgetNew();
-        addChild(panel, a);
-        setRect(a, 0, 0x130, 0, 0);
-        setImage(a, d ? 0xD9 : 0xD8, d ? 0xDB : 0xDA, d ? 0x100004 : 0x100002);
-        setHandlers(a, [this, p, d](Widget&) { pcModeStep(p, d ? 1 : -1); }, &Frontend::hitImage);
-        a->user = p;
-    }
-}
-
-void Frontend::charSelectOpen(int players)
-{
-    walking_ = false;
-    charSel = true;
-    charSelPlayers = std::clamp(players, 1, 2);   // (Players 3 / 4: P1 / P2 pick here; 3 / 4 keep Rogan 2 / G 2)
-    pcSeats = 2;
-    screen_ = 16;
-    freeTree();
-    Widget* root = widgetNew();
-    root_ = root;
-    setRect(root, 0, 0, 0, 0);
-    setImage(root, 0xA4, -1, 0x20000A);
-    for (int p = 0; p < charSelPlayers; ++p) {
-        Widget* panel = widgetNew();
-        addChild(root, panel);
-        const int x = charSelPlayers == 1 ? (kWidth - 0xF8) / 2 : p == 0 ? 0x20 : 0x168;   // (one player: front and centre)
-        setRect(panel, x, 0x30, 0xF8, 0x14A);
-        charSelectPanel(panel, p);
-    }
-    Widget* title = widgetNew();
-    addChild(root, title);
-    setRect(title, 0, 0x10, 0, 0);
-    setText(title, "Character Select", 0x10020);
-    title->fitW = kWidth - 40;
-    auto item = [&](int y, const std::string& text, int labelId, std::function<void()> fn) {
-        Widget* w = widgetNew();
-        addChild(root, w);
-        setRect(w, 0, y, 0, 0);
-        if (labelId >= 0)
-            setLabel(w, labelId, 0x20020);
-        else
-            setText(w, text, 0x20020);
-        setHandlers(w, [this, fn](Widget&) { walking_ = false; fn(); }, &Frontend::hitText);
-        return w;
-    };
-    item(0x190, "", 0x4F, [this]() { if (onCharSelectStart) onCharSelectStart(false); });   // "Start"
-    item(0x1AC, "Default Characters", -1, [this]() { if (onCharSelectStart) onCharSelectStart(true); });
-    Widget* ex = item(0x1C8, "", 0x24, [this]() { screenMainMenu(); });   // "Exit"
-    ex->tag = 1;   // (Escape)
-}
-
 // ---- remakepages: the Remake style's PC Mode (docs/menu_remake.md): the PC's tombstones (0xA4, their own art: the
 // original's identity) centred on the Remake backdrop, the panels' texts in the Remake letters, the arrows as chevrons,
 // Start / Exit as parchment strips, the prompts at the bottom right. The same seats, picks and actions ----
@@ -353,16 +296,27 @@ void Frontend::remakePcMode()
     rArt_ = 0xA4;
     const int ox = (cw_ - kWidth) / 2;   // (the PC's 640 x 480 layout on the tombstones, centred)
     if (pcSeats == 4) {
-        for (int p = 0; p < 4; ++p)
+        for (int p = 0; p < (charSel ? charSelPlayers : 4); ++p)   // (charsel: the players in the game)
             remakePcPanel4(p, ox + (p % 2 == 0 ? 0x10 : 0x150), p < 2 ? 0x30 : 0xE6);
     } else {
-        for (int p = 0; p < 2; ++p)
+        for (int p = 0; p < (charSel ? charSelPlayers : 2); ++p)   // (charsel, one player: P1's panel alone)
             remakePcPanel(p, ox + (p == 0 ? 0x20 : 0x168), 0x40);
     }
-    Widget* title = rWidget(0, 4, cw_, 44, &Frontend::drawRLabel, label(2));   // "PC Mode"
+    Widget* title = rWidget(0, 4, cw_, 44, &Frontend::drawRLabel, charSel ? std::string("Character Select") : label(2));   // "PC Mode"
     title->user = 0xFFF2E6, title->seed = 37;
     Widget* start = nullptr;
-    if (pcSeats == 4) {   // who is still picking (the game starts when nobody is), in place of Start
+    if (charSel) {   // charsel: Start, then Default Characters / Exit (the picks come back by onCharSelectStart)
+        start = rStripButton(cw_ / 2 - 60, 404, 120, 26, label(0x4F), "Start the game with these characters", [this]() {
+            if (onCharSelectStart)
+                onCharSelectStart(false);
+        }, 310);
+        rHome_ = start;
+        rStripButton(cw_ / 2 - 155, 436, 180, 26, "Default Characters", "Start with the arcade's characters (Rogan / G)", [this]() {
+            if (onCharSelectStart)
+                onCharSelectStart(true);
+        }, 311);
+        rStripButton(cw_ / 2 + 35, 436, 120, 26, label(0x24), "Back to the main menu (Escape)", [this]() { screenMainMenu(); }, 300);
+    } else if (pcSeats == 4) {   // who is still picking (the game starts when nobody is), in place of Start
         std::string wait;
         for (int p = 0; p < 4; ++p)
             if (pcChars[p] != 0 && !pcReady[p])
@@ -376,7 +330,8 @@ void Frontend::remakePcMode()
         }, 310);
         rHome_ = start;
     }
-    rStripButton(cw_ / 2 - 60, 436, 120, 26, label(0x24), "Back to the main menu (Escape)", [this]() { screenMainMenu(); }, 300);
+    if (!charSel)
+        rStripButton(cw_ / 2 - 60, 436, 120, 26, label(0x24), "Back to the main menu (Escape)", [this]() { screenMainMenu(); }, 300);
     rHelp_[1] = 466;
     remakePrompts(root_, false, [this]() { screenMainMenu(); });
     if (remakeFirstFocus_ && !handShown_) {
@@ -393,10 +348,10 @@ void Frontend::remakePcPanel(int p, int x, int y)
     const int ch = pcChars[p], pw = 0xF8;
     if (ch != 0) {
         const auto& c = Chars::pm_table(ch);
-        Widget* pic = rWidget(x, y, pw, 100, &Frontend::drawRSprite);
+        Widget* pic = rWidget(x, y + (charSel ? kCsPicDy : 0), pw, 100, &Frontend::drawRSprite);   // (charcards: centred)
         pic->id = int16_t(pcPortraitId(ch, false));
         const std::vector<std::string> notes = pcExtraNotes(ch);   // pmextra: between the portrait and the rows
-        for (size_t i = 0; i < notes.size(); ++i) {
+        for (size_t i = 0; i < notes.size() && (!charSel || i < 1); ++i) {   // (charsel: the group only)
             Widget* n = rWidget(x + 4, y + 102 + int(i) * 24, pw - 8, 22, &Frontend::drawRLabel, notes[i]);
             n->user = i == 0 ? 0xE0C020 : 0xB0A898, n->seed = 70 + int(i);
         }
@@ -405,6 +360,8 @@ void Frontend::remakePcPanel(int p, int x, int y)
             {0xB8, 0x51, hp}, {0xD0, 0x52, rounds}, {0xE8, 0x53, label(rating(c.damage, 0.8f, 1.2f))},
             {0x100, 0x54, label(rating(float(c.reload_ms), 200.0f, 300.0f))}, {0x118, 0x55, label(rating(c.hit_size, 0.8f, 1.2f))}};
         for (const auto& r : rows) {
+            if (charSel)
+                break;   // charsel: no ratings (the arcade's rules)
             Widget* s = rWidget(x + 4, y + r.y, pw - 8, 22, &Frontend::drawRStat, label(r.lid));
             s->value = r.value;
             s->user = 16;
@@ -430,15 +387,16 @@ void Frontend::remakePcPanel4(int p, int x, int y)
     static const int kColour[4] = {0xD02020, 0x2858E0, 0x20B030, 0xE0C020};   // P1 red, P2 blue, P3 green, P4 yellow
     const int ch = pcChars[p];
     const bool locked = pcReady[p] && !pcCpu[p];
+    const int cy = y + (charSel ? kCsPanel4Dy : 0);   // (charcards: the contents centred in the frame)
     const bool extra = Chars::pm_extra(ch) != nullptr;   // pmextra: "Player N - Extra" in yellow
-    Widget* who = rWidget(x + 0x58, y + 3, 0xC4, 24, &Frontend::drawRLabel,
+    Widget* who = rWidget(x + 0x58, cy + 3, 0xC4, 24, &Frontend::drawRLabel,
                           "Player " + std::to_string(p + 1) + (extra ? " - Extra" : ""));
     who->user = extra ? 0xE0C020 : 0xFFF2E6, who->seed = 51 + p;
-    Widget* name = rWidget(x + 0x58 + 26, y + 0x1C, 0xC4 - 52, 24, &Frontend::drawRLabel, ch == 0 ? std::string(label(0x50)) : Chars::pm_table(ch).name);
+    Widget* name = rWidget(x + 0x58 + 26, cy + 0x1C, 0xC4 - 52, 24, &Frontend::drawRLabel, ch == 0 ? std::string(label(0x50)) : Chars::pm_table(ch).name);
     name->user = 0xFFF2E6, name->seed = 55 + p;
     name->fitW = 0xC4 - 52 - 24;   // namefit: a long name kept off the arrows (pmpick: a clear gap, 12 each side)
     for (int d = 0; d < 2; ++d) {
-        Widget* a = rWidget(d ? x + 0x58 + 0xC4 - 26 : x + 0x58, y + 0x1C, 26, 24, &Frontend::drawRSide);
+        Widget* a = rWidget(d ? x + 0x58 + 0xC4 - 26 : x + 0x58, cy + 0x1C, 26, 24, &Frontend::drawRSide);
         a->user = d;
         a->seed = locked ? 1 : 0;
         a->help = std::string(d ? "The next character" : "The character before") + " for player " + std::to_string(p + 1);
@@ -448,7 +406,8 @@ void Frontend::remakePcPanel4(int p, int x, int y)
     if (ch != 0) {
         const auto& c = Chars::pm_table(ch);
         const int bx = p == 0 ? x + 0x58 + 0xC4 / 2 - 44 : x + 0x58 + 6;   // (players 2-4: Ready / CPU, then the toggle)
-        if (pcCpu[p]) {
+        if (charSel) {   // charsel: the portrait only (no Ready / CPU, no ratings: the arcade's rules)
+        } else if (pcCpu[p]) {
             Widget* cpu = rWidget(bx, y + 0x36, 88, 22, &Frontend::drawRLabel, "CPU");
             cpu->user = 0x8A827A, cpu->seed = 59;
         } else {
@@ -457,7 +416,7 @@ void Frontend::remakePcPanel4(int p, int x, int y)
                                          [this, p]() { pcModeSeat(p, kPcReady); }, 320 + p);
             ready->nav = true;
         }
-        if (p > 0) {
+        if (p > 0 && !charSel) {
             Widget* t = rStripButton(x + 0x58 + 0xC4 - 6 - 88, y + 0x36, 88, 20, pcCpu[p] ? "Player" : "CPU",
                                      pcCpu[p] ? "A person plays this seat" : "A computer teammate plays this seat",
                                      [this, p]() { pcModeSeat(p, kPcCpu); }, 330 + p);
@@ -468,17 +427,37 @@ void Frontend::remakePcPanel4(int p, int x, int y)
             {0x4E, 0x51, hp}, {0x60, 0x52, rounds}, {0x72, 0x53, label(rating(c.damage, 0.8f, 1.2f))},
             {0x84, 0x54, label(rating(float(c.reload_ms), 200.0f, 300.0f))}, {0x96, 0x55, label(rating(c.hit_size, 0.8f, 1.2f))}};
         for (const auto& r : rows) {
+            if (charSel)
+                break;
             Widget* s = rWidget(x + 10, y + r.y, 0x10C, 18, &Frontend::drawRStat, label(r.lid));
             s->value = r.value;
             s->user = 12;
             s->seed = 640 + r.y;
         }
-        Widget* pic = rWidget(x + 4, y + 4, 0x52, 0x50, &Frontend::drawRSprite);
+        Widget* pic = rWidget(x + 4, cy + 4, 0x52, 0x50, &Frontend::drawRSprite);
         pic->id = int16_t(pcPortraitId(ch, false));
         pic->user = 1;
     }
     Widget* frame = rWidget(x, y, 0x120, 0xB0, &Frontend::drawRFrame);   // (added last: drawn first, under the rest)
     frame->user = kColour[p];
+}
+
+// ---- charsel (user 2026-11-06/07): the Character Select of a story game: PC Mode's own select screen as it is (its
+// 2-seat stones for 1-2 players, its 4-seat quarter panels for 3-4; only the players in the game), without the
+// ratings / Ready / CPU, titled "Character Select", with Start / Default Characters / Exit; both menu styles ----
+
+void Frontend::charSelectOpen(int players)
+{
+    walking_ = false;
+    charSel = true;
+    charSelPlayers = std::clamp(players, 1, 4);
+    pcSeats = charSelPlayers >= 3 ? 4 : 2;
+    for (int p = 0; p < 4; ++p) {
+        pcReady[p] = false, pcCpu[p] = false;
+        if (p < charSelPlayers && pcChars[p] <= 0)
+            pcChars[p] = p + 1;   // (Rogan, G, Rogan 2, G 2)
+    }
+    screenPcMode();
 }
 
 // ---- ours (4P, docs/pcmode.md "4 players in PC Mode"): four panels, a pick and Ready per seat ----
@@ -509,7 +488,7 @@ void Frontend::pcModeOpen(int players, const bool cpu[4], uint32_t seed)
 
 bool Frontend::pcModeAllReady() const
 {
-    if (pcSeats != 4 || pcChars[0] == 0)
+    if (pcSeats != 4 || pcChars[0] == 0 || charSel)   // (charsel: its Start starts the game)
         return false;
     for (int p = 0; p < 4; ++p)
         if (pcChars[p] != 0 && !pcReady[p])
@@ -521,6 +500,8 @@ void Frontend::pcModeSeat(int seat, int act)
 {
     if (pcSeats != 4 || seat < 0 || seat > 3 || screen_ != 16)
         return;
+    if (charSel && (seat >= charSelPlayers || (act != kPcPrev && act != kPcNext)))
+        return;   // charsel: the players in the game pick, nothing else
     if (act == kPcPrev || act == kPcNext) {
         if (pcReady[seat] && !pcCpu[seat])
             return;   // (Ready: the pick is kept until the player takes Ready back)
@@ -551,6 +532,7 @@ void Frontend::pcModePanel4(Widget* cell, int p)
 {
     static const int kColour[4] = {0xD02020, 0x2858E0, 0x20B030, 0xE0C020};   // P1 red, P2 blue, P3 green, P4 yellow
     const int ch = pcChars[p];
+    const int cy = charSel ? kCsPanel4Dy : 0;   // (charcards: the contents centred in the frame; the frame as it is)
     Widget* frame = widgetNew();
     addChild(cell, frame);
     setRect(frame, 0, 0, 0, 0);
@@ -558,7 +540,7 @@ void Frontend::pcModePanel4(Widget* cell, int p)
     frame->user = kColour[p];
     Widget* who = widgetNew();
     addChild(cell, who);
-    setRect(who, 0x58, 4, 0xC4, 0);
+    setRect(who, 0x58, 4 + cy, 0xC4, 0);
     const bool extra = Chars::pm_extra(ch) != nullptr;   // pmextra: "Player N - Extra" in yellow
     setText(who, "Player " + std::to_string(p + 1) + (extra ? " - Extra" : ""), 0x20020);
     if (extra)
@@ -567,10 +549,12 @@ void Frontend::pcModePanel4(Widget* cell, int p)
         const auto& c = Chars::pm_table(ch);
         Widget* pic = widgetNew();
         addChild(cell, pic);
-        setRect(pic, 4, 4, 0x52, 0x50);
+        setRect(pic, 4, 4 + cy, 0x52, 0x50);
         setImage(pic, pcPortraitId(ch, false), -1, 0x100020);
         pic->draw = &Frontend::drawHalfImage;
         auto row = [&](int y, int labelId, const std::string* text, int valueLabel) {
+            if (charSel)
+                return;   // charsel: no ratings (the arcade's rules)
             Widget* l = widgetNew();
             addChild(cell, l);
             setRect(l, 10, y, 0x10C, 0);
@@ -589,6 +573,7 @@ void Frontend::pcModePanel4(Widget* cell, int p)
         row(0x72, 0x53, nullptr, rating(c.damage, 0.8f, 1.2f));
         row(0x84, 0x54, nullptr, rating(float(c.reload_ms), 200.0f, 300.0f));
         row(0x96, 0x55, nullptr, rating(c.hit_size, 0.8f, 1.2f));
+        if (!charSel) {   // (charsel: no Ready / CPU)
         Widget* ready = widgetNew();
         addChild(cell, ready);
         setRect(ready, 0x58, 0x34, p == 0 ? 0xC4 : 0x62, 0);
@@ -607,10 +592,11 @@ void Frontend::pcModePanel4(Widget* cell, int p)
                 ready->draw = &Frontend::drawTextLit;   // yellow while ready
             setHandlers(ready, [this, p](Widget&) { pcModeSeat(p, kPcReady); }, &Frontend::hitText);
         }
+        }
     }
     Widget* name = widgetNew();
     addChild(cell, name);
-    setRect(name, 0x58, 0x1C, 0xC4, 0);
+    setRect(name, 0x58, 0x1C + cy, 0xC4, 0);
     if (ch == 0)
         setLabel(name, 0x50, 0x20020);   // No Player
     else
@@ -618,12 +604,12 @@ void Frontend::pcModePanel4(Widget* cell, int p)
     const bool locked = pcReady[p] && !pcCpu[p];
     Widget* prev = widgetNew();
     addChild(cell, prev);
-    setRect(prev, 0x58, 0x1C, 0xC4, 0);
+    setRect(prev, 0x58, 0x1C + cy, 0xC4, 0);
     setImage(prev, 0xD8, locked ? -1 : 0xDA, 0x100002);
     setHandlers(prev, [this, p](Widget&) { pcModeSeat(p, kPcPrev); }, &Frontend::hitImage);
     Widget* next = widgetNew();
     addChild(cell, next);
-    setRect(next, 0x58, 0x1C, 0xC4, 0);
+    setRect(next, 0x58, 0x1C + cy, 0xC4, 0);
     setImage(next, 0xD9, locked ? -1 : 0xDB, 0x100004);
     setHandlers(next, [this, p](Widget&) { pcModeSeat(p, kPcNext); }, &Frontend::hitImage);
 }

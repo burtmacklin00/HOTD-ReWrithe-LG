@@ -125,6 +125,28 @@ void hashBoss(const game::Runtime& rt, Hasher& h)
     hashPm(rt, h);
 }
 bool bossGame(const game::Runtime& rt) { return rt.boss.active() || rt.boss_mode != 0; }
+// Survival Mode online (protocol 22): the mode's and the weapons' logic state (their digests: they live outside the
+// work RAM). Not the lead-in's music code (Runtime::survivalMusic_: only kept when this PC has sound; a joiner's
+// catch-up replays without it, and it only picks the music)
+void hashSurvival(const game::Runtime& rt, Hasher& h)
+{
+    h.value(rt.survival.digest());
+    h.value(rt.weapons.digest());
+    // the Hand's bolts in flight and explosions (blastslots): their own fields, not the structs' padding
+    for (const auto& bt : rt.weaponBolts) {
+        h.value(uint64_t(uint32_t(bt.seat)) | uint64_t(uint32_t(bt.age)) << 32);
+        h.value(uint64_t(uint32_t(bt.frames)) | uint64_t(uint32_t(bt.burst)) << 32);
+        h.value(uint64_t(uint32_t(bt.pct)) | uint64_t(bt.what) << 32 | uint64_t(bt.item) << 48);
+        h.bytes(bt.from, sizeof bt.from), h.bytes(bt.to, sizeof bt.to), h.bytes(&bt.radius, sizeof bt.radius);
+        h.bytes(bt.cand, sizeof bt.cand), h.value(uint64_t(uint32_t(bt.serial)));
+    }
+    for (const auto& b : rt.weaponBlast) {
+        h.value(uint64_t(uint32_t(b.seat)) | uint64_t(uint32_t(b.pct)) << 32);
+        h.value(b.frame), h.value(uint64_t(b.doneN));
+        h.bytes(b.at, sizeof b.at), h.bytes(&b.radius, sizeof b.radius), h.bytes(b.done, sizeof b.done);
+    }
+    h.value(rt.weaponFrame);   // (handsync: the explosions' clock, rollback keeps it)
+}
 } // namespace
 
 bool NetArgs::parse(const std::string& a, const std::function<std::string()>& next, std::string& err)
@@ -155,6 +177,12 @@ bool NetArgs::parse(const std::string& a, const std::function<std::string()>& ne
     else if (a == "--net-name") playerName = sanitiseName(next());
     else if (a == "--lobby") lobby = next();
     else if (a == "--no-lan") noLan = true;
+    else if (a == "--stun") stun = next();
+    else if (a == "--stun-mock") stunMock = next();
+    else if (a == "--net-sim-nat") simNat = true;
+    else if (a == "--code-out") codeOut = next();
+    else if (a == "--reply-out") replyOut = next();
+    else if (a == "--reply-from") replyFrom = next();
     else if (a == "--lan-code") lanCode = true;
     else if (a == "--net-drop") {   // a PC left mid-game: wait (for it, until the host goes on), continue (at once), N s then go on
         const std::string v = next();
@@ -213,7 +241,7 @@ uint64_t NetGame::gameHash(game::Runtime& rt)
     // the work RAM (the 4P block 0x50C000..0x50FFFF in it) and, in the 4-seat game, the runtime's per-seat fields that
     // live between frames (the start requests, the input counters); in PC Mode its runtime fields (hashPm). An arcade
     // game of two seats: the work RAM only, as before. Boss Mode: its fields (hashBoss)
-    if (!rt.coop4_on() && !rt.pcmode && !bossGame(rt))
+    if (!rt.coop4_on() && !rt.pcmode && !bossGame(rt) && !rt.survival.active())
         return stateHash(rt.mem);
     Hasher h;
     hashRam(rt.mem, h);
@@ -226,6 +254,29 @@ uint64_t NetGame::gameHash(game::Runtime& rt)
         hashPm(rt, h);
     else if (bossGame(rt))
         hashBoss(rt, h);
+    if (rt.survival.active())   // (Survival online, protocol 22)
+        hashSurvival(rt, h);
+    // developer (handsync): HOTD_NET_HASH_PARTS=1: each hash's parts by the runtime's frame (a re-simulated frame
+    // printed again: the last line of a frame is the one compared), to diff the two PCs' logs at a desync
+    static const bool parts = std::getenv("HOTD_NET_HASH_PARTS") != nullptr;
+    if (parts) {
+        Hasher a, b;
+        hashRam(rt.mem, a);
+        hashSurvival(rt, b);
+        std::printf("HASHPARTS %llu ram %016llx surv %016llx weap %016llx all %016llx\n", (unsigned long long)rt.frameCount,
+                    (unsigned long long)a.done(), (unsigned long long)rt.survival.digest(), (unsigned long long)rt.weapons.digest(),
+                    (unsigned long long)b.done());
+        std::printf("   wf %llu bolts", (unsigned long long)rt.weaponFrame);
+        for (const auto& bt : rt.weaponBolts)
+            if (bt.seat >= 0)
+                std::printf(" [s%d a%d/%d b%d w%d to %.2f %.2f %.2f]", bt.seat, bt.age, bt.frames, bt.burst, bt.what, bt.to[0], bt.to[1], bt.to[2]);
+        std::printf(" blasts");
+        for (const auto& bl : rt.weaponBlast)
+            if (bl.seat >= 0)
+                std::printf(" [s%d f%llu n%d at %.2f %.2f %.2f]", bl.seat, (unsigned long long)bl.frame, bl.doneN, bl.at[0], bl.at[1], bl.at[2]);
+        std::printf(" pts %d %d hits %d %d kills %d alive %d\n", rt.survival.seat[0].points, rt.survival.seat[1].points, rt.survival.seat[0].hits,
+                    rt.survival.seat[1].hits, rt.survival.kills, rt.survival.alive);
+    }
     return h.done();
 }
 
@@ -284,6 +335,8 @@ uint64_t NetGame::bootHash(game::Runtime& rt)
         hashPm(rt, h);
     else if (bossGame(rt))   // Boss Mode online (protocol 18): the boss, the clock's step ..
         hashBoss(rt, h);
+    if (rt.survival.active())   // Survival online (protocol 22): the arena, seed, cap .. as started
+        hashSurvival(rt, h);
     const uint64_t v = h.done();
     if (std::getenv("HOTD_BOOT_HASH_PARTS")) {   // developer: which part of a start state differs (a join's "came out different")
         Hasher a;
@@ -327,11 +380,153 @@ std::string NetGame::shareCode() const
     Address a = lanAddress();
     if (upnp_.externalIp())
         a.ip = upnp_.externalIp();
+    else if (nat_.stun() == NatTraversal::Stun::Done && nat_.mapped().ip)
+        a = nat_.mapped();   // (hole punching, 2026-11-10: the STUN-mapped address and port; a port the 16-symbol
+                             // code cannot hold (not 47800-47803): the long HOTD- code, as a custom password)
     return makeShareCode(a, code_);
 }
 
-bool NetGame::open(const NetArgs& a, std::string& err)
+namespace {
+// testing (--join @FILE, --reply-from FILE): a file's first line ("" none / not there yet)
+std::string fileLine(const std::string& path)
 {
+    std::string s;
+    if (FILE* f = std::fopen(path.c_str(), "rb")) {
+        char buf[256];
+        const size_t n = std::fread(buf, 1, sizeof buf - 1, f);
+        std::fclose(f);
+        s.assign(buf, n);
+        const size_t e = s.find_first_of("\r\n");
+        if (e != std::string::npos) s.resize(e);
+    }
+    return s;
+}
+void writeLine(const std::string& path, const std::string& s)
+{
+    const std::string tmp = path + ".tmp";   // (whole or nothing: the other process may read it any moment)
+    if (FILE* f = std::fopen(tmp.c_str(), "wb")) {
+        std::fwrite(s.data(), 1, s.size(), f);
+        std::fputc('\n', f);
+        std::fclose(f);
+        std::remove(path.c_str());
+        std::rename(tmp.c_str(), path.c_str());
+    }
+}
+} // namespace
+
+std::string NetGame::replyCode() const
+{
+    if (session_.isHost() || !punchJoin_ || session_.hostAnswered() || nowS() - openedAt_ < 3.0)
+        return "";
+    if (nat_.stun() != NatTraversal::Stun::Done && nat_.stun() != NatTraversal::Stun::Failed &&
+        nat_.stun() != NatTraversal::Stun::Off)
+        return "";
+    ReplyCode r;
+    if (nat_.stun() == NatTraversal::Stun::Done) r.pub = nat_.mapped();
+    r.lan = Address{localLanAddress(), session_.local().port};
+    if (!r.pub.ip && !isPrivateIp(r.lan.ip)) return "";
+    return makeReplyCode(r);
+}
+
+bool NetGame::addReply(const std::string& text, std::string& msg)
+{
+    // natpunch2 (one paste for the whole squad): every reply code in the text (a group chat's copy), each punched to
+    // at once; one already used (this hosting) is left out quietly; a typo'd one does not pass the check
+    if (!session_.isHost()) return false;
+    int found = 0, fresh = 0;
+    for (const ReplyCode& r : findReplyCodes(text)) {
+        ++found;
+        const std::string key = makeReplyCode(r);
+        if (std::find(repliesUsed_.begin(), repliesUsed_.end(), key) != repliesUsed_.end()) continue;
+        repliesUsed_.push_back(key);
+        ++fresh;
+        nat_.punch(r.pub, 10.0);
+        nat_.punch(r.lan, 10.0);
+    }
+    if (fresh == 0) {
+        msg = found > 0 ? (repliesUsed_.size() > 1 ? "Waiting for your friends..." : "Waiting for your friend...")
+                        : "No reply code found in what you pasted (a reply code: 20 letters and digits, from your "
+                          "friend's Join page).";
+        return found > 0;
+    }
+    replyPunchAt_ = nowS();
+    if (log) log("hole punching: " + std::to_string(fresh) + " reply code" + (fresh > 1 ? "s" : "") + " pasted, punching for 10 s");
+    msg = fresh == 1 ? std::string("1 reply code found: punching...") : std::to_string(fresh) + " reply codes found: punching...";
+    return true;
+}
+
+std::string NetGame::natNote() const
+{
+    const NatTraversal::Stun st = nat_.stun();
+    if (session_.isHost()) {
+        if (replyPunchAt_ >= 0 && nowS() - replyPunchAt_ < 12.0)   // (each joiner shows in the list as it connects)
+            return repliesUsed_.size() > 1 ? "Waiting for your friends..." : "Waiting for your friend...";
+        if (peerIn()) return "";
+        if (st == NatTraversal::Stun::Resolving || st == NatTraversal::Stun::Asking) return "Getting your address...";
+        if (replyPunchAt_ >= 0)
+            return "Couldn't connect: your networks block direct connections (strict / carrier-grade NAT). Try UPnP / "
+                   "port forwarding, or let the other player host.";
+        if (nat_.symmetric() && upnp_.state() != PortMapper::State::Mapped)
+            return "Your network may block direct connections.";
+        return "";
+    }
+    if (!punchJoin_ || session_.hostAnswered()) return "";
+    if (st == NatTraversal::Stun::Resolving || st == NatTraversal::Stun::Asking) return "Getting your address...";
+    if (replyCode().empty()) return "";
+    return "No direct answer yet: send this reply code to the host (they paste it in their waiting room). Waiting for your "
+           "friend...";   // (the page adds the strict-NAT warning and the privacy note)
+}
+
+void NetGame::natPoll()
+{
+    nat_.tick();
+    if (!session_.isHost()) {
+        // the host answered a punch at another of its addresses (its LAN one): the handshake goes there
+        const Address r = nat_.reached();
+        if (r.ip && r != session_.peer() && session_.retarget(r) && log)
+            log("hole punching: the host answered at another address; connecting there");
+        if (!args_.replyOut.empty() && !replyWritten_) {
+            const std::string c = replyCode();
+            if (!c.empty()) { writeLine(args_.replyOut, c); replyWritten_ = true; }
+        }
+        return;
+    }
+    const bool stunOver = nat_.stun() != NatTraversal::Stun::Resolving && nat_.stun() != NatTraversal::Stun::Asking;
+    if (!args_.codeOut.empty() && !codeWritten_ && stunOver) {
+        writeLine(args_.codeOut, shareCode());
+        codeWritten_ = true;
+    }
+    // testing: the "paste" from a file, read again twice a second (a new content = pasting again: its new codes added)
+    if (!args_.replyFrom.empty() && nowS() - replyReadAt_ >= 0.5) {
+        replyReadAt_ = nowS();
+        std::string t;
+        if (FILE* f = std::fopen(args_.replyFrom.c_str(), "rb")) {
+            char buf[4096];
+            size_t n;
+            while ((n = std::fread(buf, 1, sizeof buf, f)) > 0 && t.size() < (64u << 10)) t.append(buf, n);
+            std::fclose(f);
+        }
+        std::string msg;
+        if (!t.empty() && t != replyFileSeen_) {
+            replyFileSeen_ = t;
+            addReply(t, msg);
+            if (log) log("hole punching: " + msg);
+        }
+    }
+}
+
+bool NetGame::open(const NetArgs& argsIn, std::string& err)
+{
+    NetArgs a = argsIn;
+    if (a.join.size() > 1 && a.join[0] == '@') {   // testing: the code from a file (the other process writes it)
+        const std::string path = a.join.substr(1);
+        const double t0 = nowS();
+        a.join.clear();
+        while (nowS() - t0 < 30.0 && (a.join = fileLine(path)).empty())
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (a.join.empty()) { err = "no code in " + path; return false; }
+    }
+    openedAt_ = nowS();
 #if defined(_MSC_VER) && defined(_M_X64)
     // the UCRT's math functions take FMA3 paths on CPUs that have it (other bits than without): off, so both PCs
     // compute the same whatever their CPUs (docs/netplay.md "Float determinism")
@@ -389,8 +584,44 @@ bool NetGame::open(const NetArgs& a, std::string& err)
                       (unsigned long long)o.pcData, o.pcData ? "" : " (none)");
         log(d);
     }
+    // hole punching (docs/netplay.md "Hole punching", 2026-11-10): STUN and the punches on the session's own socket
+    // (the NAT's mapping is the socket's). A host asks STUN unless it is bound to one address (the loopback tests)
+    // without --stun-mock; a joiner when the host's address is on the internet (or with --stun-mock)
+    const bool mock = !a.stunMock.empty();
+    const bool useStun = a.stun != "off" && !a.stun.empty() &&   // (a STUN server on the loopback: a test)
+                         (o.host ? o.addr.ip == 0 || mock : !isPrivateIp(o.addr.ip) || mock || a.stun.rfind("127.", 0) == 0);
+    punchJoin_ = !o.host && useStun;
+    if (punchJoin_ && o.connectTimeoutS > 0)   // (time for the reply code to reach the host and come back)
+        o.connectTimeoutS = std::max(o.connectTimeoutS, 90);
+    o.raw = [this](const Address& from, const uint8_t* p, size_t n) { return nat_.onPacket(from, p, n); };
+    opts_.raw = o.raw;
     if (!session_.start(o, err))
         return false;
+    nat_.init([this](const Address& to, const uint8_t* p, size_t n) { session_.sendPlain(to, p, n); }, log);
+    nat_.simNat = a.simNat;
+    std::string stunList = a.stun;
+    if (mock) {   // testing: tiny STUN servers on 127.0.0.1 (the second may answer N ports off: "p+N")
+        stunList.clear();
+        size_t at = 0;
+        for (int k = 0; k < 2 && at < a.stunMock.size(); ++k) {
+            size_t e = a.stunMock.find(',', at);
+            if (e == std::string::npos) e = a.stunMock.size();
+            const std::string s = a.stunMock.substr(at, e - at);
+            const size_t plus = s.find('+');
+            const int port = std::atoi(s.substr(0, plus).c_str()), shift = plus == std::string::npos ? 0 : std::atoi(s.c_str() + plus + 1);
+            std::string me;
+            if (port > 0 && port < 65536 && stunMock_[k].start(uint16_t(port), shift, me))
+                stunList += (stunList.empty() ? "" : ",") + std::string("127.0.0.1:") + std::to_string(port);
+            else if (log)
+                log("--stun-mock " + s + ": " + me);
+            at = e + 1;
+        }
+    }
+    if (useStun) nat_.startStun(stunList);
+    if (punchJoin_) {   // the direct try (the session's HELLO) and the punches toward the host at once
+        nat_.punch(o.addr, 10.0);
+        if (log) log("hole punching: trying the host directly and punching toward it");
+    }
     if (multi_) {   // up to four PCs: a session per seat (P2-P4) on the hub's socket
         relay_.assign(kRelayRing, {});
         own_.assign(kRelayRing, {});
@@ -415,8 +646,14 @@ bool NetGame::open(const NetArgs& a, std::string& err)
                                    : o.addr.ip != 0 || a.upnp == "off" ? PortMapper::Mode::Off
                                                                        : PortMapper::Mode::On;
         upnp_.start(session_.local().port, m);
-        if (log)
-            log("hosting on UDP " + lanAddress().str() + "; password " + shownCode() + "; join code " + shareCode());
+        if (log) {   // (natpunch: a code holding an internet address is not logged: it can be decoded)
+            Address ca;
+            std::string cc;
+            const std::string sc = shareCode();
+            const bool pub = parseShareCode(sc, ca, cc) && !isPrivateIp(ca.ip) && !std::getenv("HOTD_NET_LOG_IPS");
+            log("hosting on UDP " + lanAddress().str() + "; password " + shownCode() + "; join code " +
+                (pub ? std::string("(not logged: it holds your internet address)") : sc));
+        }
         upnpLogged_ = false;
     } else if (log) {
         log("joining " + o.addr.str() + " ...");
@@ -426,7 +663,11 @@ bool NetGame::open(const NetArgs& a, std::string& err)
 
 int NetGame::poll(Settings& settings, std::string& err, int waitMs)
 {
+    natPoll();
     const int r = session_.handshake(settings, err, waitMs);
+    if (r < 0 && punchJoin_ && !session_.hostAnswered() && err.rfind("No answer", 0) == 0)
+        err = "Couldn't connect: your networks block direct connections (strict / carrier-grade NAT). Try UPnP / port "
+              "forwarding, or let the other player host.";
     announce(false);
     if (!upnpLogged_ && session_.isHost() && upnp_.state() != PortMapper::State::Working && log) {
         upnpLogged_ = true;
@@ -524,6 +765,15 @@ int NetGame::bossMode() const
     return args_.pcMode ? 0 : args_.bossMode;
 }
 
+int NetGame::survival() const
+{
+    if (charsFixed_)
+        return settings_.survival;
+    if (!session_.isHost())
+        return session_.rosterReceived ? session_.roster[0].survival : 0;
+    return args_.pcMode || args_.bossMode ? 0 : std::clamp(args_.survival, 0, 16);
+}
+
 void NetGame::roster(Session::RosterSeat out[4]) const
 {
     auto ping = [](const Session& s) { return uint16_t(std::min(s.rttMs() + 0.5, 65535.0)); };
@@ -538,6 +788,7 @@ void NetGame::roster(Session::RosterSeat out[4]) const
         for (int s = 0; s < 4; ++s)
             out[s].pcChar = seatChar(s);   // (PC Mode: each seat's character)
         out[0].boss = bossMode();
+        out[0].survival = survival();
         return;
     }
     if (session_.isHost()) {   // two PCs: this one and the other
@@ -547,6 +798,7 @@ void NetGame::roster(Session::RosterSeat out[4]) const
         for (int s = 0; s < 4; ++s)
             out[s].pcChar = seatChar(s);
         out[0].boss = bossMode();
+        out[0].survival = survival();
         return;
     }
     // a joiner: the host's ROSTER (each seat's name and its ping to the host); before it came: the host and this PC
@@ -653,7 +905,7 @@ void NetGame::announce(bool inGame)
     // a host playing alone (or waiting for player 2 to come back) can be joined: listed as joinable
     g.inGame = !(solo_ || waitRejoin_) && (inGame || session_.released());
     g.build = buildId();
-    g.publicIp = upnp_.externalIp();
+    g.publicIp = upnp_.externalIp() ? upnp_.externalIp() : nat_.stun() == NatTraversal::Stun::Done ? nat_.mapped().ip : 0;
     if (multi_ && session_.isHost()) {   // up to four PCs: n / 4, joinable while a seat is free
         Session::RosterSeat r[4];
         roster(r);
@@ -690,7 +942,20 @@ void NetGame::hostStart(Settings s)
     if (!args_.pcMode)
         s.pmContinues = s.pmFreePlay = 0;
     s.bossMode = uint8_t(bossMode());   // Boss Mode (protocol 18): the host's boss game (never with PC Mode)
+    // Survival Mode (protocol 22): the host's arena (never with PC Mode / Boss Mode); its seed, cap .. as the caller
+    // filled them (main's netSettingsOf), the defaults in any other game
+    s.survival = uint8_t(survival());
+    if (!s.survival) {
+        const Settings d;
+        s.survivalSeed = d.survivalSeed, s.survivalCap = d.survivalCap, s.survivalCut = d.survivalCut;
+        s.survivalSmgWave = d.survivalSmgWave, s.survivalWeaponsWave = d.survivalWeaponsWave, s.survivalTest = d.survivalTest;
+    }
+    s.survivalCap = uint8_t(std::clamp(int(s.survivalCap), 1, 64));
+    s.survivalCut = s.survivalCut ? 1 : 0;
+    s.survivalTest &= 3;
     charsFixed_ = true;
+    if (log && s.survival)
+        log("Survival Mode: arena " + std::to_string(s.survival) + ", seed " + std::to_string(s.survivalSeed));
     if (log && s.bossMode)
         log("Boss Mode: " + std::string(game::kBossNames[s.bossMode - 2]));
     if (log && args_.pcMode)
@@ -1204,6 +1469,21 @@ void NetGame::applyInputs(game::Runtime& rt, const Input in[kMaxPlayers])
             const int c = (f & Input::kChar) >> Input::kCharShift;
             if ((f & Input::kStart) && c >= 1 && c <= kPmCharMax && rt.mem.u32(rt.player_rec(s)) == 9)
                 rt.pm_char[s] = c;
+        }
+    // Survival Mode (protocol 22): an input without its start carries the trigger held (the automatic weapons) and the
+    // weapon switch / the light gun's auto best weapon (Input::kHeld / kWeapon), applied as the local game's input does
+    // (main: the wheel, the number keys, a pad's shoulders, the light guns): in the frame's inputs, so alike on every PC
+    if (rt.survival.active())
+        for (int s = 0; s < (four ? 4 : 2); ++s) {
+            const uint8_t f = s < 2 ? in[s].flags : in[s - 2].flags2;
+            game::Runtime::GunInput& g = rt.gun[s];
+            const bool extras = !(f & Input::kStart);
+            g.held = extras && (f & Input::kHeld);   // (the sender leaves it off with a reload, as the local game)
+            const int code = extras ? f >> Input::kWeaponShift : 0;
+            rt.weapons.autoBest[s] = code >= Input::kWeaponAuto;
+            const int step = code >= Input::kWeaponAuto ? code - Input::kWeaponAuto : code;
+            if (rt.weapons.live && step != Input::kWeaponNone)
+                rt.weapons.request[s] = step == Input::kWeaponPrev ? -1 : step == Input::kWeaponNext ? 1 : 100 + (step - Input::kWeaponPick);
         }
     for (int p = 0; p < kMaxPlayers; ++p) {
         if (in[p].flags & Input::kStart)
@@ -1721,7 +2001,12 @@ NetGame::Step NetGame::stepMulti(game::Runtime& rt, const std::function<Input()>
                 }
             } else {
                 uint32_t pf; uint64_t ph;
-                const bool bye = ss.peerBye(pf, ph);
+                bool bye = ss.peerBye(pf, ph);
+                // bugs7: a BYE for a frame this PC has not run yet is that PC's run ending (a --frames limit: rollback
+                // lets it run a frame or two ahead), not a leave: the seat stays, finish() compares its end with ours
+                // (a 3-PC test logged "player 3 left (frame 2999)" and that PC's result "nobye"). Its inputs up to
+                // there are in; if this PC runs on past its end, the silence below frees the seat
+                if (bye && pf != kByeLeaving && pf > frame_) bye = false;
                 if (ss.silentSeconds() > 6.0 || ss.rejoinAsked() || bye) {   // (rejoinAsked: its PC is back)
                     if (log) log("player " + std::to_string(s + 1) + " left (frame " + std::to_string(frame_) + "): the seat is free to join again");
                     // (2026-10-30) a PC that closed / quit or dropped (not one whose run ended): the game waits for the

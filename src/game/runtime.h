@@ -15,6 +15,9 @@
 
 #include "game/bossmode.h"
 #include "game/survival.h"
+#if HOTD_HORDE
+#include "game/horde.h"
+#endif
 #include "game/weapons.h"
 #include "port/game.h"
 
@@ -103,13 +106,35 @@ public:
         bool held = false;   // Survival Mode's SMG: the trigger is held down (automatic fire); read by nothing else
     };
     GunInput gun[4];   // players 3 / 4: the experimental 4P mode only (docs/coop4.md)
+    // vr4 (user 2026-11-09, docs/vr.md "Dual pistols"): VR dual pistols with a magazine each, player 1, offline. The
+    // right gun is the game's own magazine (Player +0x3D rounds / +0x3E empty); the left gun's is kept here. A tick
+    // whose input is the left gun's (a shot, or its reload: main.cpp vrGunInput sets `use`) runs with the left
+    // magazine swapped into the player's record (frame: vrLeftBefore / vrLeftAfter around the first frame_one), so the
+    // game's own player_shoot fires / reloads it (its sounds, RELOAD!, Infinite Ammo, PC Mode's rounds). Out of play
+    // (state not 5: a continue, a new game) it is full again. Not in the rollback state: never online
+    struct VrLeftGun {
+        bool on = false;            // separate magazines now (main.cpp: VR dual pistols, offline, not Survival's weapon)
+        bool use = false;           // this tick's input is the left gun's
+        uint8_t rounds = 6, empty = 0;
+        bool swapped = false;       // (during the tick)
+        uint8_t start = 0;          // (the left rounds as the tick began)
+        uint32_t shots = 0, reloads = 0;   // (tests: the left magazine's rounds spent / refills)
+    } vrLeft;
+    void vrLeftBefore();
+    void vrLeftAfter();
     // --input-test (docs/teaser_status/input.md): what the input task handed the game, counted
     uint32_t inputFrames = 0, shotsIn[4] = {}, reloadsIn[4] = {}, startsIn[4] = {};
     bool livesKept = false;          // testing: a player at 0 lives gets 1 back (game over is not ported yet)
+    // smallfix: a cheat (game::cheats(): Invincibility / Infinite Ammo) was on during this game (from its start, game
+    // mode 4, main.cpp applyCheats): rank_insert, PC Mode's and Survival's tables take none of its scores
+    bool cheated = false;
     uint8_t livesKeptSkip = 0;       // testing (Survival's HOTD_SURVIVAL_DRAIN): bit p = seat p is not kept by livesKept
     // GitHub #29 (user 2026-11-03): a one-player game in player 2's seat (1), as the arcade's player 2 start button alone
     // gives it: chapter_start puts player 2 in play and player 1 waiting (arcade games only: not PC Mode / 4P)
     int soloSeat = 0;
+    // fix140a (user 2026-11-10: "I do not expect VR to support online. Only single player"): a VR run, player 1 only
+    // (player_join ignores the other seats' start buttons)
+    bool vrSolo = false;
     // GitHub #5 (Chapter Retry): players 1 / 2 as the chapter began (chapter_start, game_chapter_start): in play, score,
     // lives; the host's retry starts the chapter again and puts these back
     struct RetryPoint {
@@ -145,6 +170,7 @@ public:
         int type;
         float a[12], b[12];
         uint32_t body = 0;   // 4P phase 6: the body (creature) drawn (coop4_scene_bodies' copies); never read by the logic
+        uint16_t flat = 0xFFFF;   // magflash: the hit flash (as DrawModel::flat), 0xFFFF = the skin's own header
     };
     std::vector<SkinDraw> skinDraws;
     float camera[12] = {};           // the view matrix of the last frame (stored matrix 0)
@@ -372,6 +398,7 @@ public:
     bool titleFlow = false;                                                 // the title's loop: a game ends in the ranking / attract
     bool nameEntryOnClear = false;                                          // the chapter clear asks for a name (launcher runs)
     std::string rankingFile;                                                // the backup RAM's top 10 (empty: not kept)
+    bool noRanking = false;   // totdpacks: no player enters the top 10 (a TotD 0 game with a mutator: rank_insert ranks no one)
     void ranking_backup_ensure();                                           // 0x22550 backup_ranking_check (+ the file)
     void ranking_backup_save();                                             // 0x226E0
     void rank_insert() override;                                            // 0x5E5D0
@@ -547,10 +574,18 @@ public:
     // Survival Mode (game/survival.h): its lead-in runs undrawn in frame(), its director in the event task's slot (run,
     // evt_run), its end checked after each frame. Off: none of these hooks does anything
     SurvivalMode survival;
+#if HOTD_HORDE
+    // Horde Mode (game/horde.h): the script's standard creatures get copies (evt_spawned); off (size 0): nothing
+    HordeMode horde;
+#endif
     void evt_spawned(uint32_t task, uint32_t rec) override
     {
         if (survival.leadIn())
             survival.captured(*this, task, rec);
+#if HOTD_HORDE
+        else if ((horde.on() || HordeMode::testing()) && !survival.active())   // (feel: the trace, the wall test: testing)
+            horde.spawned(*this, task, rec);
+#endif
     }
     // Survival Mode's points (game.h survival_hits: only while survivalScoring)
     void survival_hits(uint32_t obj, uint32_t seats, int killer, uint32_t headSeats) override
@@ -562,12 +597,27 @@ public:
     void weapon_kill(uint32_t obj, int killer) override
     {
         weapons.kill(*this, obj, killer);
+#if HOTD_HORDE
+        horde.killed(*this, obj, killer);   // horde2: Horde's score pops, chains, multi-kills (nothing when off)
+#endif
     }
+#if HOTD_HORDE
+    void prop_broken(uint32_t obj) override   // hordepub: a crate / breakable prop broken (Horde's drops)
+    {
+        horde.propBroken(*this, obj);
+    }
+#endif
     // survfix3: the Magician's Hand's aim ray against the stage (Weapons::worldRay)
     bool weapon_world_ray(const float o[3], const float d[3], float maxT, float& t) override { return weapons.worldRay(*this, o, d, maxT, t); }
+    // (handsync) an online game: Weapons::worldRay tests only the stage's own walls, not the moving props' (the
+    // Ragdoll mod's doors: each PC's own setting, placed as last drawn, not as re-simulated)
+    bool onlineGame = false;
     // a creature as ENTB3 makes one (kind -> obj_kinds, the record's fields), in the current task group (survival.cpp)
     uint32_t survival_spawn(uint32_t kind, uint32_t flags, const float pos[3], const int32_t ang[3], int type, int action,
                          int life, uint32_t delay, uint32_t substate);
+    // survmaps: a creature as ENTBE makes one from an event record (its kind, flags, place, angles; +0x35C = the
+    // record's own part, rec + 0x24), with these hit points
+    uint32_t survival_spawn_record(uint32_t rec, int life);
     std::vector<std::pair<uint32_t, uint32_t>> survivalPatches_;   // ROM-image words Survival changed (address, old value)
     void survival_restore();                                       // those words set back (a new game, Survival off)
     uint32_t survivalMusic_ = 0;                                   // the lead-in's last music code (played at the arena)
@@ -691,6 +741,10 @@ public:
     std::vector<uint32_t> pcCells = std::vector<uint32_t>(4 * kPcRows * 64, 0);
     std::vector<uint32_t> pcClip = std::vector<uint32_t>(4 * kPcRows * 64, 0);
     std::map<std::pair<int, int>, std::string> pcTexts;
+    // subs (game/subtitles.h): the captions among pcTexts by place: their id (event * 2 + line - 1: a line of the
+    // subtitle table G::voice_subtitles) and the frame (frameCount) tile_text_draw showed it. Draw-only, never read by
+    // the logic
+    std::map<std::pair<int, int>, std::pair<int, uint64_t>> pcTextIds;
     // pcrank: the name entry's 3D pieces this frame (name_entry_model_draw: model, place in arcade screen pixels from
     // the centre, y up, and size against a grid letter's), which the PC files lack: the HUD draws PC sprites there
     struct PcNameModel {

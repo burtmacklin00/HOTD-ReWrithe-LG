@@ -459,8 +459,11 @@ template <class P> void Game<P>::shot_effect(uint32_t task)
         const uint32_t pl = player_rec(p) - 4;   // 0x51F280 + p x 0xCC (4P: seats 2 / 3 in the block)
         const float ax = float(mem.at<int16_t>(pl + 0x38)) / 496.0f, ay = float(mem.at<int16_t>(pl + 0x3A)) / 496.0f;
         const uint32_t d = task_create(F::shot_effect_debris, 0x64);
-        mem.set32(d + 0x54, uint32_t((p & 1) + 0x660));
-        if (coop4_on() && p >= 2) {   // 4P: player 2's spark (blue: its ramp reads clearly), the seat noted for the view
+        // charsel4: Rogan / G's spark and flash are players 1 / 2's own in any seat (look_seat; in seats 3 / 4 then
+        // as they are: no ring entry, no ramp)
+        const int look = look_seat(p);
+        mem.set32(d + 0x54, uint32_t((look & 1) + 0x660));
+        if (coop4_on() && look >= 2) {   // 4P: player 2's spark (blue: its ramp reads clearly), the seat noted for the view
             mem.set32(d + 0x54, 0x661);
             const uint32_t k = mem.at<uint8_t>(coop4::kSparkNext) & 3;   // a ring of four
             mem.set32(coop4::kSparks + k * 8, d);
@@ -506,8 +509,8 @@ template <class P> void Game<P>::shot_effect(uint32_t task)
         mem.set32(fl + 0x3C, c.w[1]);
         mem.set32(fl + 0x40, c.w[2]);
         mem.set32(fl + 0x50, 0);
-        mem.set32(fl + 0x54, mem.u32(0xCA738 + uint32_t(p) * 4));
-        if (coop4_on() && p >= 2) {
+        mem.set32(fl + 0x54, mem.u32(0xCA738 + uint32_t(look < 2 ? look : p) * 4));
+        if (coop4_on() && look >= 2) {
             // 4P: the table has two players' flashes (its words 2 / 3 are code: no model): player 2's flash as the
             // spark above, the seat noted for the view (its colour ramp, Teammate Flashes)
             mem.set32(fl + 0x54, mem.u32(0xCA73C));

@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -28,6 +29,8 @@
 #include <set>
 #include <string>
 #include <vector>
+
+namespace hotd::test { struct Access; }   // (tests/unit: hotd_unit's look at the private parts)
 
 namespace hotd::game {
 
@@ -75,6 +78,13 @@ struct TypingConfig {
     float smallWait[5] = {1.6f, 1.4f, 1.0f, 0.75f, 0.6f};   // totd6: a small one's (bat, Murrer, frog) reading time
     float smallQueue[5] = {0.6f, 0.45f, 0.35f, 0.3f, 0.25f};   // totd8: the small ones' graces queue, this a key
     float attackGap[5] = {1.5f, 1.2f, 0.8f, 0.5f, 0.3f};
+    // totdrec (the user's recording 2026-11-05: "how the enemy animations line up when you fail to type in time"; an
+    // agile one on a wall out of the picture, its box gone, leapt in and bit 0.5 s later): a creature with a word whose
+    // box is not on the screen begins no attack (as one with no word yet), for offscreen_hold seconds at most since
+    // its box went (then it may: no event waits for ever); a creature's hit lands only once its box has been on the
+    // screen strike_seen seconds in a row (it leapt in from outside: its strike plays, no damage)
+    float offscreenHold = 3.0f;
+    float strikeSeen[5] = {0.8f, 0.7f, 0.6f, 0.5f, 0.4f};
     // totd6: the graces queue (one word after another, as a typist types them): a creature's grace starts no sooner
     // than the latest one running ends, plus this (seconds; < 0: no queue, totd5's graces all from the same moment)
     float attackQueue[5] = {0.5f, 0.45f, 0.4f, 0.3f, 0.2f};
@@ -134,10 +144,10 @@ struct TypingConfig {
     // totd4 (user 2026-11-04: "a typewriter key sound, a ding for a word, another sound for a wrong letter"): the
     // sounds, each data/typing/<key|miss|ding>.wav when there (a mod's or the user's file), else the PC game's own
     // sound: a PC cue number of THOTD.EXE's table (docs/typing.md "Sounds"). key_cue 28: the 1998 PC's name entry key
-    // sound (screen 15's Enter / Space click, sample 13, also the reload click); miss_cue 253: a short low buzz
-    // (sample 60); ding_cue 140: the coin / life item chime (O_LIFEUP), until the user's ding.wav. -1: none
+    // sound (screen 15's Enter / Space click, sample 13, also the reload click); miss_cue 48: a short mid-low buzz
+    // (sample 49); ding_cue 140: the coin / life item chime (O_LIFEUP), until the user's ding.wav. -1: none
     bool sounds = true;
-    int keyCue = 28, missCue = 253, dingCue = 140;
+    int keyCue = 28, missCue = 48, dingCue = 140;
     float keyVolume = 4.0f, missVolume = 4.0f;   // (totd5: up to 4, a gain over the peak; totd7: 4, the gun shot's level)
     // totd5 (user 2026-11-04: "I could barely hear the typing sounds and could not tell what they were"): each sound's
     // peak brought to sound_peak of full scale (a user's own file too), then its volume; the ding's own volume
@@ -164,6 +174,45 @@ struct TypingConfig {
     // totd7 (user 2026-11-05: "maybe a pixel shadow on the borders, I would have to see it"): the boxes' one-pixel drop
     // shadow (box_shadow; on: the user picked it 2026-11-05)
     bool boxShadow = true;
+    // totdex (2026-11-09, SEGA's rules as Tenome's Typing of the Dead EX notes read them from Tod.exe; docs/typing.md
+    // "SEGA's rules and ours"): recent_words: a prompt is not given again within the last n picks (Tod.exe's picker
+    // avoids its last 16); shift_grace: a key that misses is tried again as its shifted character when the key
+    // before it was a shifted one (Tod.exe's judge: Shift let go a moment early); the word level (Tod.exe 0-15, -2 a
+    // hit, up while you do well): word_level_hit levels down a hit (each level a creature's word one letter shorter,
+    // a tough one's phrase two), down to word_level_min, one level back every word_level_words creature words typed
+    // without a hit, never above the difficulty's own lengths (0: off); key_cost_grade: a kill's speed in Tod.exe's
+    // key costs (a s t h 3, most letters 4, c m n x z 5, p q 6, v 8, space 2, digits 10, symbols 13; 4 = a letter),
+    // short words x 1 / 1.1, long x 1 / 0.8; rank_points: the score for each kill grade S A B C D F (Tod.exe's speed
+    // bonus 35 / 20 / 15 / 10 / 5 / 0 for its six grades)
+    int recentWords = 16;
+    bool shiftGrace = true;
+    int wordLevelHit = 1, wordLevelMin = -2, wordLevelWords = 8;
+    bool keyCostGrade = true;
+    std::vector<int> rankPoints = {35, 20, 15, 10, 5, 0};
+    // totdrec (step 3 of the Tenome plan, "practice from your misses", the menu's Practice Your Misses, off by
+    // default): practice_share of the creature words come from your misses (the Statistics' most missed words, then
+    // words of the lists with your most missed keys); practice_words / practice_keys: how many of each are taken
+    float practiceShare = 0.35f;
+    int practiceWords = 30, practiceKeys = 3;
+    // totdpacks (Practice, the drill): drill_words a round, at most drill_on_screen up at once, a new one every
+    // drill_gap seconds; a word crosses the screen in drill_seconds + drill_per_letter x its letters (per difficulty)
+    int drillWords = 30, drillMax = 4;
+    float drillGap[5] = {2.6f, 2.2f, 1.8f, 1.4f, 1.1f};
+    float drillSeconds[5] = {14.0f, 12.0f, 10.0f, 8.0f, 7.0f};
+    float drillPerLetter[5] = {0.5f, 0.35f, 0.25f, 0.2f, 0.16f};
+};
+
+// totdpacks (Options > Gameplay > Typing of the Dead 0 > Mutators, all off by default; after Tenome's Typing of the
+// Dead EX mutators, ideas only): long words only (the creatures' words from the far band's longest lengths up), short
+// words only (the near band's shortest; tough ones a word, not a phrase), one life (the game starts with 1),
+// no Backspace (a word once begun cannot be dropped: Escape / Backspace do nothing), double speed (the game's ticks
+// twice as fast: creatures, attacks, the boss windows; your typing as it is), reversed (every prompt backwards). A
+// game with any of them on goes in no high score table. launcher.ini totd_mutators= (csv() ids)
+struct TypingMutators {
+    bool longWords = false, shortWords = false, oneLife = false, noBackspace = false, doubleSpeed = false, reversed = false;
+    bool any() const { return longWords || shortWords || oneLife || noBackspace || doubleSpeed || reversed; }
+    std::string csv() const;                           // "long,onelife" (empty: none)
+    static TypingMutators parse(const std::string& csv);
 };
 
 // one chapter's (or the game's) typing stats
@@ -188,9 +237,31 @@ struct TypingStats {
     int rescueSeen = 0, rescued = 0;   // the chapter's people to rescue (hostages_appeared) and rescued
     bool bossSeen = false, bossBeaten = false;
     std::map<std::string, std::pair<uint32_t, uint32_t>> lengths;   // the prompts by enemy class: count, letters
+    // totdex (the Statistics page): the misses by the letter that should have come (lower case) and by prompt
+    uint32_t keyMiss[128] = {};
+    std::map<std::string, uint32_t> wordMiss;
     float accuracy() const { return letters + misses ? 100.0f * float(letters) / float(letters + misses) : 100.0f; }
     // words per minute (5 letters a word, the standard measure) over the locked time
     float wpm() const { return typingMs > 0 ? float(letters) / 5.0f / float(typingMs / 60000.0) : 0.0f; }
+};
+
+// totdex (user 2026-11-09, after Tenome's Typing of the Dead EX statistics): the typing over many games, kept in the
+// settings folder (totd_stats.txt): a session's (since the game started) and the lifetime's. add() takes what a
+// game's TypingStats gained since `last` (then last = now), so it can be called at any time (a chapter's end, the
+// game's, leaving)
+struct TypingRecord {
+    uint32_t games = 0, letters = 0, misses = 0, words = 0;
+    double typingMs = 0;
+    uint32_t keyMiss[128] = {};
+    std::map<std::string, uint32_t> wordMiss;
+    float accuracy() const { return letters + misses ? 100.0f * float(letters) / float(letters + misses) : 100.0f; }
+    float wpm() const { return typingMs > 0 ? float(letters) / 5.0f / float(typingMs / 60000.0) : 0.0f; }
+    void add(const TypingStats& now, TypingStats& last);
+    bool load(const std::string& path);
+    bool save(const std::string& path) const;
+    // "E 12, R 9, T 7" / "zombie 3, shadow 2": the n most missed (empty: none yet)
+    std::string topKeys(int n) const;
+    std::string topWords(int n) const;
 };
 
 class Typing {
@@ -199,12 +270,52 @@ public:
     ~Typing();
     // the tuning and the dictionary from data/typing under each data folder (later folders, i.e. mods, override);
     // false: no prompts found (err says where it looked)
-    bool load(const std::vector<std::string>& dataDirs, std::string& err, const std::string& dictionary = "");
+    // totdpacks: packs = the word packs chosen (typing_packs.h; launcher.ini totd_packs=): "builtin" the dictionary's own
+    // lists, the others data/typing/packs/<id>, mixed (each list the union); empty: the built-in only
+    bool load(const std::vector<std::string>& dataDirs, std::string& err, const std::string& dictionary = "",
+              const std::vector<std::string>& packs = {});
+    // totdpacks: what load() took ("builtin + example-story, 912 prompts"), the packs asked for but not found
+    std::string packsInfo, packsMissing;
+    // totdpacks (Tenome's in-order typing): the chosen packs with order = text: their text in pieces, served in order to
+    // the creatures' words (a creature whose turn finds the next piece's first letter taken on the screen gets a word
+    // of the lists and the piece waits for the next one); textPos the next piece (kept between games by main.cpp under
+    // textKey: the packs and the text's length), textLoops the times the text was typed through
+    const std::vector<std::string>& text() const { return text_; }
+    std::string textKey;
+    size_t textPos = 0;
+    uint32_t textServed = 0, textLoops = 0;
     // a new game: difficulty 0..4 (the game's setting: very easy .. very hard), the prompts' seed (fixed: the runs repeat)
     void start(int difficulty, uint64_t seed = 0x70D0);
     int difficulty() const { return difficulty_; }
+    // totdrec (Practice Your Misses): after start(), the words you missed most (prompts as shown) and the letters
+    // (lower case) you missed most; both empty: off. The next words of the creatures draw on them (practice_share)
+    void setPractice(std::vector<std::string> words, std::string keys);
+    bool practiceOn() const { return !practiceWords_.empty() || !practiceKeys_.empty(); }
+    uint32_t practicePicks = 0, practiceFromWords = 0, practiceFromKeys = 0;   // (the report: creature picks, from misses)
     // capitals typed as shown (difficulty >= case_from_difficulty)
     bool caseSensitive() const { return difficulty_ >= cfg_.caseFromDifficulty; }
+    // totdpacks: the game's mutators (set before start(); main.cpp applies one life / double speed / the table)
+    TypingMutators mutators;
+    // the keys that drop the lock (typing.ini drop_lock_keys; No Backspace: none)
+    int dropKeys() const { return mutators.noBackspace ? 0 : cfg_.dropLockKeys; }
+
+    // totdpacks: Practice (More Modes > The Typing of the Dead 0 > Practice; after Tenome's Typing of the Dead EX
+    // practice / drills, ideas only): words float in across a fixed screen, no attacks, no game (no Runtime). After
+    // start(): drillStart(fromMisses: the words of setPractice(), else the chosen packs' lists; the packs' text in
+    // order when there is one); drillTick() each 1/60 s with the queued keys (typed() / cancel()); labels in arcade
+    // screen units (496 x 384, centre 0 / 0, y up); the stats in `game` (letters, misses, words, keyMiss, wordMiss)
+    void drillStart(bool fromMisses);
+    void drillTick(class Audio* audio, double tickMs);
+    bool drillOn() const { return drill_; }
+    bool drillOver() const { return drill_ && drillShown >= drillTotal && targets_.empty(); }
+    void drillEnd() { drill_ = false; targets_.clear(); labels.clear(); lock_ = 0; }
+    bool drillFromMisses = false;   // (the misses list was empty: false, the packs instead)
+    int drillTotal = 30;
+    uint32_t drillShown = 0, drillTyped = 0, drillLost = 0;
+    std::map<std::string, uint32_t> drillLostWords;   // the words that floated off the screen untyped
+    // (the self-test's rule checks) two words up at once with the same first letter; a word given within the last
+    // recent_words picks again (none with enough words in the lists)
+    uint32_t drillSameFirst = 0, drillRepeats = 0;
 
     // input (the window's text events, or the Typist): one character (any case), Backspace / Escape (drop the lock;
     // true if one was dropped), queued for the next tick
@@ -339,6 +450,10 @@ private:
         uint64_t preyReadyAt = 0;   // a captor: the frame from which its bite on the researcher may land
         // totd3
         int bossGoal = -1;          // a boss part's hit points after its sentences so far (-1: none set); 0: the next shot kills
+        // totdex: a part without hit points of its own (the Chariot's hit box): the boss part whose bar its sentences
+        // take instead (0: none) and its serial; its shots go there too
+        uint32_t bossAlt = 0;
+        int32_t bossAltSerial = 0;
         bool autoShot = false;      // a frog / a hanging Ebitan: no prompt, the layer shoots it (auto_names)
         uint64_t nextAuto = 0;      // its next shot
         // totd5
@@ -353,7 +468,10 @@ private:
     };
     const bool noLatch_ = std::getenv("HOTD_TOTD_NOLATCH") != nullptr;   // (testing: round 6's boxes, the flicker comparison)
     // totd7 (the flicker check): each box's last frame shown, its target's serial and text
-    struct Shown { int32_t serial = 0; uint64_t last = 0; std::string text; uint64_t flipAt = 0; };
+    // (totdrec: since = the frame this showing began, the box up every frame since)
+    struct Shown { int32_t serial = 0; uint64_t last = 0; std::string text; uint64_t flipAt = 0; uint64_t since = 0; };
+    // totdrec: a creature's box on the screen now (its leader's for a group member); frames in a row it has been
+    uint64_t boxUpFor(uint32_t obj) const;
     std::map<uint32_t, Shown> shown_;
     // totd5 (user 2026-11-04: "a destroyed / typed projectile can never damage the player"): the things typed to their
     // end (projectiles, small creatures): obj -> serial, until frame; their hits are held (holdsHit, holdsProjectile)
@@ -367,6 +485,7 @@ private:
     uint64_t bossRestUntil_ = 0;       // totd5: the boss acts (no sentence) until this frame after a sentence typed
     void noteHit(const char* via) const;
     mutable std::string tickHitVia_;   // the routine whose hit got through this tick
+    mutable uint32_t tickHitObj_ = 0;  // totdrec: its object (the current task when the hit got through)
     void strike(Runtime& rt, Target& t);   // totd5: the landed shot's hit given directly (no shot)
     // totd2: a typed small target / projectile followed for a while: did it really go (killed, knocked away)
     struct Follow { uint32_t obj; int32_t serial; uint32_t routine; int16_t state; uint64_t until; uint32_t hitsAt; int what; };
@@ -408,6 +527,7 @@ private:
     uint64_t bossDamageUntil_ = 0;   // a boss attack's damage x until this frame
     struct BossHp { uint32_t obj; int32_t serial; int16_t hp; };
     std::vector<BossHp> bossHp_;     // the bosses' hit points before the tick (a boss attack's window)
+    std::map<uint32_t, int> altGoal_;   // totdex: the boss parts taking another part's sentences: their hit points goal
     int lastChapter_ = -1;
     bool clearWas_ = false;
     Runtime* rt_ = nullptr;          // (the attack hold during the tick)
@@ -430,9 +550,43 @@ private:
     mutable bool strikeLanded_ = false;   // (this tick: the striker's hit let through)
     uint64_t lastBossFinish_ = 0;    // the frame the last boss sentence was typed
     uint64_t bossDownUntil_ = 0;     // totd3: a boss part killed by its last sentence: no boss prompts until this frame
+    // totdex (SEGA's rules): the last prompts picked (recent_words), the key before was a shifted one (shift_grace),
+    // the word level (0 the difficulty's lengths, down after a hit) and the creature words typed since the last change
+    std::deque<std::string> recent_;
+    bool lastShifted_ = false;
+    int levelRun_ = 0;
+public:
+    int wordLevel = 0;
+    // totdex: a kill's speed measure in Tod.exe's key costs, in letters (4 a letter); the factor for short / long ones
+    static float keyEffort(const std::string& s, bool caseCounts, float& factor);
+    // totdex (SEGA's judge): a key as typed with Shift (US pairs: a -> A, 1 -> !; else itself); a shifted key
+    static uint32_t shiftOf(uint32_t key);
+    static bool shiftedKey(uint32_t key);
+    // the key types `want` (case as caseSensitive()); prevShift: the key before it was shifted (shift_grace)
+    bool keyMatches(char want, uint32_t key, bool prevShift) const;
+private:
+    friend struct ::hotd::test::Access;   // (tests/unit: the prompt picker's rules)
     // a prompt from the list `list` (letters minLen..maxLen; 0: any) whose first letter no other target's has (false:
     // none such, out = any of the list)
-    bool pick(const std::vector<std::string>& lists, int minLen, int maxLen, uint32_t self, std::string& out);
+    // (totdrec: only words: from those instead of the lists; only keys: words with one of those letters; with either,
+    // lengths widened by 2 at most and false with out untouched when none passes the rules)
+    bool pick(const std::vector<std::string>& lists, int minLen, int maxLen, uint32_t self, std::string& out,
+              const std::vector<std::string>* onlyWords = nullptr, const std::string* onlyKeys = nullptr);
+    // totdrec: a practice word (a missed one of about that length, else a list word with a missed key) that pick()'s
+    // rules allow (first letter, on the screen, recent); false: none, out untouched
+    bool practicePick(const std::vector<std::string>& lists, int minLen, int maxLen, uint32_t self, std::string& out);
+    std::vector<std::string> practiceWords_;
+    std::string practiceKeys_;
+    // totdpacks: the text's next piece if pick()'s rules allow it now (first letter, the quick keys, on the screen)
+    bool textPick(uint32_t self, std::string& out);
+    std::vector<std::string> text_;
+    // totdpacks: Practice's state: on, the next word's id and time, its words' speeds (units a tick)
+    bool drill_ = false;
+    uint32_t drillNextId_ = 0;
+    uint64_t drillNextAt_ = 0;
+    std::map<uint32_t, float> drillSpeed_;
+    std::deque<std::string> drillRecent_;
+    void soundTo(class Audio* audio, const char* name);
     std::string newPrompt(Runtime& rt, Target& t);   // the target's next prompt (its list by kind, difficulty, chapter)
     bool isSmall(Runtime& rt, uint32_t obj) const;
     bool same(char want, uint32_t key) const;        // the key types this character (case as caseSensitive())
@@ -454,6 +608,13 @@ public:
     uint32_t quickTyped = 0, quickIgnored = 0, ignoredKeys = 0, groupsMade = 0, groupKills = 0, pickupsAuto = 0;
     // totd7: strikes whose hit was held (the animation hit, no damage): a creature's with its word still up, a boss's
     mutable uint32_t heldCreature = 0, heldBoss = 0, heldInFight = 0;
+    // totdrec (the user's recording 2026-11-05): creature hits that landed while the creature's box was not on the
+    // screen (gone more than 20 frames: nothing to type), and those with its box up (its word not typed in time)
+    uint32_t hitsUnshown = 0, hitsShown = 0;
+    // totdrec: attack asks held while the creature's box was off the screen (frames), strikes whose hit was held as
+    // its box had not been up strike_seen yet
+    uint32_t offscreenHeld = 0;
+    mutable uint32_t heldFresh = 0;
     // totd8: boss strikes let go (a window missed) and landed; frames a strike was held; asks not held (no boss seen 2 s)
     uint32_t bossStrikes = 0, bossStrikesLanded = 0, bossHeldFrames = 0, bossUnheld = 0;
     uint32_t bossFreeStrikes = 0, bossBlocks = 0;   // totd8: free strikes let go, blocked by their sentence's first letters

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "net/lobby.h"
+#include "net/natpunch.h"
 #include "net/rollback.h"
 #include "net/session.h"
 #include "net/upnp.h"
@@ -53,10 +54,22 @@ struct NetArgs {
     bool charPick = false;
     // Boss Mode online (protocol 18): the host's boss game (--boss-mode; the Host page's Game Mode): 0 none, 2-6
     int bossMode = 0;
+    // Survival Mode online (protocol 22): the host's Survival game (--survival with --host; the Host page's Game Mode):
+    // 0 none, else the arena + 1 (never with PC Mode / Boss Mode)
+    int survival = 0;
     // the same game data (protocol 19; docs/netplay.md "Same game data"): this PC's digests (main fills them before
     // open: gameDataDigests); the host refuses a joiner whose ROMs differ, or whose PC data differ in a PC Mode / Boss
     // Mode game
     uint64_t romData = 0, pcData = 0;
+    // online without port forwarding (natpunch.h; docs/netplay.md "Hole punching"): the STUN servers in fallback order
+    // (--stun a,b | off; launcher.ini netstun= / stunservers=), "off" = as before (UPnP / port forwarding only).
+    // Testing: --stun-mock p[,p2] (tiny STUN servers on 127.0.0.1 in this process; "p+N": that one answers N ports
+    // off, a symmetric NAT), --net-sim-nat (a restricted NAT in front of this PC), --code-out FILE (the host's join
+    // code once it has its address), --reply-out FILE (a joiner's reply code), --reply-from FILE (the host reads a
+    // reply code there), --join @FILE (the code read from a file, waited for)
+    std::string stun = kDefaultStun;
+    std::string stunMock, codeOut, replyOut, replyFrom;
+    bool simNat = false;
     bool active() const { return !host.empty() || !join.empty(); }
     // consumes one option (and its value through next); false: not a netplay option. err set on a bad value
     bool parse(const std::string& a, const std::function<std::string()>& next, std::string& err);
@@ -87,7 +100,10 @@ public:
     // Boss Mode online (protocol 18): the game's Boss Mode (0 none, 2-6: game/bossmode.h): the host's choice; a joiner's
     // waiting room: the host's ROSTER; once started: the game's settings
     int bossMode() const;
-    void close();                                // the LAN announcement and the UPnP mapping end
+    // Survival Mode online (protocol 22): the game's arena + 1 (0 none), as bossMode(): the host's choice, a joiner's
+    // ROSTER, once started the settings
+    int survival() const;
+    void close();                               // the LAN announcement and the UPnP mapping end
     // opens the session and waits for the other PC (host: up to timeoutS, 0 = until one joins; it starts by itself once
     // player 2 is in). The host passes its settings; the client receives the host's
     bool connect(const NetArgs& a, Settings& settings, std::string& err, int timeoutS);
@@ -98,6 +114,15 @@ public:
     std::string shareCode() const;               // the address (internet address when UPnP gave it) + the code
     Address lanAddress() const;
     const PortMapper& upnp() const { return upnp_; }
+    // hole punching (docs/netplay.md "Hole punching"): the host's STUN state for its Internet line; a joiner's reply
+    // code (its public + LAN address) once its direct try had no answer for a few seconds ("" none); the host pastes it:
+    // its punches open the way (msg: what the waiting room says)
+    const NatTraversal& nat() const { return nat_; }
+    std::string replyCode() const;
+    bool addReply(const std::string& text, std::string& msg);
+    // the waiting rooms' line about it: "Getting your address...", "Waiting for your friend...", the strict-NAT
+    // warning, "Couldn't connect: ..." ("" nothing to say)
+    std::string natNote() const;
 
     enum class Step { Run, Wait, Stop };
     // before a game frame: `sample` gives the local player's input (called once per frame, for frame + delay); Run =
@@ -181,6 +206,16 @@ private:
     std::string code_;
     LobbyAnnouncer announcer_;
     PortMapper upnp_;
+    // hole punching (natpunch.h): STUN on the session's socket, the punches; the tests' mock STUN servers
+    NatTraversal nat_;
+    StunMock stunMock_[2];
+    bool punchJoin_ = false;                     // a joiner trying an internet host: punches, the reply code
+    double openedAt_ = 0, replyPunchAt_ = -1;    // a host: the last reply code's punches started (-1 none)
+    bool codeWritten_ = false, replyWritten_ = false;
+    std::vector<std::string> repliesUsed_;       // a host: the reply codes punched to this hosting (a repeat: ignored)
+    double replyReadAt_ = -1;                    // testing (--reply-from): the file's last look, and its content then
+    std::string replyFileSeen_;
+    void natPoll();
     uint8_t chapter_ = 0;
     uint32_t frame_ = 0;
     int64_t submitted_ = -1;

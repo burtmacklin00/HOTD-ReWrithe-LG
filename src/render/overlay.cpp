@@ -89,7 +89,9 @@ void Overlay::setText(const std::vector<std::string>& linesIn, int scale)
         for (std::string& l : shown) l = lang::tr(l);
     const render::TtfText* tf = nullptr;
     for (const std::string& l : shown)
-        if (!tf && !lang::plain(l)) tf = lang::fontFor(l);
+        // (rec131: a Latin-1 line, e.g. Spanish "CAPÍTULO": fontFor leaves those to the PC fonts, but the 8 x 8 font
+        // has no accents (the end screen showed a box for the Í): a font from data/fonts all the same)
+        if (!tf && !lang::plain(l) && !(tf = lang::fontFor(l))) tf = lang::anyFont();
     if (tf) {
         setTextTtf(shown, *tf);
         return;

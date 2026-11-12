@@ -1,6 +1,8 @@
 #include "net/socket.h"
 
+#include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -112,6 +114,66 @@ bool isPrivateIp(uint32_t ip)
 {
     return (ip >> 24) == 10 || (ip >> 20) == 0xAC1 || (ip >> 16) == 0xC0A8 || (ip >> 16) == 0xA9FE || (ip >> 22) == (0x64400000u >> 22) ||
            (ip >> 24) == 127;
+}
+
+std::string redactLog(const std::string& text, uint32_t salt)
+{
+    if (salt == 0) {
+        static const bool showAll = [] { const char* e = std::getenv("HOTD_NET_LOG_IPS"); return e && *e == '1'; }();
+        if (showAll) return text;
+        static const uint32_t runSalt = [] {
+            const uint32_t s = uint32_t(std::chrono::steady_clock::now().time_since_epoch().count()) ^
+                               uint32_t(uint64_t(std::chrono::system_clock::now().time_since_epoch().count()) >> 7);
+            return s ? s : 0x9E3779B9u;
+        }();
+        salt = runSalt;
+    }
+    auto digit = [&](size_t i) { return i < text.size() && text[i] >= '0' && text[i] <= '9'; };
+    std::string out;
+    size_t i = 0;
+    while (i < text.size()) {
+        // a dotted quad starting here (not inside a longer number, version string or word)
+        if (digit(i) && (i == 0 || !(digit(i - 1) || text[i - 1] == '.' || std::isalpha(static_cast<unsigned char>(text[i - 1]))))) {
+            size_t j = i;
+            uint32_t ip = 0;
+            int parts = 0;
+            bool ok = true;
+            while (parts < 4) {
+                size_t k = j;
+                uint32_t v = 0;
+                while (digit(k) && k - j < 4) v = v * 10 + uint32_t(text[k++] - '0');
+                if (k == j || k - j > 3 || v > 255) { ok = false; break; }
+                ip = ip << 8 | v;
+                j = k;
+                if (++parts < 4) {
+                    if (j < text.size() && text[j] == '.' && digit(j + 1)) ++j;
+                    else { ok = false; break; }
+                }
+            }
+            if (ok && !digit(j) && !(j + 1 < text.size() && text[j] == '.' && digit(j + 1))) {
+                if (isPrivateIp(ip) || ip == 0 || ip == 0xFFFFFFFFu) {
+                    out.append(text, i, j - i);
+                } else {
+                    uint32_t h = (ip ^ salt) * 0x9E3779B1u;   // (a keyed mix: the same address = the same tag in one run)
+                    h ^= h >> 15, h *= 0x85EBCA77u, h ^= h >> 13;
+                    char tag[16];
+                    std::snprintf(tag, sizeof tag, "public#%04X", unsigned(h >> 16));
+                    out += tag;
+                }
+                i = j;
+                continue;
+            }
+            while (digit(i) || (i < text.size() && text[i] == '.')) out += text[i++];   // (not an address: as it is)
+            continue;
+        }
+        out += text[i++];
+    }
+    return out;
+}
+
+std::string logAddr(const Address& a)
+{
+    return redactLog(a.str());
 }
 
 std::vector<LocalIf> localInterfaces()

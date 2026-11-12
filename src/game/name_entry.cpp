@@ -113,6 +113,7 @@ void Runtime::rank_insert()
     ranking_backup_ensure();
     int8_t place[2] = {-1, -1};
     auto insert = [&](int p) -> int {
+        if (noRanking) return -1;   // (totdpacks: a TotD 0 game with a mutator on: no table)
         const Player& pl = mem.at<Player>(G::players, uint32_t(p));
         if (pl.score < mem.at<int32_t>(kTable + 9 * 12 + 8))
             return -1;
@@ -130,7 +131,12 @@ void Runtime::rank_insert()
         mem.at<int32_t>(e + 8) = pl.score;
         return i;
     };
-    const bool in0 = mem.at<Player>(G::players, 0).state != 9, in1 = mem.at<Player>(G::players, 1).state != 9;
+    bool in0 = mem.at<Player>(G::players, 0).state != 9, in1 = mem.at<Player>(G::players, 1).state != 9;
+    if (cheated) {   // (smallfix: a game with a cheat on: no place, no name entry)
+        in0 = in1 = false;
+        if (log)
+            log("ranking: a cheat was on, no place");
+    }
     if (in0 && !in1) {
         place[0] = int8_t(insert(0));
     } else if (in1 && !in0) {

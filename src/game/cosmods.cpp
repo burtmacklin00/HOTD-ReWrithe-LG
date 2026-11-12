@@ -74,17 +74,21 @@ void rainbowTableCache(const Runtime& rt)
     menuTableKnown() = true;
 }
 
-bool rainbowMenuColour(double seconds, float rgb[3])
+bool rainbowMenuColour(double seconds, float rgb[3], bool smooth)
 {
     const RainbowBloodSettings& s = rainbowBloodSettings();
     if (!s.on || !s.menu)
         return false;
     // (user 2026-11-07: "extremely laggy": each change draws the whole Remake menu again, its blood art recoloured
     // pixel by pixel; so one change every 3 s, 12 colours a cycle)
-    const double h = std::fmod(std::floor(seconds / 3.0) / 12.0, 1.0);
+    // (smallfix2 user 2026-11-09: "not a smooth transition": the GPU-tinted menu takes smooth = true: the same 36 s
+    // cycle, the table's entries blended, a new colour every frame at no cost)
+    const double h = smooth ? std::fmod(seconds / 36.0, 1.0) : std::fmod(std::floor(seconds / 3.0) / 12.0, 1.0);
     if (menuTableKnown()) {
-        const int i = int(h * 90.0) % 90;
-        for (int k = 0; k < 3; ++k) rgb[k] = menuTable()[i][k];
+        const double f = h * 90.0;
+        const int i = int(f) % 90, j = (i + 1) % 90;
+        const float t = smooth ? float(f - std::floor(f)) : 0.0f;
+        for (int k = 0; k < 3; ++k) rgb[k] = menuTable()[i][k] * (1.0f - t) + menuTable()[j][k] * t;
         return true;
     }
     for (int k = 0; k < 3; ++k) {
@@ -229,6 +233,17 @@ void bigHeadConfigure(bool on, const std::map<std::string, std::string>& values)
     s.everyone = valueOf(values, "who", "Everyone") != "Enemies";   // (default Everyone: user 2026-11-03)
     s.bosses = valueOf(values, "bosses", "On") != "Off";
     bigHeadSettings() = s;
+}
+
+HermitHeadSettings& hermitHeadSettings()
+{
+    static HermitHeadSettings s;
+    return s;
+}
+
+void hermitHeadConfigure(bool on, const std::map<std::string, std::string>&)
+{
+    hermitHeadSettings().on = on;
 }
 
 MagicianAfterimageSettings& magicianAfterimageSettings()

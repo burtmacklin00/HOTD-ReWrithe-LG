@@ -450,31 +450,83 @@ std::vector<uint8_t> widenRGB(GLsizei w, GLsizei h, const void* data)
     return out;
 }
 
+// questui (user 2026-11-10: "a white box in the main menu" on the Quest): the uploads in the log with their GL error,
+// named by texTag (the caller's), so a run on the headset says which one a native driver refused: on Android the
+// first 400 level-0 uploads (a new texture or a new size) and every failed one; on the PC with HOTD_TEX_LOG=1
+const char* gTexTag = nullptr;
+bool texLogOn()
+{
+#if defined(__ANDROID__)
+    static const bool on = true;
+#else
+    static const bool on = std::getenv("HOTD_TEX_LOG") && *std::getenv("HOTD_TEX_LOG") != '0';
+#endif
+    return on;
+}
+void texLogClear()
+{
+    if (texLogOn())
+        while (GetError() != 0) {}
+}
+void texLog(const char* fn, GLint level, GLint ifmt, GLsizei w, GLsizei h, GLenum fmt, GLenum type, bool widened)
+{
+    if (!texLogOn())
+        return;
+    const char* tag = gTexTag;   // (a name is for the one upload after it)
+    gTexTag = nullptr;
+    const GLenum e = GetError();
+    static int lines = 0;
+    if (e == 0 && (level != 0 || lines >= 400))
+        return;
+    if (e == 0) {   // (once per name, size and format: a picture uploaded every frame is one line)
+        static std::map<std::string, int> seen;
+        char key[160];
+        std::snprintf(key, sizeof key, "%s %dx%d %x", tag ? tag : "?", int(w), int(h), unsigned(ifmt));
+        if (seen[key]++ > 0)
+            return;
+    }
+    ++lines;
+    GLint bound = 0;
+    if (esGetIntegerv) esGetIntegerv(0x8069 /*TEXTURE_BINDING_2D*/, &bound);
+    SDL_Log("menu tex: %s %s #%d %dx%d ifmt 0x%04X fmt 0x%04X type 0x%04X%s level %d %s (0x%04X)", tag ? tag : "?", fn,
+            int(bound), int(w), int(h), unsigned(ifmt), unsigned(fmt), unsigned(type), widened ? " (RGB widened to RGBA8)" : "",
+            int(level), e == 0 ? "ok" : "err", unsigned(e));
+}
+
 void HOTD_APIENTRY esTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei w, GLsizei h, GLint border,
                                 GLenum format, GLenum type, const void* data)
 {
-    if (format == RGB && type == UNSIGNED_BYTE && internalformat != GLint(RGB) && internalformat != 0x8051 /*RGB8*/) {
+    texLogClear();
+    // (questui: SRGB8 kept as it is, a legal ES upload: widened to RGBA8 it broke gamma.cpp's copy from an sRGB VR eye,
+    // GL_INVALID_OPERATION on a native ES driver: the encodings must match)
+    if (format == RGB && type == UNSIGNED_BYTE && internalformat != GLint(RGB) && internalformat != 0x8051 /*RGB8*/ &&
+        internalformat != 0x8C41 /*SRGB8*/) {
         std::vector<uint8_t> px;
         if (data) px = widenRGB(w, h, data);
         realPixelStorei(UNPACK_ALIGNMENT, 4);
         realTexImage2D(target, level, GLint(RGBA8), w, h, border, RGBA, UNSIGNED_BYTE, data ? px.data() : nullptr);
         realPixelStorei(UNPACK_ALIGNMENT, gUnpackAlign);
+        texLog("TexImage2D", level, internalformat, w, h, format, type, true);
         return;
     }
     realTexImage2D(target, level, internalformat, w, h, border, format, type, data);
+    texLog("TexImage2D", level, internalformat, w, h, format, type, false);
 }
 
 void HOTD_APIENTRY esTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsizei w, GLsizei h, GLenum format,
                                    GLenum type, const void* data)
 {
+    texLogClear();
     if (format == RGB && type == UNSIGNED_BYTE && data) {   // (the textures here are RGBA: see esTexImage2D)
         const std::vector<uint8_t> px = widenRGB(w, h, data);
         realPixelStorei(UNPACK_ALIGNMENT, 4);
         realTexSubImage2D(target, level, x, y, w, h, RGBA, UNSIGNED_BYTE, px.data());
         realPixelStorei(UNPACK_ALIGNMENT, gUnpackAlign);
+        texLog("TexSubImage2D", 1, 0, w, h, format, type, true);   // (level 1: only a failure is logged)
         return;
     }
     realTexSubImage2D(target, level, x, y, w, h, format, type, data);
+    texLog("TexSubImage2D", 1, 0, w, h, format, type, false);
 }
 
 // texture buffers (Draw Depth "Arcade Sort"'s keys): ES 3.0 has none. The buffer's data is kept here and mirrored in
@@ -628,6 +680,11 @@ const char* loadES()
     GetQueryObjectui64v = esGetQueryObjectui64v;
     SDL_Log("OpenGL ES: depth clamp %s", gDepthClampExt ? "on (GL_EXT_depth_clamp)" : "unavailable");
     return nullptr;
+}
+
+void texTag(const char* name)
+{
+    gTexTag = name;
 }
 
 } // namespace gl

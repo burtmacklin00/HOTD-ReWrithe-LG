@@ -306,7 +306,7 @@ template <class P> void Game<P>::player_scene02_shoot_three_p_sub_p_p(uint32_t t
     const uint32_t body = mem.at<Player>(G::players, p).body.a;
     if (n == 0x2D || n == 0x4D || n == 0x6C) {
         muzzle_flash_spawn(0);
-        sound_cue(mem.at<uint8_t>(0x51F280 + p * 0xCC) == 0 ? 0xA01208 : 0xA01207);
+        sound_cue(shot_cue(mem.at<uint8_t>(0x51F280 + p * 0xCC) == 0 ? 0 : 1));   // (charsel4: by look_seat)
     }
     if (mem.at<Obj>(body).frame == 0x9C) {
         mem.at<Player>(G::players, p).scene_routine = 0x4C320;
@@ -556,7 +556,7 @@ template <class P> void Game<P>::player_scene06_reload_shoot_p1(uint32_t task)
     const uint32_t body = mem.at<Player>(G::players, p).body.a;
     if (n == 0x2D || n == 0x4D || n == 0x6C) {
         muzzle_flash_spawn(1);
-        sound_cue(mem.at<uint8_t>(0x51F280 + p * 0xCC) == 0 ? 0xA01208 : 0xA01207);
+        sound_cue(shot_cue(mem.at<uint8_t>(0x51F280 + p * 0xCC) == 0 ? 0 : 1));   // (charsel4: by look_seat)
     }
     if (mem.at<Obj>(body).frame == 0xD6) {
         mem.at<Player>(G::players, p).scene_routine = 0x4CBF0;
@@ -690,7 +690,7 @@ template <class P> void Game<P>::player_scene09_stance_shoot_p1(uint32_t task)
     const uint32_t body = mem.at<Player>(G::players, p).body.a;
     if (n == 0x2D || n == 0x4D || n == 0x6C) {
         muzzle_flash_spawn(1);
-        sound_cue(mem.at<uint8_t>(0x51F280 + p * 0xCC) == 0 ? 0xA01208 : 0xA01207);
+        sound_cue(shot_cue(mem.at<uint8_t>(0x51F280 + p * 0xCC) == 0 ? 0 : 1));   // (charsel4: by look_seat)
     }
     if (mem.at<Obj>(body).frame == 0xD6) {
         mem.at<Player>(G::players, p).scene_routine = 0x4D240;

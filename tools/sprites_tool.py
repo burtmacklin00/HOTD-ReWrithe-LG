@@ -142,6 +142,10 @@ def _thumb(img, n=24):
 OVERRIDES = {**{a: 0x422 + a - 0xE4 for a in range(0xE4, 0x106)}, 0xA1: 0, 0xA2: 0, 0xA6: 0,
              # hangfix: the Magician's title line "Magician TYPE 0" (the thumbnails took the Hangedman's 0x50B)
              0xE2: 0x50D,
+             # rec131 (user's v1.3.1 recording, attract 1:12): the reload boards "SHOOT OUTSIDE OF THE SCREEN WHEN
+             # BULLETS ARE OUT." 0x26B (and the older 0x89) are the PC's English / Spanish board 0x4E0 (Spanish CD:
+             # RECARGA ANTES DE QUEDARTE SIN BALAS); the thumbnails took the Japanese 0x4DF next to it
+             0x89: 0x4E0, 0x26B: 0x4E0,
              # bugs2 (#9): the hit marks 0x28..0x2D are the PC's 0x47E..0x483 in order (the PC's hit-notice table
              # 0x5F2DEC = the arcade's 0xCA5FC entry for entry); the thumbnails took the claws 0x480 for the punch 0x2C
              **{0x28 + k: 0x47E + k for k in range(6)},

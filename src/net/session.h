@@ -41,7 +41,11 @@ namespace hotd::net {
 // ROSTER), an input's character in flags bits 3-7 (was bits 4-6, 1-6)
 // 21: the Character Select of the arcade games (charsel, cosmetic): the settings' pmChar[4] in an arcade game (pcMode 0)
 // are all 0 (no picks) or every seat's character 1-19; an input's character with its start there too
-constexpr uint16_t kProtocol = 21;
+// 22: Survival Mode online (docs/netplay.md "Survival online", worker "survnet" 2026-11-09): the settings' Survival
+// bytes after bossMode (arena + 1, seed, cap, cut creatures, the testing waves / flags); an input without its start
+// carries the Survival extras in flags bits 3-7 (bit 3: the trigger held, bits 4-7: the weapon switch); ROSTER's last
+// byte 0x10 + arena: the host's Survival game
+constexpr uint16_t kProtocol = 22;
 constexpr int kPmCharMax = 19;   // the last PC Mode character (port::Game::kPmCharCount - 1: the PC's 1-6, the extras 7-19)
 constexpr uint32_t kMaxLog = 8u << 20;   // the input log a joining PC accepts at most (bytes)
 constexpr uint32_t kMaxJoinFrames = 4'000'000;   // a running game joined at most this far in (~19 hours; bounds the replay's memory)
@@ -58,7 +62,17 @@ struct Input {
     // kChar (protocol 17; 20: bits 3-7, was 4-6) = PC Mode, the seat's character (1-19) with its start; 0 none (an
     // arcade game, Auto)
     enum : uint8_t { kOnScreen = 1, kTrigger = 2, kStart = 4, kAll = 7, kChar = 0xF8, kCharShift = 3 };
-    static bool flagsOk(uint8_t f) { return (f >> kCharShift) <= kPmCharMax; }   // (characters 20-31: none)
+    // protocol 22, Survival Mode: an input WITHOUT kStart carries the Survival extras in bits 3-7 instead of a
+    // character: kHeld (the trigger held: the automatic weapons) and the weapon switch (kWeapon: 0 none, 1 previous,
+    // 2 next, 3 + id that weapon (0-5), 9 the light gun's auto best weapon, 10 / 11 auto best + previous / next).
+    // Only a Survival game sends or reads them (NetGame::applyInputs); every other game's inputs are as before
+    enum : uint8_t { kHeld = 0x08, kWeapon = 0xF0, kWeaponShift = 4 };
+    enum : int { kWeaponNone = 0, kWeaponPrev = 1, kWeaponNext = 2, kWeaponPick = 3, kWeaponAuto = 9, kWeaponCodes = 12 };
+    // (with a start: characters 20-31 none; without: any Survival extras below kWeaponCodes)
+    static bool flagsOk(uint8_t f)
+    {
+        return (f & kStart) ? (f >> kCharShift) <= kPmCharMax : (f >> kWeaponShift) < kWeaponCodes;
+    }
     uint8_t flags = 0;
     float x = 0, y = 0;
     uint8_t flags2 = 0;
@@ -67,12 +81,14 @@ struct Input {
     {
         return flags == o.flags && x == o.x && y == o.y && flags2 == o.flags2 && x2 == o.x2 && y2 == o.y2;
     }
-    // rollback's prediction from the last real input: the aims stay, no trigger / start repeated
+    // rollback's prediction from the last real input: the aims stay, no trigger / start repeated (Survival: the
+    // trigger held stays held, no weapon switch repeated)
     Input predicted() const
     {
         Input p = *this;
-        p.flags &= kOnScreen;
-        p.flags2 &= kOnScreen;
+        auto keep = [](uint8_t f) { return uint8_t(f & (kOnScreen | ((f & kStart) ? 0 : kHeld))); };
+        p.flags = keep(flags);
+        p.flags2 = keep(flags2);
         return p;
     }
 };
@@ -114,6 +130,12 @@ struct Settings {
     // Boss Mode online (protocol 18; game/bossmode.h): 0 none, 2 Chariot, 3 Hangedman, 4 Hermit, 5 Magician, 6 All
     // Bosses (never with pcMode): every PC starts that boss's game, the clock in game ticks
     uint8_t bossMode = 0;
+    // Survival Mode online (protocol 22; game/survival.h): 0 none, else the arena + 1 (1-16; never with pcMode /
+    // bossMode); the director's seed, the cap of creatures at once (1-64), the cut creatures (0 / 1); testing: the SMG's
+    // free round, every weapon's free round (0 none), survivalTest bit 0 the test buyer, bit 1 the weapon cycle
+    uint8_t survival = 0;
+    uint32_t survivalSeed = 0x484F5244;
+    uint8_t survivalCap = 24, survivalCut = 1, survivalSmgWave = 0, survivalWeaponsWave = 0, survivalTest = 0;
 };
 
 // seat s of a frame's two PC inputs (the 4-seat layout: seats 0 / 1 primary, 2 / 3 the second fields)
@@ -153,6 +175,9 @@ struct Options {
     uint64_t romData = 0, pcData = 0;
     bool needPcData = false;
     std::function<void(const std::string&)> log;
+    // the join code's hole punching (natpunch.h): every datagram the socket's owner receives goes here first; true =
+    // consumed (a STUN answer, a punch packet), not the session's
+    std::function<bool(const Address&, const uint8_t*, size_t)> raw;
 };
 
 // upper case, letters / digits only; "" when not 4-32 characters
@@ -165,9 +190,10 @@ std::string reachHint(uint16_t port);
 // with: up to four PCs, a PC's second seat: the seat of that PC's first (0-3; its name and ping are the PC's), -1 none
 // pcChar: PC Mode, the seat's character (0-6); -1: an arcade game (protocol 16)
 // boss: seat 0's (the host's) only: the game's Boss Mode (0 none, 2-6; protocol 18)
-struct RosterSeat { bool in = false; uint16_t pingMs = 0; std::string name; int with = -1; int pcChar = -1; int boss = 0; };
+// survival: seat 0's only: the game's Survival arena + 1 (0 none; protocol 22)
+struct RosterSeat { bool in = false; uint16_t pingMs = 0; std::string name; int with = -1; int pcChar = -1; int boss = 0; int survival = 0; };
 // ROSTER's payload (four seats: in (+ (with + 1) << 4), ping, name, character (0xFF: none); then the host's Boss Mode
-// byte): fixed 81 bytes; the decoder checks every field
+// byte (0x10 + arena: its Survival game)): fixed 81 bytes; the decoder checks every field
 std::vector<uint8_t> encodeRoster(const RosterSeat r[4]);
 bool decodeRoster(const uint8_t* p, size_t n, RosterSeat out[4]);
 
@@ -232,6 +258,11 @@ public:
     void markRun(uint32_t frame) { lastRun_ = std::max(lastRun_, frame); }   // the host's relay is at frame (the window)
     void seedFull(uint32_t base, const std::vector<std::array<Input, 2>>& frames);
     Address peer() const { return peer_; }
+    // hole punching: a datagram outside the protocol from this session's socket (STUN, a punch packet)
+    void sendPlain(const Address& to, const uint8_t* p, size_t n) { sock().send(to, p, n); }
+    // the client, before the host answered: the host's other address (a punch reached it there); false: too late
+    bool retarget(const Address& a);
+    bool hostAnswered() const { return gotAck_ || connected_; }
     // the pause (bits = seats 0-3): what this PC's PINGs say is paused, and what the peer's last PING said
     void setPausedOut(uint8_t seats);
     uint8_t peerPaused() const { return peerPaused_; }

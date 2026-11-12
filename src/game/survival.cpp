@@ -8,6 +8,7 @@
 #include "game/weapons.h"
 
 #include <algorithm>
+#include <bit>
 #include <filesystem>
 #include <functional>
 #include <cctype>
@@ -28,6 +29,16 @@ constexpr uint32_t kTaskUnlink = 0x15110;     // task_unlink: the task is freed 
 constexpr uint32_t kRank = 0x51F492;          // difficulty_level's rank (0..15): the creatures' aggression
 constexpr int kFirstBreak = 90;               // the break before round 1 (the arena's name)
 constexpr uint32_t kBodyTable = 0x7E0000;     // Survival's body slots 16.. (outside the original map; the port's locals: 0x700000)
+// survdogs: the dogs' rounds. The story's Kenfis records (kind 97, Chapter 1 event 3, the courtyard's first dogs: logged
+// with HOTD_SURVIVAL_LOGCAP): E13F0 type 8 (the black dog) set-up 2 (jumping in), E1430 type 0 set-up 2, E1470 type 8
+// set-up 1 (running in); each 0x40 bytes (kind, flags, place, angles, hit points 1, then its own part +0x24: type,
+// set-up, the jump angle, the circling point +0x34..; the story's 37 units from its camera stop). A dog is made from a
+// copy (kDogRecs, a ring: the dog keeps a pointer to its part) moved to a spawn point, facing the camera, its circling
+// point kDogCircle in front of the camera
+constexpr uint32_t kDogSrc[3] = {0xE13F0, 0xE1430, 0xE1470};
+constexpr uint32_t kDogRecs = 0x7E1000, kDogRecSize = 0x50, kDogRing = 32;
+constexpr float kDogCircle = 40.0f;
+constexpr uint64_t kDogStall = 3600;           // a dog alive this long (60 s) is ended (the round never stalls)
 constexpr float kNear = 110.0f;              // a spawn place at least this far from the camera
 constexpr float kRoom = 450.0f;              // earlier sections' spawn places this near the camera are the arena's too
 constexpr int kLeadInCap = 30000;             // the lead-in's longest run (frames) before the arena is taken as it is
@@ -75,6 +86,26 @@ const std::vector<SurvivalArena>& survivalArenas()
         // (Chapters 2-4 removed, user 2026-11-05: "get rid of chapter 2-4 locations, they don't work"; the tried ones,
         // the green bedroom / dining hall, the laboratory / furnace bridge and the octagon hall with their door lists,
         // are in git history (2188e467) and docs/survival.md "Arenas")
+        // survmaps (user 2026-11-09; dev builds only until the user tries them: main.cpp survivalArenaCount)
+        // Chapter 3's platform under the overhead rail (event 1, the first stop on it, camera 466 / -282 / 561): the
+        // story's three hanging zombies (kind 7: down their chains on the rail, then the jump off; types 28, 28, 65) come
+        // again on their own chains, 60 % of the spawns; the rest walk in from the platform's far end (its floor:
+        // x 405..573, z 535..858 at y -282, the railing at z 836); the story's own view of the stop
+        // (user 2026-11-10: "I only picked that location wise": no chain zombies; everyone walks in from the far end)
+        // fix140b (user 2026-11-10, v1.4.0: "creatures spawn too far away"): the far end was 253-264 units from the
+        // camera, a 19-21 s walk to the player (the courtyard's places: 110 units, 4.3 s); now three places on the
+        // platform's floor 124-128 units out (about 5 s), each a clear walk to the camera (0 wall triangles crossed)
+        {"platform", "Chapter 3: the platform", 2, 1, 0, {28, 61, 62, 29, 53, 72},
+         {{{425, -282, 678}}, {{470, -282, 688}}, {{530, -282, 672}}}, {}, 7, -1, 0, {}},
+        // Chapter 4's roof, the Magician's fight (event 4: the wait after he comes, kind 20, is taken; he is not
+        // there): the camera on the roof (its floor x -1021..-561, z 2274..2559 at y 0) facing the doorway he blasted
+        // open out of Curien's laboratory (x -906..-676 at z 2253..2274); the creatures come out of it, from the
+        // laboratory's floor just inside
+        // fix140b (user 2026-11-10, v1.4.0: "creatures spawn too far away"): inside the doorway was 242-245 units
+        // from the camera (a 19 s walk); now on the roof's floor before it, 125-126 units out (as the courtyard's 110)
+        {"roof", "Chapter 4: the Magician's roof", 3, 4, 0, {11, 53, 72},
+         {{{-848, 0, 2357}}, {{-792, 0, 2345}}, {{-736, 0, 2357}}}, {}, 20, -1, 0,
+         {-791.9f, 15.0f, 2470.0f, -791.9f, 25.0f, 2264.0f}},
     };
     return k;
 }
@@ -96,12 +127,18 @@ const std::vector<SurvivalCut>& survivalCuts()
     // docs/cut_content.md: no event record spawns these types; the ROM keeps their skeletons, part models (with
     // textures, gallery_cut.cpp) and for three of them a motion list (enemy_motion_lists 0xC6B60): Disiprin the
     // zombies' (0xC6B00), Neozom Zom's (0xC6B10), Debu Bentley's (0xC6B30). Syndy and Baba (18 joints like the
-    // zombies, no list) borrow one; the area: where their textures are
+    // zombies, no list) borrow one; the area: where their textures are. hordepub (user 2026-11-09: "Syndy's animation
+    // when she is approaching the player looks wrong"): she borrowed Neil's (28) list, the plain zombies' row 0xC6B00
+    // (stance MO_z_a_kamae2a, walk MO_z_a_walk7a: a shamble with the arms swinging free), so the long mallet in her
+    // hand (her bagbag parts) flailed about at her hip with every step, at her type's scale 1.2 (0x118060); her own
+    // only motion, MO_synd_demo (452), is a standing pose (hands on the hips: the Gallery), no walk. Now Cyril's (29)
+    // row with his axe set-up (action 1: MO_z_ono_kamae / _walk / _back, the two-handed weapon carried in front, and
+    // his axe attacks): the mallet is held and swung as a weapon
     static const std::vector<SurvivalCut> k = {
         {52, "Disiprin", 2, 0, 160},
         {12, "Debu", 5, 0, 220},
         {56, "Neozom", 6, 0, 120},
-        {10, "Syndy", 7, 28, 180},
+        {10, "Syndy", 7, 29, 180, 1},
         {66, "Baba", 3, 29, 140},
     };
     return k;
@@ -172,6 +209,60 @@ uint32_t SurvivalMode::next()
     return (rng_ >> 8) & 0xFFFFFF;
 }
 
+uint64_t SurvivalMode::digest() const
+{
+    uint64_t h = 0xCBF29CE484222325ull;   // (FNV-1a over the logic fields' values; no texts: the banner is translated)
+    auto mix = [&h](uint64_t v) {
+        for (int i = 0; i < 8; ++i, v >>= 8)
+            h = (h ^ (v & 0xFF)) * 0x100000001B3ull;
+    };
+    auto two = [&mix](int a, int b) { mix(uint64_t(uint32_t(a)) | uint64_t(uint32_t(b)) << 32); };
+    two(arena, int(phase));
+    two(wave, special);
+    two(toSpawn, waveTotal);
+    two(spawnTimer, breakTimer);
+    two(leadFrames, waitsSeen);
+    two(kills, spawned);
+    two(cutSpawned, fastSpawned);
+    two(alive, score);
+    two(maxAlive, players_);
+    mix(uint64_t(smgOn) | uint64_t(frozen) << 1 | uint64_t(reported_) << 2 | uint64_t(cutCreatures) << 3 |
+        uint64_t(testBuyer) << 4 | uint64_t(rng_) << 32);
+    mix(overFrame);
+    for (int p = 0; p < 4; ++p) {
+        const Seat& s = seat[p];
+        two(s.points, s.earned);
+        two(s.hits, s.kills);
+        two(s.heads, s.spent);
+        for (int it = 0; it < kItems; ++it)
+            mix(uint32_t(s.buys[it]));
+        two(int(s.ownedAtClear), int(s.livesSet) | int(s.out) << 1 | int(s.returning) << 2);
+        two(s.outPoints, s.outRound);
+        two(s.outRounds, int(s.outOwned));
+        two(leadLives_[p], lastLives_[p]);
+    }
+    two(outN, backN);
+    two(retiredN, engage.retired);
+    mix(points.size() | uint64_t(mine.size()) << 32);
+    for (const Mine& m : mine) {
+        mix(m.task | uint64_t(m.serial) << 32);
+        mix(m.born);
+        two(m.type, m.cut);
+    }
+    two(int(entries.size()), entrySpawned);   // (survmaps: the chains' entry records)
+    for (const Entry& e : entries) {
+        two(int(e.rec), e.type);
+        mix(e.freeAt);
+    }
+    two(dogWave, dogRounds);   // (survdogs: the dogs' rounds, their stream, Max Ammo)
+    two(dogSpawned, dogKilled);
+    two(dogStalled, refills);
+    mix(dogRng_);
+    for (const Mine& m : mine)
+        mix(uint64_t(m.dog));
+    return h;
+}
+
 void SurvivalMode::begin(int arenaIndex)
 {
     const int keepArena = arenaIndex, keepSmg = smgWave, keepMax = maxAlive, keepWeapons = weaponsWave;
@@ -195,6 +286,12 @@ void SurvivalMode::begin(int arenaIndex)
         d = e && *e == ',' ? e + 1 : "";
     }
     rng_ = seed;
+    // survdogs: the first dogs' round 7 or 8, from a stream of its own ("DOGS" over the seed: the same seed, the same
+    // rounds; the director's draws untouched). Testing: HOTD_SURVIVAL_DOG_WAVE=n the first one at round n
+    dogRng_ = seed ^ 0x444F4753u;
+    dogWave = dogNext();
+    if (const char* d = survivalEnv("DOG_WAVE"); d && std::atoi(d) >= 1)
+        dogWave = std::atoi(d);
     phase = arena >= 0 ? LeadIn : Off;
 }
 
@@ -227,6 +324,11 @@ void SurvivalMode::startGame(Runtime& rt, int players)
         rt.mem.set32(kBodyTable + i, 0);
     rt.extraBodyTable = kBodyTable;
     rt.extraBodySlots = std::max(0, maxAlive + 8 - 14);   // (+8: corpses, the uncaptured, the players' own)
+    // survdogs: the dogs' record copies (outside the original map, as the body table; in the snapshots: mem's regions)
+    if (!rt.mem.mapped(kDogRecs))
+        rt.mem.map(kDogRecs, kDogRecSize * kDogRing);
+    for (uint32_t i = 0; i < kDogRecSize * kDogRing; i += 4)
+        rt.mem.set32(kDogRecs + i, 0);
     // from the event's section 0 (its BGTB / GGCOL: the room's draw zone and colours), as Boss Mode starts (bossbug)
     rt.startAtSection0 = a.event != 0;
     rt.chapter_start(a.chapter, a.event, players);
@@ -241,8 +343,30 @@ void SurvivalMode::captured(Runtime& rt, uint32_t task, uint32_t rec)
     if (phase != LeadIn || task == 0)
         return;
     const uint32_t kind = rt.mem.u32(rec);
+    if (survivalEnv("LOGCAP") && rt.log) {   // developer (survmaps: finding arenas): each capture, its record and the camera
+        char b[300];
+        std::snprintf(b, sizeof b, "survcap: f%llu ev %d kind %u type %d rec %X pos %.0f %.0f %.0f ang %d | %08X %08X %08X %08X %08X %08X %08X %08X",
+                      (unsigned long long)rt.frameCount, rt.mem.at<int8_t>(G::event_index), kind, rt.mem.at<int16_t>(task + 0xCC), rec,
+                      rt.mem.f32(task + 0x20), rt.mem.f32(task + 0x24), rt.mem.f32(task + 0x28), int(rt.mem.u32(task + 0x30)), rt.mem.u32(rec + 4),
+                      rt.mem.u32(rec + 8), rt.mem.u32(rec + 12), rt.mem.u32(rec + 16), rt.mem.u32(rec + 20), rt.mem.u32(rec + 24), rt.mem.u32(rec + 28),
+                      rt.mem.u32(rec + 32));
+        rt.log(b);
+        std::snprintf(b, sizeof b, "survcap2: cam %.1f %.1f %.1f | +24: %08X %08X %08X %08X %08X %08X %08X %08X", rt.mem.f32(G::camera_pos),
+                      rt.mem.f32(G::camera_pos + 4), rt.mem.f32(G::camera_pos + 8), rt.mem.u32(rec + 0x24), rt.mem.u32(rec + 0x28), rt.mem.u32(rec + 0x2C),
+                      rt.mem.u32(rec + 0x30), rt.mem.u32(rec + 0x34), rt.mem.u32(rec + 0x38), rt.mem.u32(rec + 0x3C), rt.mem.u32(rec + 0x40));
+        rt.log(b);
+    }
     if (!creatureKind(kind))
         return;
+    // survmaps: the arena's take kind seen (its wait comes next), its entry kind's records kept (their type: kind 7's
+    // first byte of its own part, rec + 0x24)
+    if (arena >= 0) {
+        const SurvivalArena& ar = survivalArenas()[size_t(arena)];
+        if (int(kind) == ar.takeKind)
+            takeSeen_ = true;
+        if (int(kind) == ar.entryKind)
+            sectionEntries_.push_back({rec, rt.mem.at<uint8_t>(rec + 0x24), 0});
+    }
     if (pointKind(kind)) {
         Point p{};
         for (int i = 0; i < 3; ++i) {
@@ -276,8 +400,18 @@ bool SurvivalMode::eventFrame(Runtime& rt)
         const uint32_t pc = rt.mem.u32(G::evt_pc);
         const uint32_t op = rt.mem.u32(G::evt_handlers + rt.mem.u32(pc) * 4);
         const bool creatureWait = op == F::evt_WAIT_ENNUM || op == F::evt_WAIT_ENALV;
+        if (survivalEnv("LOGCAP") && rt.log && pc != stallPc_) {   // developer (HOTD_SURVIVAL_LOGCAP): each script step of the lead-in
+            char b[200];
+            std::snprintf(b, sizeof b, "survpc: f%llu pc %X %s %08X cam %.1f %.1f %.1f", (unsigned long long)rt.frameCount, pc, rt.routineName(op).c_str(),
+                          rt.mem.u32(pc + 4), rt.mem.f32(G::camera_pos), rt.mem.f32(G::camera_pos + 4), rt.mem.f32(G::camera_pos + 8));
+            rt.log(b);
+        }
         bool take = false;
-        if (creatureWait && !section.empty()) {
+        // survmaps: an arena by its take kind counts only the creature waits after a capture of that kind
+        const int takeKind = survivalEnv("START") || survivalEnv("WAIT") ? -1 : survivalArenas()[size_t(arena)].takeKind;
+        if (creatureWait && takeKind >= 0 && !takeSeen_)
+            sectionEntries_.clear();   // (a wait for other creatures: the entries are the ones just before the arena's)
+        if (creatureWait && (takeKind >= 0 ? takeSeen_ : !section.empty())) {
             // developer: HOTD_SURVIVAL_WAIT=n takes the (n + 1)-th wait instead (finding arenas: each wait is logged)
             static const int waitForce = survivalEnv("WAIT") ? std::atoi(survivalEnv("WAIT")) : -1;
             if (rt.log) {
@@ -292,6 +426,8 @@ bool SurvivalMode::eventFrame(Runtime& rt)
             else {
                 ++waitsSeen;
                 section.clear();
+                takeSeen_ = false;
+                sectionEntries_.clear();
             }
         }
         // the lead-in's own waits that only the captured creatures would have ended: after 2 s at one place, a wait on
@@ -322,11 +458,14 @@ bool SurvivalMode::eventFrame(Runtime& rt)
         // the spawn points: this wait's creatures' places, and those of earlier sections near the camera (the same room:
         // the original sends the room's creatures in several sections), at most 16, none twice
         points = section;
-        const float cx = rt.mem.f32(G::camera_pos), cz = rt.mem.f32(G::camera_pos + 8);
         // arenas (2026-11-05): an arena with its doors takes them instead (the captured places were where the original's
         // creatures stood up close, or behind walls in the next room, or on another floor): each faces the camera, with
         // the flags of the arena's own creatures
         const SurvivalArena& ar = survivalArenas()[size_t(arena)];
+        // (fix140b: an arena with its own view measures from that eye, where the camera is set below: the roof's lead-in
+        // camera stood 66 units nearer the doorway, so places near the arena's eye were pushed out by kNear from it)
+        const bool ownView = ar.view != std::array<float, 6>{} && !survivalEnv("START");
+        const float cx = ownView ? ar.view[0] : rt.mem.f32(G::camera_pos), cz = ownView ? ar.view[2] : rt.mem.f32(G::camera_pos + 8);
         const bool doors = !ar.doors.empty() && !survivalEnv("START") && !survivalEnv("WAIT");   // (finding arenas: the old rule)
         if (doors) {
             const uint32_t fl = section.empty() ? 0u : section.front().flags;
@@ -368,15 +507,63 @@ bool SurvivalMode::eventFrame(Runtime& rt)
                 }
         if (points.size() < 2 && rt.log)
             rt.log("survival: few spawn points in the arena (" + std::to_string(points.size()) + ")");
-        if ((rt.mem.u32(G::shot_enable) == 0 || rt.letterbox != 0) && rt.log)   // (an arena inside a cut-scene: no shots)
-            rt.log("survival: the arena is in a cut-scene (shots off / letterbox): a bad arena");
+        // survmaps: the entry records (each once) and the arena's own view: the game camera's stop point (the eye held
+        // there, the look-at its rest: game_cam_look_at_attackers / _attackers_midpoint) and the view record 0 at once
+        entries.clear();
+        for (const Entry& e : sectionEntries_) {
+            bool dup = false;
+            for (const Entry& f : entries)
+                dup = dup || f.rec == e.rec;
+            if (!dup)
+                entries.push_back(e);
+        }
+        if (ownView) {
+            // record 0's eye / look-at, its angles by the game's own look-at (camera_look_at), copied to the stop point;
+            // camera_pos at the eye less the record's height and the heading its yaw (as camera_frame_mode4 sets them:
+            // the attack positions are placed from these)
+            const uint32_t r0 = G::camera_records, sp = G::game_cam_stop_point;
+            for (int i = 0; i < 3; ++i) {
+                rt.mem.set32(r0 + 4 * uint32_t(i), std::bit_cast<uint32_t>(ar.view[size_t(i)]));
+                rt.mem.set32(r0 + 0x18 + 4 * uint32_t(i), std::bit_cast<uint32_t>(ar.view[size_t(3 + i)]));
+            }
+            rt.camera_look_at(r0, r0 + 0x18, 0);
+            for (uint32_t i = 0; i < 0x30; i += 4)
+                rt.mem.set32(sp + i, rt.mem.u32(r0 + i));
+            rt.mem.set32(G::camera_pos, rt.mem.u32(r0));
+            rt.mem.set32(G::camera_pos + 4, std::bit_cast<uint32_t>(ar.view[1] - rt.mem.f32(r0 + 0xD8)));
+            rt.mem.set32(G::camera_pos + 8, rt.mem.u32(r0 + 8));
+            rt.mem.set32(G::camera_heading, rt.mem.u32(r0 + 0x10));
+            rt.mem.set32(G::camera_heading + 4, 0);
+        }
+        if (rt.log) {
+            char b[200];
+            const uint32_t r0 = G::camera_records;
+            std::snprintf(b, sizeof b, "survival: arena camera: mode %u sub-state %u job %s, eye %.1f %.1f %.1f look %.1f %.1f %.1f, %zu entry records",
+                          rt.mem.u32(G::camera_mode), rt.mem.u32(G::camera_drive_flag), rt.routineName(rt.mem.u32(r0 + 0x4C)).c_str(),
+                          rt.mem.f32(r0), rt.mem.f32(r0 + 4), rt.mem.f32(r0 + 8), rt.mem.f32(r0 + 0x18), rt.mem.f32(r0 + 0x1C), rt.mem.f32(r0 + 0x20),
+                          entries.size());
+            rt.log(b);
+        }
+        // fix140b (user 2026-11-10, the roof: "the arena is in a cut-scene ... a bad arena" in every run, the headless
+        // test's too: not a timing or settings matter): the roof's wait comes while the Magician's entrance scene ends,
+        // its bars still sliding away (letterbox_task's scene_state 1, 40 frames, under the arena's name). The arena
+        // starts in play at once: scene_state 6 (bars off, shots on, then 2),
+        // whatever cut-scene state the lead-in left (a scene_state 4 would have held the bars and shots off for good)
+        if (rt.mem.u32(G::shot_enable) == 0 || rt.letterbox != 0) {
+            if (rt.log)
+                rt.log("survival: the lead-in ended in a cut-scene (scene state " + std::to_string(rt.mem.at<uint8_t>(G::scene_state)) +
+                       ", bars " + std::to_string(rt.letterbox) + ", shots " + std::to_string(rt.mem.u32(G::shot_enable)) + "): the arena starts in play");
+            rt.mem.at<uint8_t>(G::scene_state) = 6;
+            rt.mem.set32(G::shot_enable, 1);
+            rt.letterbox = 0;
+        }
         frozen = true;
         if (const char* w = survivalEnv("START_WAVE"))   // testing: the waves from this one (the limits' stress run)
             wave = std::max(0, std::atoi(w) - 1);
         phase = Break;
         breakTimer = kFirstBreak;
         {
-            std::string n = survivalArenas()[size_t(arena)].name;   // (upper case, as the other banners)
+            std::string n = lang::tr(survivalArenas()[size_t(arena)].name);   // (upper case, as the other banners; survpub: translated)
             for (char& c : n) c = char(std::toupper(uint8_t(c)));
             say(n, 120, Plain);
         }
@@ -389,6 +576,15 @@ bool SurvivalMode::eventFrame(Runtime& rt)
     }
     // frozen: the director, in the event task's slot (the game's task group, as the script's own spawns)
     countMine(rt);
+    // survmaps: an arena with its own view keeps it: the stop's wait kind 3 (game_cam_stop_update keeps the sub-state)
+    // and the sub-state "look at the attackers" (the eye held at the stop point, the look-at eased to the attackers
+    // or, none, to the stop's own look-at), never "clear" (that eases back to the story's path: the Magician's sky);
+    // a requested turn (7) as it is
+    if (survivalArenas()[size_t(arena)].view != std::array<float, 6>{} && !survivalEnv("START")) {
+        rt.mem.at<uint8_t>(G::evt_cgmfnsh) = 3;
+        if (rt.mem.u32(G::camera_drive_flag) != 7)
+            rt.mem.set32(G::camera_drive_flag, 3);
+    }
     // developer (arenas: judging an arena by numbers, scratch arenas.py): HOTD_SURVIVAL_DUMP=<file> writes, 30 frames
     // into the first break (the camera settled, the view drawn), the camera's place and view matrix, the spawn points
     // and the stage's walls / floors near the camera (the Ragdoll mod's, the view builds them with --render); then
@@ -448,15 +644,38 @@ bool SurvivalMode::eventFrame(Runtime& rt)
         testIdleFrame(rt);
     if (static const char* tr = survivalEnv("TRACE_ALIVE"); tr && phase == Wave && rt.frameCount % uint64_t(std::max(1, std::atoi(tr))) == 0) {
         const float cx = rt.mem.f32(G::camera_pos), cz = rt.mem.f32(G::camera_pos + 8);
+        // (hordepub: the motions' names, 0xC8BE0: a pointer to "MO_..." per motion; every name once with the trace)
+        const auto moName = [&](int mo) {
+            std::string s;
+            const uint32_t p = mo >= 0 && mo < 674 ? rt.mem.u32(0xC8BE0 + 4 * uint32_t(mo)) : 0;
+            for (uint32_t a = p; p && rt.mem.mapped(a) && rt.mem.at<uint8_t>(a) && s.size() < 40; ++a)
+                s += char(rt.mem.at<uint8_t>(a));
+            return s;
+        };
+        if (static bool listed = false; !listed && survivalEnv("TRACE_MOTIONS")) {
+            listed = true;
+            for (int mo = 0; mo < 674; ++mo)
+                std::printf("motion %d %s\n", mo, moName(mo).c_str());
+            for (int ty : {10, 28, 29, 66}) {   // (the stance / walk lists: {motion, speed} by sub-state, action 0)
+                const uint32_t row = rt.mem.u32(G::enemy_motion_lists + 4 * uint32_t(ty)), list = row ? rt.mem.u32(row) : 0;
+                std::printf("list type %d row %X list %X:", ty, row, list);
+                for (uint32_t k = 0; list && k < 8; ++k)
+                    std::printf(" [%u] %d %.3f", k, rt.mem.at<int32_t>(list + 8 * k), rt.mem.f32(list + 8 * k + 4));
+                std::printf("\n");
+            }
+        }
         for (const Mine& m : mine) {
             if (rt.mem.u32(m.task + 8) != m.serial || m.serial == 0)
                 continue;
             const port::a::Enemy& e = rt.mem.at<port::a::Enemy>(m.task);
             const float dx = e.pos[0] - cx, dz = e.pos[2] - cz;
-            std::printf("alive f%llu round %d task %X type %d%s age %llu %s state %d sub %d delay %d slot %d flags %08X dist %.0f view z %.0f life %d\n",
+            // (hordepub: + the motion, its frame and the forward speed: the cut creatures' walk check)
+            std::printf("alive f%llu round %d task %X type %d%s age %llu %s state %d sub %d delay %d slot %d flags %08X dist %.0f view z %.0f life %d"
+                        " motion %d frame %d speed %.3f\n",
                         (unsigned long long)rt.frameCount, wave, m.task, m.type, m.cut ? " cut" : "", (unsigned long long)(rt.frameCount - m.born),
                         rt.routineName(e.routine).c_str(), e.state, e.substate, e.delay, e.attack_slot, e.flags, std::sqrt(dx * dx + dz * dz),
-                        e.view_pos[2], e.life);
+                        e.view_pos[2], e.life, int(rt.mem.at<int16_t>(m.task + 0xD0)), int(rt.mem.at<int16_t>(m.task + 0xF4)),
+                        rt.mem.f32(m.task + 0x74));
         }
     }
     // testing (HOTD_SURVIVAL_DRAIN): a seat's lives to 0 in a round, as a creature's last hit would
@@ -482,6 +701,14 @@ bool SurvivalMode::eventFrame(Runtime& rt)
             for (int p = 0; p < rt.seat_count(); ++p)
                 if (const int it = testBuy(rt, p); it >= 0)
                     buy(rt, p, it);
+        // (survhand: a named buyer's seat takes its own weapon back into the hand when it has ammo again (bought Ammo):
+        // a player switching to the gun they paid for)
+        if (testBuyer && breakTimer == 1)
+            if (const char* b = survivalEnv("BUYER"))
+                for (int p = 0; p < rt.seat_count() && p < 4; ++p)
+                    for (int k = 1; k < kWeapons; ++k)
+                        if (rt.weapons.def(k).key == b)
+                            rt.weapons.select(rt, p, k);
         if (--breakTimer <= 0)
             startWave(rt);
         return true;
@@ -503,18 +730,45 @@ bool SurvivalMode::eventFrame(Runtime& rt)
     // a round (Call of Duty Zombies: the creatures come one by one, a few at once, the gap shrinking each round; rounds
     // 1-3 gentle: 2, 3, 4 at once)
     const int cap = std::min(maxAlive, special == 1 ? 4 + wave : wave <= 3 ? 1 + wave : 2 + wave);
-    if (toSpawn > 0 && --spawnTimer <= 0 && alive < cap && !points.empty()) {
+    if (dogs()) {
+        // survdogs: the dogs come in twos and threes, a few at once (2 + the round's number among the dogs' rounds +
+        // the players, at most 8: the original's 14 body slots, where its pack list looks), a gap of 0.6-1.6 s
+        const int dogCap = std::min({maxAlive, 8, 2 + dogRounds + players_});
+        if (toSpawn > 0 && --spawnTimer <= 0 && alive < dogCap && !points.empty()) {
+            spawnDog(rt);
+            spawnTimer = std::max(20, 50 - 5 * dogRounds) + rand(60);
+        }
+        // a dog that never came in (stuck in an entrance or circling for good: the camera never moves here) is ended
+        // after 60 s by the game's own death (its hit points 0), so the round never stalls
+        for (const Mine& m : mine)
+            if (m.dog && m.serial != 0 && rt.mem.u32(m.task + 8) == m.serial && rt.frameCount - m.born == kDogStall) {
+                port::a::Enemy& e = rt.mem.at<port::a::Enemy>(m.task);
+                if (e.life > 0 && (e.flags & 1) != 0) {
+                    e.life = 0;
+                    ++dogStalled;
+                    if (rt.log)
+                        rt.log("survival: a dog stalled 60 s (routine " + rt.routineName(e.routine) + ", state " + std::to_string(e.state) +
+                               "): ended at frame " + std::to_string(rt.frameCount));
+                }
+            }
+    } else if (toSpawn > 0 && --spawnTimer <= 0 && alive < cap && (!points.empty() || !entries.empty())) {
         spawnOne(rt);
         spawnTimer = std::max(12, int(80.0 * std::pow(0.93, double(wave - 1)))) + rand(20);
     }
     if (toSpawn == 0 && alive == 0) {
-        // the round is cleared: no free life (survival2); after a special round, Max Ammo as after the dogs' rounds
+        // the round is cleared: no free life (survival2). survdogs (user 2026-11-10, "Only dog rounds"): Max Ammo after
+        // a dogs' round and no other (the runners' / brutes' rounds gave it until then): every weapon each player in
+        // play holds, its magazine and reserve full; the game's own item pick-up sound (as a buy's)
         std::string s = lang::fmt("ROUND {n} CLEARED", {{"n", std::to_string(wave)}});
-        if (special != 0) {   // (every weapon held: its magazine and reserve full)
-            for (int p = 0; p < rt.seat_count(); ++p)
-                if (rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5)
+        if (dogs()) {
+            for (int p = 0; p < rt.seat_count() && p < 4; ++p)
+                if (rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5) {
                     rt.weapons.refill(rt, p, -1);
+                    ++refills;
+                }
             s += "  " + lang::tr("MAX AMMO");
+            rt.sound_cue(0xA01351);
+            dogKilled += waveTotal;   // (every dog of the round dead: shot, or the stall guard's, counted apart)
         }
         // the weapons are kept after a round (the user, 2026-11-04): what each seat holds now, checked at the next start
         for (int p = 0; p < 4; ++p) {
@@ -601,6 +855,15 @@ void SurvivalMode::startWave(Runtime& rt)
         count = count * 3 / 4;
     else if (special == 2)
         count = std::max(4, count / 2);
+    // survdogs: the dogs' round (it takes the place of a runners' / brutes' one on the same round): 6 dogs for one
+    // player the first time, 2 more each time after, + half for each other player (fast: far fewer than a round's
+    // creatures), at most 40; the next one 7 or 8 rounds on
+    if (wave >= dogWave) {   // (>=: HOTD_SURVIVAL_START_WAVE may start past it)
+        special = kDogs;
+        ++dogRounds;
+        count = std::min(40, int((6.0 + 2.0 * (dogRounds - 1)) * (1.0 + 0.5 * double(std::clamp(players_, 1, 4) - 1)) + 0.5));
+        dogWave = wave + dogNext();
+    }
     waveTotal = toSpawn = count;
     spawnTimer = 30;
     phase = Wave;
@@ -614,7 +877,7 @@ void SurvivalMode::startWave(Runtime& rt)
         rt.mem.at<uint16_t>(kRank) = floor;
     std::string s = lang::fmt("ROUND {n}", {{"n", std::to_string(wave)}});
     if (special != 0)
-        s += "  " + lang::tr(special == 1 ? "RUNNERS" : "BRUTES");
+        s += "  " + lang::tr(special == 1 ? "RUNNERS" : special == 2 ? "BRUTES" : "DOGS");
     // the weapons held at the last clear are still held (the test's kept= check: bought ones may have been added)
     for (int p = 0; p < 4; ++p) {
         unsigned now = 0;
@@ -648,7 +911,8 @@ void SurvivalMode::startWave(Runtime& rt)
         rt.audio->playExtra(survivalSoundDir(), kSurvivalSfx[2], -1, 1.0f, 1.0f);
     if (rt.log)
         rt.log("survival: round " + std::to_string(wave) + " (" + std::to_string(waveTotal) + " creatures" +
-               (special == 1 ? ", runners" : special == 2 ? ", brutes" : "") + ") at frame " + std::to_string(rt.frameCount));
+               (special == 1 ? ", runners" : special == 2 ? ", brutes" : dogs() ? ", dogs" : "") + ") at frame " + std::to_string(rt.frameCount) +
+               (dogs() ? ", the next dogs' round " + std::to_string(dogWave) : std::string()));
 }
 
 // the creatures of a round (Call of Duty Zombies' curve, World at War / Black Ops, from round 10 24 x 0.15 x round),
@@ -705,8 +969,83 @@ int SurvivalMode::pickType(const Runtime& rt, bool& cut)
     return t[size_t(rand(n))];
 }
 
+bool SurvivalMode::spawnEntry(Runtime& rt, int life)
+{
+    // a free chain (its last copy off it), at random; none free: false
+    int freeN = 0;
+    for (const Entry& e : entries)
+        freeN += e.freeAt <= rt.frameCount ? 1 : 0;
+    if (freeN == 0)
+        return false;
+    int k = rand(freeN);
+    for (Entry& e : entries) {
+        if (e.freeAt > rt.frameCount || k-- != 0)
+            continue;
+        if (life > 1) {   // (its type's hit points, risen with the round as every spawn's)
+            const float m = roundHealth(wave) * (special == 2 ? 1.25f : 1.0f);
+            life = std::clamp(int(float(baseLife(e.type)) * m + 0.5f), 1, 30000);
+        }
+        const uint32_t t = rt.survival_spawn_record(e.rec, life);
+        // (kind 7: the slide's frames at +0x10 of its part, then the jump off; the next copy 60 frames after)
+        e.freeAt = rt.frameCount + uint64_t(std::min<uint32_t>(rt.mem.u32(e.rec + 0x24 + 0x10), 600)) + 60;
+        mine.push_back({t, rt.mem.u32(t + 8), rt.frameCount, e.type, false});
+        --toSpawn;
+        ++spawned;
+        ++entrySpawned;
+        return true;
+    }
+    return false;
+}
+
+// survdogs: a dog, as the story makes its dogs (ENTBE on a kind 97 record: Runtime::survival_spawn_record), from a copy of
+// one of Chapter 1's three records (kDogSrc, at random: the black dog or the grey one, jumping or running in) with the
+// place a spawn point (spread +-20), the heading toward the camera, the circling point kDogCircle in front of the camera
+// on the line to the dog. Its hit points: the story's 1 (every hit kills) in the first dogs' round, then 40 more a time
+void SurvivalMode::spawnDog(Runtime& rt)
+{
+    const Point& p = points[size_t(rand(int(points.size())))];
+    const uint32_t src = kDogSrc[rand(3)];
+    const uint32_t rec = kDogRecs + kDogRecSize * (uint32_t(dogSpawned) % kDogRing);
+    if (rt.mem.mapped(src) && rt.mem.u32(src) == 97) {
+        for (uint32_t i = 0; i < 0x40; i += 4)
+            rt.mem.set32(rec + i, rt.mem.u32(src + i));
+    } else {   // (not that ROM: the grey dog jumping in, as E1430)
+        for (uint32_t i = 0; i < 0x40; i += 4)
+            rt.mem.set32(rec + i, 0);
+        rt.mem.set32(rec, 97);
+        rt.mem.set32(rec + 0x24, 0x18000200u);
+    }
+    float pos[3] = {p.pos[0], p.pos[1], p.pos[2]};
+    pos[0] += float(rand(41) - 20);
+    pos[2] += float(rand(41) - 20);
+    const float cx = rt.mem.f32(G::camera_pos), cz = rt.mem.f32(G::camera_pos + 8);
+    const float dx = pos[0] - cx, dz = pos[2] - cz, d = std::max(1.0f, std::sqrt(dx * dx + dz * dz));
+    for (int i = 0; i < 3; ++i)
+        rt.mem.set32(rec + 8 + 4 * uint32_t(i), std::bit_cast<uint32_t>(pos[i]));
+    rt.mem.set32(rec + 0x14, 0);
+    rt.mem.set32(rec + 0x18, uint32_t(int32_t(std::lround(-std::atan2(cx - pos[0], cz - pos[2]) / 6.2831853 * 65536.0)) & 0xFFFF));
+    rt.mem.set32(rec + 0x1C, 0);
+    const float circle[3] = {cx + dx / d * kDogCircle, pos[1], cz + dz / d * kDogCircle};
+    for (int i = 0; i < 3; ++i)
+        rt.mem.set32(rec + 0x34 + 4 * uint32_t(i), std::bit_cast<uint32_t>(circle[i]));
+    static const int lifeForce = survivalEnv("DOG_LIFE") ? std::atoi(survivalEnv("DOG_LIFE")) : 0;   // (testing)
+    const int life = lifeForce > 0 ? lifeForce : std::min(1 + 40 * (dogRounds - 1), 400);
+    const uint32_t t = rt.survival_spawn_record(rec, life);
+    const int type = rt.mem.at<uint8_t>(rec + 0x24);
+    mine.push_back({t, rt.mem.u32(t + 8), rt.frameCount, type, false, true});
+    --toSpawn;
+    ++spawned;
+    ++dogSpawned;
+}
+
 void SurvivalMode::spawnOne(Runtime& rt)
 {
+    // survmaps: the arena's entry records first (entryShare %), or when it has no other places
+    const SurvivalArena& ar = survivalArenas()[size_t(arena)];
+    if (!entries.empty() && (points.empty() || rand(100) < ar.entryShare)) {
+        if (spawnEntry(rt, 2) || points.empty())
+            return;   // (none free and no other places: the next try after the gap)
+    }
     const Point& p = points[size_t(rand(int(points.size())))];
     bool cut = false;
     const int type = pickType(rt, cut);
@@ -731,7 +1070,10 @@ void SurvivalMode::spawnOne(Runtime& rt)
     const bool runner = special == 1 || (wave >= 4 && rand(100) < std::min(6 * (wave - 3), 60));
     if (special == 1 || (wave >= 4 && rand(100) < std::min(8 * (wave - 3), 70)))
         flags |= 1u << 22;   // AI at once (enemy_take_ai_at_once): no waiting before it comes
-    const uint32_t t = rt.survival_spawn(0, flags, pos, p.ang, type, cut ? 0 : baseAction(type), life,
+    int cutAction = 0;   // (hordepub: a cut creature's own set-up, SurvivalCut::action)
+    for (const SurvivalCut& c : survivalCuts())
+        if (cut && c.type == type) cutAction = c.action;
+    const uint32_t t = rt.survival_spawn(0, flags, pos, p.ang, type, cut ? cutAction : baseAction(type), life,
                                       wave >= 3 ? 0 : uint32_t(rand(3)), runner ? 2u : 0u);
     mine.push_back({t, rt.mem.u32(t + 8), rt.frameCount, type, cut});
     --toSpawn;
@@ -854,6 +1196,11 @@ std::string SurvivalMode::summary(const Runtime& rt) const
                   buysN[Life], buysN[Quick], buysN[BigMag], buysN[Rifle], buysN[Dual], buysN[Shotgun], buysN[Hand], spawned, cutSpawned,
                   fastSpawned, kills, alive, peakAlive, peakBodies, (unsigned long long)rt.frameCount, keptOk ? "ok" : "FAIL");
     std::snprintf(b + std::strlen(b), sizeof b - std::strlen(b), " retired=%d blasts=%d/%d/%d hits=%d stage=%d items=%d blastkills=%d", retiredN, rt.blastsN, rt.blastsHit, rt.blastsMulti, rt.blastHits, rt.blastsWorld, rt.blastsItems, rt.blastKills);
+    if (rt.blastsDouble > 0)   // (HOTD_BLAST_DOUBLE: creatures two explosions of one frame both hit)
+        std::snprintf(b + std::strlen(b), sizeof b - std::strlen(b), " blastdouble=%d", rt.blastsDouble);
+    // survdogs: the dogs' rounds (begun), the dogs made / dead / ended by the stall guard, Max Ammo given (seats), the next
+    std::snprintf(b + std::strlen(b), sizeof b - std::strlen(b), " dogrounds=%d dogs=%d/%d stalled=%d maxammo=%d nextdogs=%d", dogRounds,
+                  dogSpawned, dogKilled, dogStalled, refills, dogWave);
     if (outN > 0)   // survrevive: the seats that went out / came back (2-4 players)
         std::snprintf(b + std::strlen(b), sizeof b - std::strlen(b), " out=%d back=%d revive=%s", outN, backN, reviveOk ? "ok" : "FAIL");
     std::string ttk = " ttk";   // (the balance runs: per weapon kills / mean frames from the first hit to the death)
@@ -982,22 +1329,28 @@ int SurvivalMode::testBuy(const Runtime& rt, int p) const
     // the balance runs (survfix2): HOTD_SURVIVAL_BUYER=saver: after the SMG every point saved for the Magician's Hand;
     // =upgrades: the SMG, ammo when low, Quick Reload, Big Mag, then saved for the Hand
     static const char* buyer = survivalEnv("BUYER");
-    if (buyer && seat[p & 3].buys[Hand] == 0) {
+    // (handsync, the online weapon tests: =rifle / dual / shotgun / hand: after the SMG every point saved for that one)
+    static const int goal = !buyer ? Hand : std::strcmp(buyer, "rifle") == 0 ? Rifle : std::strcmp(buyer, "dual") == 0 ? Dual
+                                          : std::strcmp(buyer, "shotgun") == 0 ? Shotgun : std::strcmp(buyer, "smg") == 0 ? Smg : Hand;
+    if (buyer && seat[p & 3].buys[goal] == 0) {
         if (std::strcmp(buyer, "upgrades") == 0) {
             if (w.own[kSmg] && w.reserve[kSmg] < rt.weapons.magazine(p, kSmg) * 2 && canBuy(rt, p, Ammo)) return Ammo;
             if (canBuy(rt, p, Quick)) return Quick;
             if (w.quick && canBuy(rt, p, BigMag)) return BigMag;
             if (!w.quick || !w.bigMag) return -1;
         }
-        return canBuy(rt, p, Hand) ? Hand : -1;
+        return canBuy(rt, p, goal) ? goal : -1;
     }
     for (int k = 1; k < kWeapons; ++k)
         if (w.own[k] && w.reserve[k] < rt.weapons.magazine(p, k) * 2 && canBuy(rt, p, Ammo)) return Ammo;
     if (pl.lives < kLives && canBuy(rt, p, Life)) return Life;
     if (canBuy(rt, p, Quick)) return Quick;
     if (canBuy(rt, p, BigMag)) return BigMag;
+    // (survhand: a named buyer, =smg / rifle / dual / shotgun / hand, keeps to that one weapon, bought again when used
+    // up: the comparisons' runs each measure one weapon)
+    static const bool one = buyer && std::strcmp(buyer, "saver") != 0 && std::strcmp(buyer, "upgrades") != 0;
     for (const int it : {Rifle, Dual, Shotgun, Hand})
-        if (canBuy(rt, p, it)) return it;
+        if ((!one || it == goal) && canBuy(rt, p, it)) return it;
     if (canBuy(rt, p, Life)) return Life;
     return -1;
 }
@@ -1208,6 +1561,21 @@ uint32_t Runtime::survival_spawn(uint32_t kind, uint32_t flags, const float pos[
     return t;
 }
 
+// as evt_ENTBE (0x319C0): flags | 1, the record's place and angles, +0x35C = rec + 0x24 (the kind's own fields: kind 7's
+// type, its slide's step and frames); the hit points ours (the record's +0x20 in the story)
+uint32_t Runtime::survival_spawn_record(uint32_t rec, int life)
+{
+    const uint32_t t = task_create(mem.u32(G::obj_kinds + mem.u32(rec) * 4), 0x3C8);
+    task_clear_work(t);
+    of<uint32_t>(t, 0x58) = mem.u32(rec + 4) | 1;
+    for (uint32_t i = 0; i < 6; ++i)
+        of<uint32_t>(t, 0x20 + 4 * i) = mem.u32(rec + 8 + 4 * i);
+    of<uint32_t>(t, 0x35C) = rec + 0x24;
+    of<uint16_t>(t, 0x72) = uint16_t(life);
+    of<uint16_t>(t, 0x70) = uint16_t(life);
+    return t;
+}
+
 std::string survivalSoundDir()
 {
     static const std::string dir = [] {   // (looked up once: the data folders are set at the start)
@@ -1244,9 +1612,15 @@ bool Runtime::survival_cue(uint32_t cue)
 // Chapter 4's stage's, which has every area) and the rows of their Gallery look
 void Runtime::survival_areas()
 {
-    if (!survival.cutCreatures)
-        return;
-    for (const SurvivalCut& c : survivalCuts()) {
+    // survdogs: the dogs' rounds' Kenfis (types 0 and 8: Chapter 1's area 1, its look type 0's) in an arena of another
+    // chapter the same way
+    std::vector<SurvivalCut> list;
+    if (survival.cutCreatures)
+        list = survivalCuts();
+    if (survival.active() && mem.at<int8_t>(G::chapter) != 0)
+        for (const int t : {8, 0})   // (the last one gives the area its look: type 0's rows, galleryLook)
+            list.push_back({t, "Kenfis", 1, 0, 1});
+    for (const SurvivalCut& c : list) {
         std::function<void(uint32_t, int)> walk = [&](uint32_t part, int depth) {
             if (part == 0 || depth > 16 || !mem.mapped(part))
                 return;

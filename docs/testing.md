@@ -5,6 +5,68 @@ Every command below runs from the checkout's root with `build\Release\hotd.exe`;
 `private\` (the game data), e.g. `C:\Games\HOTD M2 RECOMPILE\M2 Source`. Every script gives each run its own
 `HOTD_PREF_DIR` and kills a run past its timeout by its own PID (never by name: other runs share the PC).
 
+## 0. The CTest suite: one command (worker "tests", 2026-11-09)
+
+```
+powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1 [-Layer all|unit|module|translation] [-Only <regex>]
+    [-Jobs 4] [-NoBuild] [-Root <main>] [-Arcade <zip>] [-Pc <PC folder>] [-Es <Spanish copy>] [-Harness <PC folder>]
+tools/run_tests.sh [--layer ...] [--only ...] [--jobs 4] [--no-build] [--root <main>]       (Linux / macOS / Git Bash)
+ctest --test-dir build -C Release [-L unit|module|translation] [-R <regex>] [-j 4]          (the same, by hand)
+```
+Builds `hotd` and `hotd_unit`, runs CTest and prints a table (each test, its layer, passed / FAILED / skipped, seconds)
+and the unit check count. Exit 0 when nothing failed (a skipped test is not a failure).
+
+**Unit layer** (label `unit`; `hotd_unit`, `tests/unit/*.cpp`; no game data, only the checkout's `data\`; CI runs it on
+Windows, Linux and macOS in `.github/workflows/release.yml`). Its own header-only harness (`tests/unit/check.h`:
+`TEST(suite, name)`, `CHECK`, `CHECK_EQ`, `CHECK_NEAR`; no third-party library). `hotd_unit [suite ...] [--list]`;
+`HOTD_UNIT_VERBOSE=1` prints extra notes. It links the game's own objects (CMake `hotd_game_obj`: every game source
+but `main.cpp`, compiled once for both `hotd` and `hotd_unit`). One CTest test per suite:
+
+| Suite | What it checks |
+|---|---|
+| util | recolour parse / pixels, resolution sizes and `visibleArea`, utf8 helpers, PNG write / read round trip, the Spanish CD's cabinet layout (`cab::arrange`, `gameCabinet`) |
+| launcher | launcher.ini: defaults round trip; every saved key set to other values comes back and changes no other key (save(load(x)) stable); package-relative paths; the cheats never saved; a damaged file set aside; frame rates, menu songs, Sonic presets |
+| lang | every language file well formed (no key twice, UTF-8, lang.name); `{placeholders}`, `%` pieces and `\n` kept; every character in the language's fonts (or Latin-1 with the PC fonts); `tr` / `fmt` / columns / wrap |
+| mods | the built-in mods' mod.ini files: defaults among the choices; the game's built-in copies equal the folders; every choice configures the mod differently; "Own Colour Each" still read; mod.ini parsing; `modDepthTest` |
+| files | pc_manifest.inc / pc_manifest_es.inc consistent (unique, SHA-1 form, Spanish files a subset with other hashes), the 29 arcade ROMs, the Spanish voice rules |
+| vr | `vr::selfTest`, aim round trips, the shake-to-reload and wrist-flick reload detectors on synthetic motion |
+| net | the crypto known-answer tests |
+| rollback | on a runtime with synthetic memory: the desync hash (same state same hash; any covered change a new one; the sound queue left out; Survival, weapons, the Hand's bolts / blasts / clock, Boss Mode, 4P, PC Mode) and `RuntimeState` save / restore |
+| typing | the dictionary; the prompt picker (unique first letters, never G / H first, not one of the last 16, the seed decides); SEGA's judge (case, Shift grace, key costs) |
+| weapons | the built-in table = data/weapons.ini; magazine / reserve / reload maths (Big Mag, Quick Reload, Drops); the random stream |
+| survival | round sizes / hit points monotonic; the director's seeded stream; arenas; prices; the score table's round trip |
+| evdev | the Linux light-gun / mouse packets (`LightGuns::evdevEvent`): relative sums, ABS ranges, buttons, auto-repeat, SYN_DROPPED, counted-only without a gun player, the Assign pull |
+
+The label `translation` (CTest test `translation.langdone`, run with `-Layer translation`; not in `all`, not in CI) lists the keys of en.txt a language has not translated yet and
+keys no longer in en.txt: a to-do for the translators, not a fault.
+
+**Module layer** (label `module`; `tests/module_test.cmake` runs `hotd` headless with its own `HOTD_PREF_DIR` under
+`build\module_tests\<name>`, a timeout, and its pass lines). The game files come from the environment and a test that
+needs a missing one is **skipped**: `HOTD_TEST_ARCADE` (the arcade zip), `HOTD_TEST_PC` (the PC game's folder),
+`HOTD_TEST_ES` (a Spanish PC copy), `HOTD_TEST_PC_HARNESS` (the input test's PC folder; default `HOTD_TEST_PC`).
+`run_tests.ps1 -Root <main>` fills them from `<main>\private`. The tests and their pass rules (tests/CMakeLists.txt):
+
+| Test | Pass rule |
+|---|---|
+| input | the results file's last line `N checks, 0 failed` |
+| chapter1_arcade / _pc | `[runtime 16350]` / `[runtime 16427] chapter 1 ended` |
+| chapter2_* | `[runtime 16550] chapter 2 ended`, `[runtime 48114] chapter 3 ended` (both models) |
+| chapter3_* | `[runtime 27279] chapter 3 ended` |
+| chapter4_* | `[runtime 28083] chapter 4 ended`, `[runtime 34967] the ending is over` |
+| survival10 | `SURVIVAL TEST: result=ok ... round=10` |
+| totd_chapter1-4 | `TOTD TEST: PASS`, every thrown thing prompted within 20 frames, no flicker |
+| boss_chariot / hangedman / hermit / magician | `BOSS MODE: result=cleared` |
+| pcmode_chapter1, players2_chapter1, players4_chapter1, sonic_frenzy_chapter1 | runtime 16933 / 17340 / 22283 / 16350 |
+| horde_chapter1 (only where src/unreleased is built) | runtime 23775 |
+| vr_preview | `vr preview test: ok` |
+| aim_area (label `nodata` too) | `aim area test: 0 failed` |
+| spanish_chapter1 | the Spanish voices and texture texts found, runtime 16350 |
+| online_story_2p | two instances on 127.0.0.1 (rollback), 2 players: both `chapter 1 ended`, `NET: result=ok` |
+| online_survival_hand | two instances, Survival with every weapon from round 1 cycled (the Hand's explosions counted), weapon switches through the input: both `SURVIVAL TEST: result=ok`, `NET: result=ok` |
+
+Every module test also fails on the soak's failure lines (GL error, watchdog, a memory fault, NaN draws, an assertion)
+and on a non-zero exit. A deliberate change of a runtime number updates tests/CMakeLists.txt with its reason.
+
 ## 1. The input test, robust (`--input-test`, `tools\input_test.ps1`)
 
 What went wrong: the test takes ~6 minutes on an idle PC (~40 game frames a second in its hidden window; the Remake
@@ -109,6 +171,19 @@ best streak), `TOTD FLICKER` (boxes gone and back within 60 frames, quick keys c
 `--route 1:3=0,1:4=0`. Comparisons: `HOTD_TOTD_HOLD6=1` (round 6's attack rule), `HOTD_TOTD_NOLATCH=1` (round 6's
 boxes), `HOTD_TOTD_NOSOUND=1` / `HOTD_TOTD_NOSHOT=1` (the typing sounds / the letters' gun sound off, with
 `--audio-wav` for loudness), `HOTD_TOTD_BOXES=<dir>` (close-ups of the boxes at 640x480's and 1080p's scale).
+
+## 6. Photo Mode holds the game (`--photo-test F:N`, worker photomode, 2026-11-09)
+
+`hotd --arcade <zip> --pc C:\Games\HOTD --frames 40000 --autofire --mute --lives-kept 1 [--models pc] --photo-test
+2200:120 [--render --shot-dir <dir>]`: at game frame 2200 Photo Mode (src/game/photo_mode.h) holds the game for 120
+frames (no game frame, the sound held as by the pause) while a script moves its camera (forward / right / up, a turn,
+the HUD hidden from frame 30, the field of view 4 notches narrower at 60), then leaves it. The line `PHOTO TEST: frozen,
+state unchanged` compares the game frame, the state hash (net::NetGame::gameHash) and every mapped region's hash
+(bootHash) before and after; `photo test: reset:` checks R / 0 (the camera and the field of view back at the game's).
+With `--render` the pictures `photo_f2200_{0,30,60,119}.png` (0 with the HUD, the others without). The chapter must
+end as the plain run does (same runtime and score). The input test's Photo Mode steps (after the padfix cases) do the
+same in the window's loop: F8, D held, a drag, the wheel, H, a click (no shot), 0, R, F8; the pause's item, Escape back
+to the pause, Escape to play; the online rules (greyed item, F8's reason).
 
 ## Results
 

@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 # THE version (a release: change this line only): the exes' VERSIONINFO, the main menu's corner, hotd --version
-project(hotd_m2 VERSION 1.3.1 LANGUAGES C CXX)
-# Light Gun Edition: its own build number on top of the ReWrithe version (v1.3.1-lg15): raise it for each release of
-# this edition; the release tag must match (git tag v1.3.1-lg15)
-set(HOTD_LG_EDITION "lg15")
+project(hotd_m2 VERSION 1.4.0 LANGUAGES C CXX)
+# Light Gun Edition: its own build number on top of the ReWrithe version (v1.4.0-lg16): raise it for each release of
+# this edition; the release tag must match (git tag v1.4.0-lg16)
+set(HOTD_LG_EDITION "lg16")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,8 +58,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_S
 
 set(HOTD_GAME_SOURCES
     ${HOTD_NAMES_CPP}
-    src/main.cpp
     src/util/crash_log.cpp
+    src/util/tts.cpp
     src/game/host.cpp
     src/game/boot.cpp
     src/game/attract.cpp
@@ -115,31 +115,43 @@ set(HOTD_GAME_SOURCES
     src/game/bot.cpp
     src/game/typing.cpp
     src/game/typing_hud.cpp
+    src/game/typing_packs.cpp
     src/game/scene_view.cpp
+    src/game/free_cam.cpp
+    src/game/photo_mode.cpp
     src/net/net_game.cpp
     src/net/online_menu.cpp
     src/net/rollback.cpp)
 # quest (2026-11-03, docs/quest.md): on Android the game is SDL's libmain.so (SDLActivity loads it and calls SDL_main);
 # everywhere else the hotd executable as before
+# tests (worker "tests", 2026-11-09, docs/testing.md "CTest"): the game's sources other than main.cpp are compiled
+# once into an OBJECT library: the game links every one of its objects (as before: the same sources and flags), and
+# the unit tests (hotd_unit, tests/CMakeLists.txt) link the same objects with their own main.
+# hotd_flags carries what the game's sources are compiled and linked with (defines, include folders, libraries)
+add_library(hotd_flags INTERFACE)
+add_library(hotd_game_obj OBJECT ${HOTD_GAME_SOURCES})
+target_link_libraries(hotd_game_obj PUBLIC hotd_flags)
 if(ANDROID)
-    add_library(hotd SHARED ${HOTD_GAME_SOURCES} src/util/android_app.cpp)
+    set_target_properties(hotd_game_obj PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    add_library(hotd SHARED src/main.cpp src/util/android_app.cpp)
     set_target_properties(hotd PROPERTIES OUTPUT_NAME main)
-    target_link_libraries(hotd PRIVATE android log EGL)
+    target_link_libraries(hotd_flags INTERFACE android log EGL)
     target_link_options(hotd PRIVATE "-Wl,-z,max-page-size=16384")   # (16 KB pages: newer Android; the Quest's 4 KB too)
-    target_compile_options(hotd PRIVATE -Wno-error=format-security)   # (the NDK's default; the game's printf helpers)
+    target_compile_options(hotd_flags INTERFACE -Wno-error=format-security)   # (the NDK's default; the game's printf helpers)
 else()
-    add_executable(hotd ${HOTD_GAME_SOURCES})
+    add_executable(hotd src/main.cpp)
 endif()
+target_link_libraries(hotd PRIVATE hotd_game_obj hotd_flags)
 
 # Netplay (docs/netplay.md): UDP + Monocypher 4.0.3 (src/third_party/monocypher, CC0 / BSD-2-Clause) on every system,
 # so every PC speaks the same protocol (cross-play); random bytes from the OS
-add_library(hotd_net STATIC src/net/socket.cpp src/net/session.cpp src/net/lobby.cpp src/net/upnp.cpp src/net/crypto.cpp
+add_library(hotd_net STATIC src/net/socket.cpp src/net/session.cpp src/net/natpunch.cpp src/net/lobby.cpp src/net/upnp.cpp src/net/crypto.cpp
             src/third_party/monocypher/monocypher.c)
 target_include_directories(hotd_net PUBLIC src)
 if(WIN32)
     target_link_libraries(hotd_net PUBLIC ws2_32 bcrypt iphlpapi)
 endif()
-target_link_libraries(hotd PRIVATE hotd_net)
+target_link_libraries(hotd_flags INTERFACE hotd_net)
 if(NOT ANDROID)   # (quest: the APK is the game alone; the developer tools stay desktop programs)
 # the netplay tests without the game: crypto, the handshake, replay / tamper rejection, a parser fuzz (127.0.0.1 only)
 add_executable(hotd_nettest src/net/nettest.cpp)
@@ -169,7 +181,7 @@ if(HOTD_STB_DIR AND EXISTS ${HOTD_STB_DIR}/stb_vorbis.c)
     if(MSVC)
         target_compile_options(hotd_vorbis PRIVATE /w)
     endif()
-    target_link_libraries(hotd PRIVATE hotd_vorbis)
+    target_link_libraries(hotd_flags INTERFACE hotd_vorbis)
     message(STATUS "OGG music: stb_vorbis from ${HOTD_STB_DIR}")
 else()
     message(STATUS "OGG music: off (set HOTD_STB_DIR or HOTD_FETCH_STB=ON)")
@@ -188,7 +200,7 @@ if(HOTD_DR_LIBS_DIR AND EXISTS ${HOTD_DR_LIBS_DIR}/dr_mp3.h)
     if(MSVC)
         target_compile_options(hotd_mp3 PRIVATE /w)
     endif()
-    target_link_libraries(hotd PRIVATE hotd_mp3)
+    target_link_libraries(hotd_flags INTERFACE hotd_mp3)
     message(STATUS "MP3 music: dr_mp3 from ${HOTD_DR_LIBS_DIR}")
 else()
     message(STATUS "MP3 music: off (set HOTD_DR_LIBS_DIR)")
@@ -237,10 +249,14 @@ if(HOTD_ARCADE_SOUND)
         DEPENDS hotd_m68kmake ${HOTD_MUSASHI_DIR}/m68k_in.c
         COMMENT "Musashi: m68kmake (m68kops.c / m68kops.h)")
     endif()
+    # sound2 (GitHub #26): MAME's scsp.cpp with the chip's hardware behaviour (cmake/scsp_hw.cmake) from the build folder
+    include(${CMAKE_SOURCE_DIR}/cmake/scsp_hw.cmake)
+    hotd_scsp_hw_patch(${HOTD_SCSP_DIR}/scsp.cpp ${CMAKE_CURRENT_BINARY_DIR}/scsp_hw/scsp.cpp)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/cmake/scsp_hw.cmake ${HOTD_SCSP_DIR}/scsp.cpp)
     add_library(hotd_arcade_sound STATIC
         ${HOTD_MUSASHI_DIR}/m68kcpu.c
         ${HOTD_M68K_GEN}/m68kops.c
-        ${HOTD_SCSP_DIR}/scsp.cpp
+        ${CMAKE_CURRENT_BINARY_DIR}/scsp_hw/scsp.cpp
         ${HOTD_SCSP_DIR}/scspdsp.cpp
         src/audio/sound_board.cpp)
     # order matters: Musashi first, then our stand-ins (m68kfpu.c / m68kmmu.h / softfloat), then the SCSP and our MAME
@@ -254,10 +270,10 @@ if(HOTD_ARCADE_SOUND)
     target_compile_definitions(hotd_arcade_sound PRIVATE M68K_EMULATE_INT_ACK=M68K_OPT_ON)
     if(MSVC)
         set_source_files_properties(${HOTD_MUSASHI_DIR}/m68kcpu.c ${HOTD_M68K_GEN}/m68kops.c
-            ${HOTD_SCSP_DIR}/scsp.cpp ${HOTD_SCSP_DIR}/scspdsp.cpp PROPERTIES COMPILE_OPTIONS "/w")
+            ${CMAKE_CURRENT_BINARY_DIR}/scsp_hw/scsp.cpp ${HOTD_SCSP_DIR}/scspdsp.cpp PROPERTIES COMPILE_OPTIONS "/w")
         target_compile_definitions(hotd_arcade_sound PRIVATE _CRT_SECURE_NO_WARNINGS)
     endif()
-    target_link_libraries(hotd PRIVATE hotd_arcade_sound)
+    target_link_libraries(hotd_flags INTERFACE hotd_arcade_sound)
     message(STATUS "Arcade sound: Musashi from ${HOTD_MUSASHI_DIR}, SCSP from ${HOTD_SCSP_DIR}")
 else()
     message(STATUS "Arcade sound: off (set HOTD_MUSASHI_DIR and HOTD_SCSP_DIR)")
@@ -289,12 +305,14 @@ add_library(hotd_engine STATIC
     src/render/ttf.cpp
     src/render/bidi.cpp
     src/game/lang.cpp
+    src/game/subtitles.cpp
     src/render/crt.cpp
     src/render/gamma.cpp
     src/util/png.cpp
     src/util/png_read.cpp
     src/util/recolour.cpp
     src/assets/mods.cpp
+    src/assets/model_import.cpp
     src/game/sights.cpp
     src/game/sight_art.cpp
     src/game/preview_art.cpp
@@ -350,7 +368,7 @@ add_custom_command(OUTPUT ${HOTD_RUNTIME_BOUNDS}
     COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_runtime_bounds.py ${HOTD_RUNTIME_BOUNDS}
     DEPENDS ${HOTD_PORT_DECLS} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_runtime_bounds.py
     VERBATIM)
-target_sources(hotd PRIVATE ${HOTD_RUNTIME_BOUNDS})
+target_sources(hotd_game_obj PRIVATE ${HOTD_RUNTIME_BOUNDS})
 # The runtime's dispatch (routine address -> the port) includes every per-kind registry of the arcade
 # (src/proof/cases/*_arcade.inc), so a logic session's new kind file is picked up without editing src/game.
 file(GLOB HOTD_ARCADE_CASES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/proof/cases/*_arcade.inc)
@@ -361,44 +379,59 @@ foreach(c ${HOTD_ARCADE_CASES})
     string(APPEND HOTD_DISPATCH_TEXT "#include \"proof/cases/${n}\"\n")
 endforeach()
 file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated/dispatch_arcade.inc CONTENT "${HOTD_DISPATCH_TEXT}")
-target_include_directories(hotd PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_include_directories(hotd_flags INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 configure_file(src/res/hotd_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/hotd_version.h @ONLY)
-target_link_libraries(hotd PRIVATE hotd_engine hotd_logic)
+target_link_libraries(hotd_flags INTERFACE hotd_engine hotd_logic)
 if(WIN32)
-    target_link_libraries(hotd PRIVATE winhttp)   # util/update_check.cpp
+    target_link_libraries(hotd_flags INTERFACE winhttp)   # util/update_check.cpp
 endif()
 # Experimental modes (user 2026-11-03: not in a public release until they are polished; docs/porting.md "Experimental
 # modes"): ON (development builds, build\Release and the private portable): the unreleased modes' menu items, command-line
 # options and High Scores tables. OFF (every release package: tools/make_portable_hotd.ps1 -Release, the GitHub release
 # workflow, the Linux / macOS packages, the Quest APK): none of them is reachable.
 option(HOTD_EXPERIMENTAL_MODES "The unreleased modes in the menus / command line (TotD 0: HOTD_TOTD_MODE, Survival: HOTD_SURVIVAL_MODE)" ON)
-target_compile_definitions(hotd PRIVATE HOTD_EXPERIMENTAL_MODES=$<IF:$<BOOL:${HOTD_EXPERIMENTAL_MODES}>,1,0>)
+target_compile_definitions(hotd_flags INTERFACE HOTD_EXPERIMENTAL_MODES=$<IF:$<BOOL:${HOTD_EXPERIMENTAL_MODES}>,1,0>)
 message(STATUS "Experimental modes: ${HOTD_EXPERIMENTAL_MODES}")
 # (user 2026-11-05: "make sure v1.3.0 does not have anything" of the unreleased mode): its code lives in
 # src/unreleased/ (left out of the public source, tools/export_public.ps1) and every use of it is inside
 # "#if HOTD_UNRELEASED" (the export drops those blocks too): with the experimental modes OFF, or without that folder,
 # none of it is compiled in (no code, options, strings or file names)
+# (hordepub 2026-11-09: Horde Mode left that folder for src/game, HOTD_HORDE_MODE below; HOTD_UNRELEASED follows the
+# experimental modes: what its blocks still hold is Survival's old "Horde" names)
 set(HOTD_UNRELEASED OFF)
-if(HOTD_EXPERIMENTAL_MODES AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/unreleased)
+if(HOTD_EXPERIMENTAL_MODES)
     set(HOTD_UNRELEASED ON)
-    file(GLOB HOTD_UNRELEASED_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/unreleased/*.cpp)
-    target_sources(hotd PRIVATE ${HOTD_UNRELEASED_SOURCES})
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/unreleased)
+        file(GLOB HOTD_UNRELEASED_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/unreleased/*.cpp)
+        target_sources(hotd_game_obj PRIVATE ${HOTD_UNRELEASED_SOURCES})
+    endif()
 endif()
-target_compile_definitions(hotd PRIVATE HOTD_UNRELEASED=$<IF:$<BOOL:${HOTD_UNRELEASED}>,1,0>)
+target_compile_definitions(hotd_flags INTERFACE HOTD_UNRELEASED=$<IF:$<BOOL:${HOTD_UNRELEASED}>,1,0>)
 message(STATUS "Unreleased modes' code: ${HOTD_UNRELEASED}")
 # The Typing of the Dead 0 (user 2026-11-05, v1.3.0; labelled "Experimental / Proof of
 # Concept"): in the release builds too. OFF: left out (with the experimental modes ON it is always in)
 option(HOTD_TOTD_MODE "The Typing of the Dead 0 (Experimental / Proof of Concept) with the experimental modes OFF" ON)
-target_compile_definitions(hotd PRIVATE HOTD_TOTD_MODE=$<IF:$<BOOL:${HOTD_TOTD_MODE}>,1,0>)
+target_compile_definitions(hotd_flags INTERFACE HOTD_TOTD_MODE=$<IF:$<BOOL:${HOTD_TOTD_MODE}>,1,0>)
 message(STATUS "The Typing of the Dead 0: ${HOTD_TOTD_MODE}")
 # Survival Mode (user 2026-11-03): in the release builds too, labelled "Very Experimental / Proof of Concept" (its menu
 # item, its help line, a notice when it starts). OFF: left out as the experimental modes are (with them ON it is always in)
 option(HOTD_SURVIVAL_MODE "Survival Mode (Very Experimental / Proof of Concept) with the experimental modes OFF" ON)
-target_compile_definitions(hotd PRIVATE HOTD_SURVIVAL_MODE=$<IF:$<BOOL:${HOTD_SURVIVAL_MODE}>,1,0>)
+target_compile_definitions(hotd_flags INTERFACE HOTD_SURVIVAL_MODE=$<IF:$<BOOL:${HOTD_SURVIVAL_MODE}>,1,0>)
 message(STATUS "Survival Mode: ${HOTD_SURVIVAL_MODE}")
+# Horde Mode (user 2026-11-09, docs/horde.md): in the release builds too, labelled "Experimental / Proof of Concept" as
+# The Typing of the Dead 0 (its menu item's tag and help line, a notice when it starts). OFF: left out (no code, options,
+# strings or table; with the experimental modes ON it is always in)
+option(HOTD_HORDE_MODE "Horde Mode (Experimental / Proof of Concept) with the experimental modes OFF" ON)
+set(HOTD_HORDE OFF)
+if(HOTD_EXPERIMENTAL_MODES OR HOTD_HORDE_MODE)
+    set(HOTD_HORDE ON)
+    target_sources(hotd_game_obj PRIVATE src/game/horde.cpp)
+endif()
+target_compile_definitions(hotd_flags INTERFACE HOTD_HORDE=$<IF:$<BOOL:${HOTD_HORDE}>,1,0>)
+message(STATUS "Horde Mode: ${HOTD_HORDE}")
 # VR mode (docs/vr.md): the VR frame, the desktop preview and the aim (always built: nothing runs without --vr);
 # HOTD_OPENXR=ON adds the OpenXR backend (needs the Khronos OpenXR SDK's loader: find_package(OpenXR), Apache 2.0)
-target_sources(hotd PRIVATE src/vr/vr.cpp src/vr/vr_aim.cpp src/vr/vr_preview.cpp src/vr/vr_scene.cpp)
+target_sources(hotd_game_obj PRIVATE src/vr/vr.cpp src/vr/vr_aim.cpp src/vr/vr_check.cpp src/vr/vr_preview.cpp src/vr/vr_scene.cpp)
 # openxr (2026-11-03): the Khronos OpenXR SDK's prebuilt loader (never committed; private/deps/openxr: OpenXRConfig.cmake
 # at its root, include/openxr, x64/bin/openxr_loader.dll, share/doc/openxr/LICENSE). HOTD_OPENXR defaults ON when the
 # SDK is found (OpenXR_DIR, CMAKE_PREFIX_PATH or that folder), OFF otherwise: builds without it work as before.
@@ -413,14 +446,14 @@ if(HOTD_OPENXR)
         find_package(OpenXR CONFIG REQUIRED)
     endif()
     message(STATUS "OpenXR (VR headsets): ${OpenXR_DIR}")
-    target_sources(hotd PRIVATE src/vr/vr_openxr.cpp)
-    target_compile_definitions(hotd PRIVATE HOTD_OPENXR)
-    target_link_libraries(hotd PRIVATE OpenXR::openxr_loader)
+    target_sources(hotd_game_obj PRIVATE src/vr/vr_openxr.cpp)
+    target_compile_definitions(hotd_flags INTERFACE HOTD_OPENXR)
+    target_link_libraries(hotd_flags INTERFACE OpenXR::openxr_loader)
     if(WIN32)
-        target_link_libraries(hotd PRIVATE opengl32)   # (wglGetCurrentDC / wglGetCurrentContext: the GL binding)
+        target_link_libraries(hotd_flags INTERFACE opengl32)   # (wglGetCurrentDC / wglGetCurrentContext: the GL binding)
         if(MSVC)   # delay-loaded: hotd.exe starts without the DLL (vr_openxr.cpp loads it on --vr openxr, says so if missing)
             target_link_options(hotd PRIVATE "/DELAYLOAD:openxr_loader.dll")
-            target_link_libraries(hotd PRIVATE delayimp)
+            target_link_libraries(hotd_flags INTERFACE delayimp)
         endif()
         add_custom_command(TARGET hotd POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:OpenXR::openxr_loader>" "$<TARGET_FILE_DIR:hotd>"
@@ -493,7 +526,7 @@ if(WIN32)
 endif()
 
 if(MSVC)
-    target_compile_options(hotd PRIVATE /wd4127)
+    target_compile_options(hotd_flags INTERFACE /wd4127)
 endif()
 
 # Differential checker: the port against MAME / PC-harness records (docs/proof.md).
@@ -505,7 +538,7 @@ if(MSVC)
 endif()
 endif()
 
-foreach(t hotd hotd_engine hotd_viewer hotd_logic hotd_proof hotd_net hotd_nettest hotd_shaketest)
+foreach(t hotd hotd_game_obj hotd_engine hotd_viewer hotd_logic hotd_proof hotd_net hotd_nettest hotd_shaketest)
     if(NOT TARGET ${t})   # (quest: Android builds the game alone)
     elseif(MSVC)
         target_compile_options(${t} PRIVATE /W4 /utf-8)
@@ -542,7 +575,7 @@ if(NOT WIN32)
 endif()
 # netplay's float determinism (docs/netplay.md): the game logic with strict IEEE float arithmetic, no contraction into
 # fused multiply-adds. MSVC's default /fp:precise (said explicitly; x64 without /arch:AVX2 emits no FMA at all)
-foreach(t hotd hotd_logic hotd_proof)
+foreach(t hotd hotd_game_obj hotd_logic hotd_proof)
     if(NOT TARGET ${t})
     elseif(MSVC)
         target_compile_options(${t} PRIVATE /fp:precise)
@@ -579,4 +612,11 @@ if(WIN32)
     else()
         message(STATUS "ANGLE (DirectX renderer): not found (HOTD_ANGLE_DIR); OpenGL only")
     endif()
+endif()
+
+# tests (worker "tests", 2026-11-09; docs/testing.md "CTest"): ctest -C Release from the build folder; the unit layer
+# (hotd_unit, no game data) and the module layer (the headless runs, with the game files from the environment)
+if(NOT ANDROID)
+    enable_testing()
+    add_subdirectory(tests)
 endif()

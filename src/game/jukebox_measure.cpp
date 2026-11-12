@@ -28,6 +28,10 @@
 #include <map>
 #include <sstream>
 
+#ifdef HOTD_HAVE_ARCADE_SOUND
+extern int hotd_scsp_fix;   // src/audio/sound_board.cpp
+#endif
+
 namespace hotd::game {
 
 namespace {
@@ -35,7 +39,7 @@ namespace {
 constexpr int kHop = 441;               // 10 ms
 constexpr int kWin = 5;                 // the level's window: 5 hops = 50 ms
 constexpr float kQuietPeak = 1.0e-4f;   // the Jukebox's quiet level (jukebox.cpp kQuiet)
-constexpr int kVersion = 1;             // the cache's format / method (a new one measures again)
+constexpr int kVersion = 2;             // the cache's format / method (a new one measures again; 2: sound2's SCSP fixes)
 
 struct Level { float l, r; };   // the RMS of each side over the last 50 ms
 
@@ -265,7 +269,12 @@ std::string Jukebox::romKey(const std::vector<uint8_t>& prog, const std::vector<
             h *= 1099511628211ull;
         }
     char b[48];
+#ifdef HOTD_HAVE_ARCADE_SOUND
+    // sound2: the SCSP fixes in use (HOTD_SCSP_MAME turns some off; the timers change the songs' lengths)
+    std::snprintf(b, sizeof b, "v%d-%016llx-f%d", kVersion, (unsigned long long)h, hotd_scsp_fix);
+#else
     std::snprintf(b, sizeof b, "v%d-%016llx", kVersion, (unsigned long long)h);
+#endif
     return b;
 }
 

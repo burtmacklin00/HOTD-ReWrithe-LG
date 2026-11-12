@@ -14,11 +14,14 @@
 #include "render/gl_backend.h"
 #include "render/renderer.h"
 #include "util/png_read.h"
+#include "util/resolution.h"
 #include "util/utf8.h"
 #include "game/preview_art.h"
+#include "game/subtitles.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -26,6 +29,36 @@
 
 namespace hotd::port { extern bool gAttractGore; }
 namespace hotd::game {
+
+#if defined(__ANDROID__)
+bool menuQuest = true;
+#else
+bool menuQuest = std::getenv("HOTD_QUEST_MENUS") && *std::getenv("HOTD_QUEST_MENUS") && *std::getenv("HOTD_QUEST_MENUS") != '0';
+#endif
+
+// questui (menu_pages.h menuQuest): the rows the standalone Quest leaves out (docs/quest.md "Settings on the Quest").
+// The Controls page has none of its PC rows there (no mouse, keyboard, pad or light gun: the Touch controllers), only
+// the VR rows (moved from Gameplay)
+static void questRows(std::vector<Frontend::Extra>& r)
+{
+    if (!menuQuest)
+        return;
+    static const char* const kHidden[] = {
+        // Video: the headset is the display (its panel and refresh rate: the runtime's; vr.ini refresh_rate), OpenGL ES
+        // always, the CRT filter is not drawn in VR
+        "Display Mode", "Display", "Resolution", "Frame Rate", "Menu Frame Rate", "Vsync", "VRR (G-Sync / FreeSync)",
+        "Renderer", "CRT Filter", "CRT Settings",
+        // Gameplay: the mouse's edge reload (VR: point down), The Typing of the Dead 0 (a keyboard; not in VR)
+        "Edge Reload", "Typing of the Dead 0",
+        // Advanced: VR is single player
+        "Teammate Crosshair Flashes", "4P Boss Hit Points", "4P Enemy Toughness",
+        // System: the PC's files setup (the Quest's files are copied into the app's folder), the update check (an APK
+        // is updated by installing the new one), the desktop and Steam
+        "Repair / Change Files", "Check for Updates", "Desktop Shortcut", "Add to Steam"};
+    r.erase(std::remove_if(r.begin(), r.end(), [](const Frontend::Extra& e) {
+                return std::find_if(std::begin(kHidden), std::end(kHidden), [&e](const char* s) { return e.name == s; }) != std::end(kHidden);
+            }), r.end());
+}
 
 const char* menuCategoryName(int category)
 {
@@ -49,6 +82,11 @@ int menuTabOf(int category)
 namespace {
 using X = Frontend::Extra;
 std::string onOff(bool b) { return b ? "On" : "Off"; }
+// modelpacks (2026-11-09): a texture-pack-type mod that only replaces models (its row says "Model pack")
+bool modelPackOnly(const ModPack& p)
+{
+    return (!p.modelRepls.empty() || !p.objs.empty()) && p.pngs.empty() && p.rules.empty() && p.bloodRgb < 0;
+}
 // uxpolish: the menu's values start with a capital (the launcher.ini / command-line names stay lower case)
 std::string capital(const char* s)
 {
@@ -151,6 +189,10 @@ std::vector<Frontend::Extra>& lightGunRow(std::vector<Frontend::Extra>& r, const
 std::vector<Frontend::Extra> menuGunAssignRows(LaunchConfig& c, const MenuHooks& h)
 {
     std::vector<X> r;
+    // linuxmice (GitHub #67): Linux reads the guns / mice from /dev/input: without access, the first row (selected
+    // as the page opens, so its help line shows) says how; a click checks again
+    if (const std::string note = h.gunNote ? h.gunNote() : std::string(); !note.empty())
+        r.push_back({"Mice Not Readable", []() { return std::string("Check Again"); }, [h]() { if (h.gunPage) h.gunPage(); }, note});
     for (int p = 0; p < 4; ++p) {
         r.push_back({"Player " + std::to_string(p + 1) + (p >= 2 ? " (4P)" : ""), [&c, h, p]() {
                          if (h.gunWaiting && h.gunWaiting() == p)
@@ -211,7 +253,8 @@ void menuInGameRows(std::vector<Frontend::Extra>& rows, const std::string& title
     const bool rules = title == "Gameplay" || title == "Advanced" || title == "Options" || title == "Killer Mods";   // ("Options": the Remake's Game tab)
     // the rules rows that still apply at once (draw-only or this PC's own)
     static const char* const kLive[] = {"Hold to Skip Cut-scenes", "Score Display", "Teammate Crosshair Flashes", "Auto Reload",
-                                        "Edge Reload", "Chapter Retry", "Advanced", "Music Numbering"};
+                                        "Edge Reload", "Chapter Retry", "Advanced", "Music Numbering", "Invincibility", "Infinite Ammo",
+                                        "Dual Pistols (VR)", "Laser (VR)", "Crosshair (VR)", "Hands in Menus (VR)"};
     static const char* const kNextRows[] = {"Models", "Aspect", "Sound", "Player 1 Input", "Player 2 Input", "Player 3 Input",
                                             "Player 4 Input", "Light Gun Type", "Players in Arcade", "Solo Player Seat"};
     static const char* const kLockRows[] = {"Repair / Change Files", "Check for Updates", "What's New", "Language", "Local 2 Players",
@@ -261,8 +304,13 @@ void menuReset(LaunchConfig& c, int page)
     case kCatAudio:
         c.sound = d.sound, c.sfxVolume = d.sfxVolume, c.music = d.music, c.musicVolume = d.musicVolume, c.menuMusic = d.menuMusic;
         c.voice = d.voice, c.reloadVoice = d.reloadVoice;   // (spanish)
+        c.soundChip = d.soundChip;   // (sound2)
         break;
     case kCatControls:
+        if (menuQuest)   // (questui: the Quest's Controls page holds the VR rows)
+            c.vrDual = d.vrDual, c.vrLaser = d.vrLaser, c.vrCrosshair = d.vrCrosshair, c.vrMenuHands = d.vrMenuHands,
+            c.vrView = d.vrView, c.vrScreenDist = d.vrScreenDist, c.vrScreenSize = d.vrScreenSize, c.vrCutscenes = d.vrCutscenes,
+            c.vrVignette = d.vrVignette;   // (vrcomfort)
         c.p1Input = d.p1Input, c.p2Input = d.p2Input, c.p3Input = d.p3Input, c.p4Input = d.p4Input;
         c.gunKind = d.gunKind, c.gunFlash = d.gunFlash, c.gunBorder = d.gunBorder;   // (padpass)
         c.padPrompts = d.padPrompts, c.buttonStyle = d.buttonStyle, c.iconOutline = d.iconOutline;   // (padglyphs; menus3)
@@ -273,8 +321,14 @@ void menuReset(LaunchConfig& c, int page)
     case kCatGameplay:
         c.lives = d.lives;   // (#30: Starting Lives / Max Lives)
         c.chapterRetry = d.chapterRetry;   // (#5)
-        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.bossCodenames = d.bossCodenames, c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.married = d.married, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush, c.scoreDisplay = d.scoreDisplay, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip;
+        c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.vrDual = d.vrDual, c.vrLaser = d.vrLaser, c.vrCrosshair = d.vrCrosshair, c.vrMenuHands = d.vrMenuHands, c.scoreDisplay = d.scoreDisplay, c.bossCodenames = d.bossCodenames, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip, c.charSelect = d.charSelect, c.totdLive = d.totdLive, c.totdPractice = d.totdPractice, c.totdPacks = d.totdPacks, c.totdMutators = d.totdMutators, c.totdTts = d.totdTts;
+        c.vrView = d.vrView, c.vrScreenDist = d.vrScreenDist, c.vrScreenSize = d.vrScreenSize, c.vrCutscenes = d.vrCutscenes;
+        c.vrVignette = d.vrVignette;   // (vrcomfort)
+        c.subtitles = d.subtitles, c.subtitleSize = d.subtitleSize;   // (subs)
+        subs::configure(c.subtitles, c.subtitleSize);
+        c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.married = d.married, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush;   // (Light Gun Edition)
         c.sonic = d.sonic, c.title = d.title, c.fbi = d.fbi, c.freePlay = d.freePlay, c.pcSplash = d.pcSplash;   // (feat29)
+        cheats().invincible = cheats().infiniteAmmo = false;   // (smallfix: the cheats, not LaunchConfig's)
         break;
     case kCatKiller:
         c.flashlight = d.flashlight, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire;
@@ -295,10 +349,105 @@ void menuReset(LaunchConfig& c, int page)
     }
 }
 
+// Gameplay's VR rows (the Quest's Controls: questui)
+static void vrRows(std::vector<X>& r, LaunchConfig& c, const MenuHooks& h)
+{
+    const auto save = [h]() { if (h.save) h.save(); };
+    // vr4 (user 2026-11-09): VR's dual pistols, a magazine each; only in a VR run (hidden in the flat game). Not set
+    // yet (-1): vr.ini dual_pistols is the default it shows; a click sets it here (launcher.ini vrdual=)
+    if (h.vrDualDefault) {
+        auto now = [&c, d = h.vrDualDefault]() { return c.vrDual >= 0 ? c.vrDual != 0 : d(); };
+        r.push_back({"Dual Pistols (VR)", [now]() { return onOff(now()); }, [&c, save, now]() { c.vrDual = now() ? 0 : 1; save(); },
+                     "A gun in each hand, each with its own magazine and reload (a second row of bullets above the first). VR only"});
+        listed(r, {"Off", "On"});
+        experimental(r);   // (user 2026-11-10: "label vr experimental")
+    }
+    // vrsight (user 2026-11-10: "allow the ability to turn off crosshair and laser"): the same way, VR runs only;
+    // not set yet (-1): vr.ini laser / crosshair are the defaults shown (launcher.ini vrlaser= / vrcrosshair=)
+    if (h.vrLaserDefault) {
+        auto now = [&c, d = h.vrLaserDefault]() { return c.vrLaser >= 0 ? c.vrLaser != 0 : d(); };
+        r.push_back({"Laser (VR)", [now]() { return onOff(now()); }, [&c, save, now]() { c.vrLaser = now() ? 0 : 1; save(); },
+                     "The faint laser from the gun's muzzle to where it aims (every gun). VR only"});
+        listed(r, {"Off", "On"});
+        experimental(r);   // (user 2026-11-10: "label vr experimental")
+    }
+    if (h.vrCrosshairDefault) {
+        auto now = [&c, d = h.vrCrosshairDefault]() { return c.vrCrosshair >= 0 ? c.vrCrosshair != 0 : d(); };
+        r.push_back({"Crosshair (VR)", [now]() { return onOff(now()); }, [&c, save, now]() { c.vrCrosshair = now() ? 0 : 1; save(); },
+                     "The crosshair where the gun aims (every gun); off, the aim still works. VR only"});
+        listed(r, {"Off", "On"});
+        experimental(r);   // (user 2026-11-10: "label vr experimental")
+        // questfb (user 2026-11-10: "add hands on the menu by default but allow people to turn them off"): on unless set
+        auto hands = [&c]() { return c.vrMenuHands != 0; };
+        r.push_back({"Hands in Menus (VR)", [hands]() { return onOff(hands()); }, [&c, save, hands]() { c.vrMenuHands = hands() ? 0 : 1; save(); },
+                     "Your hands and gun in front of the menus' big screen. VR only"});
+        listed(r, {"Off", "On"});
+        experimental(r);
+    }
+    // vrcomfort (user 2026-11-10, a player's wish: "a window at a certain distance to prevent motion sickness or an
+    // immersive mode", each player's own): vr.ini's comfort settings in game (the Quest's vr.ini is hard to reach).
+    // Not set (-1): vr.ini's value shown; a click sets it here (launcher.ini vrview= ...: launcher.h LaunchConfig)
+    if (h.vrComfortDefault) {
+        const auto d = h.vrComfortDefault;
+        auto view = [&c, d]() { return c.vrView >= 0 ? c.vrView : d(0); };
+        r.push_back({"View (VR)", [view]() { return std::string(view() ? "Screen" : "Immersive"); },
+                     [&c, save, view]() { c.vrView = view() ? 0 : 1; save(); },
+                     "Immersive: the world all around you. Screen: the game on a big screen in front of you, for less motion sickness. VR only"});
+        listed(r, {"Immersive", "Screen"});
+        experimental(r);
+        static const int kDist[4] = {2, 3, 4, 6};   // (metres)
+        auto distCm = [&c, d]() { return c.vrScreenDist > 0 ? c.vrScreenDist * 100 : d(3); };
+        auto distStep = [distCm]() {
+            for (int i = 0; i < 4; ++i)
+                if (kDist[i] * 100 == distCm()) return i;
+            return -1;
+        };
+        auto setDist = [&c, save](int k) { c.vrScreenDist = kDist[std::clamp(k, 0, 3)]; save(); };
+        r.push_back({"Screen Distance (VR)",
+                     [distCm]() {
+                         char b[24];
+                         std::snprintf(b, sizeof b, "%g m", double(distCm()) / 100.0);
+                         return std::string(b);
+                     },
+                     [distCm, setDist]() {   // (the next step up from the value now; after the last: the first)
+                         int k = 0;
+                         while (k < 4 && kDist[k] * 100 <= distCm()) ++k;
+                         setDist(k % 4);
+                     },
+                     "How far away the big screen is (Screen view, cut-scenes on the screen, the menus). VR only"});
+        indexed(r, namesOf(4, [](int i) { return std::to_string(kDist[i]) + " m"; }), distStep, setDist);
+        experimental(r);
+        static const char* const kSize[3] = {"Small", "Medium", "Large"};
+        auto size = [&c, d]() { return c.vrScreenSize >= 0 ? c.vrScreenSize : d(4); };
+        auto setSize = [&c, save](int k) { c.vrScreenSize = std::clamp(k, 0, 2); save(); };
+        r.push_back({"Screen Size (VR)", [size]() { return std::string(size() >= 0 ? kSize[size()] : "Custom"); },
+                     [size, setSize]() { setSize((size() + 1) % 3); },
+                     "How big the big screen looks (Screen view, cut-scenes on the screen, the menus). VR only"});
+        indexed(r, {"Small", "Medium", "Large"}, size, setSize);
+        experimental(r);
+        auto cuts = [&c, d]() { return c.vrCutscenes >= 0 ? c.vrCutscenes : d(1); };
+        r.push_back({"Cut-scenes (VR)", [cuts]() { return std::string(cuts() ? "Screen" : "World"); },
+                     [&c, save, cuts]() { c.vrCutscenes = cuts() ? 0 : 1; save(); },
+                     "World: the cut-scenes play all around you. Screen: on a big screen in front of you. VR only"});
+        listed(r, {"World", "Screen"});
+        experimental(r);
+        auto vig = [&c, d]() { return c.vrVignette >= 0 ? c.vrVignette != 0 : d(2) != 0; };
+        r.push_back({"Comfort Vignette (VR)", [vig]() { return onOff(vig()); }, [&c, save, vig]() { c.vrVignette = vig() ? 0 : 1; save(); },
+                     "Darkens the edges of the view while the camera turns fast, for less motion sickness. VR only"});
+        listed(r, {"Off", "On"});
+        experimental(r);
+    }
+}
+
 std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, const MenuHooks& h)
 {
     const auto save = [h]() { if (h.save) h.save(); };
     std::vector<X> r;
+    if (menuQuest && category == kCatControls) {   // questui: the Touch controllers' rows only (menu_pages.h menuQuest)
+        vrRows(r, c, h);
+        resetRow(r, h, category);
+        return r;
+    }
     switch (category) {
     case kCatVideo:
         r.push_back({"Models", [&c]() { return std::string(c.models == 1 ? "PC" : "Arcade"); },
@@ -365,6 +514,10 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      [h]() { if (h.resolutionPage) h.resolutionPage(); },
                      "Windowed: the window's size; Fullscreen: the display mode (Auto: the desktop's)"});
         r.back().off = [h]() {
+            // deckfs (GitHub #74): under gamescope (Steam Deck Game Mode) the screen is gamescope's: it scales the
+            // window to fit, so Borderless and Fullscreen show the same picture and no display mode is ours to pick
+            if (util::underGamescope() && h.displayModeNow && h.displayModeNow() != 0)
+                return std::string("Steam Deck Game Mode (gamescope) scales the game to the screen: Borderless and Fullscreen look the same");
             return h.displayModeNow && h.displayModeNow() == 1 ? std::string("Borderless uses the desktop's resolution (Display Mode: Windowed or Fullscreen to pick one)")
                                                                : std::string();
         };
@@ -577,6 +730,11 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // spanish: the reload voice off, as the Spanish release (a light-gun / accessibility choice), any language
         r.push_back({"Reload Voice", [&c]() { return onOff(c.reloadVoice); }, [&c, save]() { c.reloadVoice = !c.reloadVoice; save(); },
                      "Off: no \"Reload!\" voice when you fire an empty gun (as the Spanish PC release); the RELOAD sign stays"});
+        // sound2 (user 2026-11-09: players compare): the arcade sound chip's accuracy fixes on (Accurate) or MAME's own
+        r.push_back({"Sound Chip", [&c]() { return std::string(c.soundChip == 1 ? "MAME" : "Accurate"); },
+                     [&c, save]() { c.soundChip = c.soundChip == 1 ? 0 : 1; save(); },
+                     "The arcade sound chip (with Arcade sound): Accurate (timing, FM and envelopes closer to the real board) or MAME (as before). Tell us which sounds right"});
+        listed(r, {"Accurate", "MAME"});
         // (uxpolish: the volumes named as on Options, each beside its switch; the music's rows grey while it is off)
         r.push_back({"Sound Effects Volume", [&c]() { return std::to_string(c.sfxVolume) + "%"; },
                      [&c, save]() { c.sfxVolume = c.sfxVolume >= 100 ? 0 : c.sfxVolume / 5 * 5 + 5; save(); },
@@ -691,13 +849,13 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                          return std::string(k[std::clamp(c.blood, 0, 5)]);
                      },
                      [&c, save]() { c.blood = (c.blood + 1) % 6; save(); },
-                     "The blood's colour; Custom (Experimental): your own colour, the bars below"});
+                     "The blood's color; Custom (Experimental): your own color, the bars below"});
         listed(r, {"Red", "Green", "Blue", "Purple", "Yellow", "Custom"});
         previewed(r, h, "blood");
         experimental(r, [&c]() { return c.blood == 5; });
         // spanish2: the Spanish PC copy as the only PC game: its CD has red and green blood only
         if (c.models == 1 && isSpanishRelease(c.pc)) {
-            const char* note = "Your PC game is the Spanish CD: it has red and green blood only (Blue / Purple / Yellow show red); add your US / EU PC copy for every colour.";
+            const char* note = "Your PC game is the Spanish CD: it has red and green blood only (Blue / Purple / Yellow show red); add your US / EU PC copy for every color.";
             r.push_back({note, nullptr, nullptr, note});
             r.back().off = [note]() { return std::string(note); };
         }
@@ -711,7 +869,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                                   c.bloodRgb = (c.bloodRgb & ~(255 << shift)) | (v << shift);
                                   save();
                               },
-                              "The custom blood colour's amount of this colour (0-255): drag the bar"});
+                              "The custom blood color's amount of this color (0-255): drag the bar"});
                 rr.back().clickBack = [&c, save, shift]() {
                     const int v = std::max(0, (((c.bloodRgb >> shift) & 255) + 15) / 16 * 16 - 16);
                     c.bloodRgb = (c.bloodRgb & ~(255 << shift)) | (v << shift);
@@ -728,18 +886,18 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
             channel(r, "Custom Red", 16);
             channel(r, "Custom Green", 8);
             channel(r, "Custom Blue", 0);
-            r.push_back({"Custom Colour", [&c]() {
+            r.push_back({"Custom Color", [&c]() {
                              char b[16];
                              std::snprintf(b, sizeof b, "#%06X", unsigned(c.bloodRgb & 0xFFFFFF));
                              return std::string(b);
                          },
                          [&c, save]() { c.blood = 5; save(); },
-                         "Your blood colour (Experimental), from the bars above; the arcade models' own textures keep theirs for now"});
+                         "Your blood color (Experimental), from the bars above; the arcade models' own textures keep theirs for now"});
             r.back().swatch = [&c]() { return uint32_t(c.bloodRgb & 0xFFFFFF); };
             r.back().off = [&c]() { return c.blood == 5 ? std::string() : std::string("Choose Blood Color: Custom first"); };
             // (the note the player should see without hovering: a grey line of its own)
-            r.push_back({"Arcade textures keep their colour for now", nullptr, nullptr,
-                         "The custom blood colour does not change the arcade models' own textures yet"});
+            r.push_back({"Arcade textures keep their color for now", nullptr, nullptr,
+                         "The custom blood color does not change the arcade models' own textures yet"});
         }
         // GitHub #30 (user 2026-11-03): the lives a player starts with and the most a life up / a chapter's bonus brings,
         // two settings (game/lives.h; the arcade's operator menu sets them as one of 12 pairs; the default 3 up to 5)
@@ -774,11 +932,29 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         r.push_back({"Edge Reload", [&c]() { return onOff(c.edgeReload); }, [&c, save]() { c.edgeReload = !c.edgeReload; save(); },
                      "As The House of the Dead 2: moving the mouse crosshair onto the screen's edge reloads, no shot needed"});
         // (Light Gun Edition: its game modes: the Killer Mods tab, kCatKiller)
+        if (!menuQuest)   // (questui: the Quest's are on Controls)
+            vrRows(r, c, h);
         // skipfix (user 2026-10-27): the hold-to-skip of the cut-scenes the arcade cannot skip (main.cpp)
         // feat29 (user 2026-10-29: "Add Free Play in the settings"): the Cheat screen's Free-Play (THOTD.EXE 0xD5B35C,
         // launcher.ini freeplay=): PC Mode's continues never run out. Arcade games are free play already (no coins)
         r.push_back({"Free Play", [&c]() { return onOff(c.freePlay); }, [&c, save]() { c.freePlay = !c.freePlay; save(); },
                      "On: PC Mode's continues never run out (as the 1998 PC's Cheat screen). Arcade games are always free play"});
+        // smallfix (user 2026-11-09): the cheats (game::cheats(): this run only, Off at every start, not in launcher.ini;
+        // never online: grey while this PC hosts / joins, off in every online game; a game with one on: no high scores)
+        {
+            auto offline = []() {   // (user 2026-11-09: also greyed in a game's pause Settings)
+                return cheats().online ? std::string("Cheats are never used online")
+                       : cheats().inGame ? std::string("Change cheats from the main menu, before a game") : std::string();
+            };
+            r.push_back({"Invincibility", []() { return onOff(cheats().invincible); },
+                         []() { if (!cheats().online && !cheats().inGame) cheats().invincible = !cheats().invincible; },
+                         "Cheat: no hit takes a life. Off at every start, never online, no high scores while on"});
+            r.back().off = offline;
+            r.push_back({"Infinite Ammo", []() { return onOff(cheats().infiniteAmmo); },
+                         []() { if (!cheats().online && !cheats().inGame) cheats().infiniteAmmo = !cheats().infiniteAmmo; },
+                         "Cheat: the gun never runs out, every weapon. Off at every start, never online, no high scores while on"});
+            r.back().off = offline;
+        }
         r.push_back({"Hold to Skip Cut-scenes", [&c]() { return onOff(c.holdSkip); }, [&c, save]() { c.holdSkip = !c.holdSkip; save(); },
                      "Hold the trigger 2 s to skip a cut-scene the arcade cannot skip (black bars up): a red ring fills. Offline"});
         r.push_back({"Attract Gore", [&c]() { return onOff(c.attractGore); },
@@ -792,6 +968,35 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      [&c, save]() { c.bossCodenames = !c.bossCodenames; save(); },
                      "Codenames Only: the boss cards show only the codename (TYPE 27), not the name, as the Spanish PC release"});
         listed(r, {"Full", "Codenames Only"});
+        // subs (user 2026-11-09, after Tenome's Typing of the Dead EX: players' own subtitle files): the cut-scene
+        // captions Off / Original / Custom (docs/subtitles.md: subtitles\<language>.txt) and their size
+        r.push_back({"Subtitles", [&c]() { return std::string(subs::modeName(c.subtitles)); },
+                     [&c, save]() { c.subtitles = (c.subtitles + 1) % 3; subs::configure(c.subtitles, c.subtitleSize); save(); },
+                     "The cut-scene captions. Custom: your subtitle file's text, timing, size and place (docs/subtitles.md)"});
+        indexed(r, {"Off", "Original", "Custom"}, [&c]() { return c.subtitles; },
+                [&c, save](int k) { c.subtitles = k; subs::configure(c.subtitles, c.subtitleSize); save(); });
+        r.back().clickBack = [&c, save]() { c.subtitles = (c.subtitles + 2) % 3; subs::configure(c.subtitles, c.subtitleSize); save(); };
+        {
+            auto stepOf = [&c]() {
+                const std::vector<int>& s = subs::sizeSteps();
+                for (size_t i = 0; i < s.size(); ++i)
+                    if (s[i] == c.subtitleSize) return int(i);
+                return -1;
+            };
+            auto setStep = [&c, save](int k) {
+                const std::vector<int>& s = subs::sizeSteps();
+                c.subtitleSize = s[size_t((k % int(s.size()) + int(s.size())) % int(s.size()))];
+                subs::configure(c.subtitles, c.subtitleSize);
+                save();
+            };
+            const int n = int(subs::sizeSteps().size());
+            r.push_back({"Subtitle Size", [&c]() { return std::to_string(c.subtitleSize) + "%"; },
+                         [stepOf, setStep]() { setStep(stepOf() + 1); },
+                         "The captions' size. 100%: the game's own; another: the captions in a clear font at that size"});
+            indexed(r, namesOf(n, [](int i) { return std::to_string(subs::sizeSteps()[size_t(i)]) + "%"; }), stepOf, setStep);
+            r.back().clickBack = [stepOf, setStep]() { setStep(std::max(stepOf(), 0) - 1); };
+            r.back().off = [&c]() { return c.subtitles == 0 ? std::string("Subtitles are Off") : std::string(); };
+        }
         // charsel (user 2026-11-06): the character picks before an Arcade / Chapter Select game (looks only)
         r.push_back({"Character Select", [&c]() { return onOff(c.charSelect); }, [&c, save]() { c.charSelect = !c.charSelect; save(); },
                      "Before an Arcade or Chapter Select game each player picks a character (looks only: the arcade's rules)"});
@@ -810,6 +1015,11 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         // logo, then the title art) before the menu
         r.push_back({"PC Start-up Screens", [&c]() { return onOff(c.pcSplash); }, [&c, save]() { c.pcSplash = !c.pcSplash; save(); },
                      "The 1998 PC's SEGA screen and zombie title art when the game starts (a key or click skips them)"});
+        // totdex (user 2026-11-09, after Tenome's Typing of the Dead EX): The Typing of the Dead 0's own page (its
+        // live WPM line, the typing statistics)
+        if (h.totdPage)
+            r.push_back({"Typing of the Dead 0", []() { return page("Open"); }, [h]() { h.totdPage(); },
+                         "The Typing of the Dead 0: the live WPM / accuracy line and your typing statistics"});
         // advopt (2026-10-21): the rarely changed rows on their own page (the tab strip has no room for a 7th tab)
         r.push_back({"Advanced", []() { return page("Open"); }, [h]() { if (h.advancedPage) h.advancedPage(); },
                      "Rarely changed settings: Game Speed, Music Numbering, Teammate Flashes, 4P Boss Hit Points, Guards"});
@@ -909,6 +1119,8 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
     }
     if (category != kCatMods && category != kCatSystem)
         resetRow(r, h, category);   // (menufb: Reset to Defaults, asked first)
+    if (category != kCatMods)
+        questRows(r);   // (questui: the rows the Quest leaves out)
     return r;
 }
 
@@ -947,7 +1159,7 @@ std::vector<X> menuModRows(LaunchConfig& c, const std::vector<ModPack>& mods, st
     auto title = [](const ModPack& p) { return p.name.size() > 22 ? util::utf8Head(p.name, 21) + "." : p.name; };
     // the help line: the mod's description (a key of its own: the built-in mods' can be translated)
     auto about = [](const ModPack& p) {
-        return !p.description.empty() ? p.description : p.type == "textures" ? std::string("A texture pack") : p.name;
+        return !p.description.empty() ? p.description : p.type == "textures" ? std::string(modelPackOnly(p) ? "A model pack" : "A texture pack") : p.name;
     };
     std::vector<X> r;
     // leftovers (user 2026-10-26: "clicking ragdoll mod also turns on example: green blood"): each row finds its mod by
@@ -1002,7 +1214,7 @@ std::vector<X> menuModRows(LaunchConfig& c, const std::vector<ModPack>& mods, st
         // leftovers (user: "the mod settings need a better experience"): who made it and its version under its name
         // (grey: no action; its help line: the mod's description)
         if (!mp.author.empty() || !mp.version.empty()) {
-            const std::string by = std::string(mp.type == "textures" ? "  Texture pack" : "  Built-in mod") +
+            const std::string by = std::string(mp.type == "textures" ? (modelPackOnly(mp) ? "  Model pack" : "  Texture pack") : "  Built-in mod") +
                                    (mp.author.empty() ? std::string() : ", by " + (mp.author.size() > 18 ? util::utf8Head(mp.author, 17) + "." : mp.author));
             r.push_back({by, [v = mp.version]() { return v.empty() ? std::string() : "v" + v; }, nullptr, about(mp)});
             r.back().raw = true;
@@ -1081,6 +1293,8 @@ int modsPageTest()
     expect("HD Pack clicked (off)", true, true, false);
     // depthopt: mod.ini depth = switches the mod's items (assets/mods.h modDepthTest: 5 checks)
     checks += 5, failed += modDepthTest();
+    // modelpacks: [model] sections, OBJ / glTF / GLB, game:<id>, malformed files (assets/mods.h modelPackTest)
+    failed += modelPackTest(checks);
     std::printf("mods test: %d checks, %d failed\n", checks, failed);
     return failed;
 }
@@ -1215,9 +1429,9 @@ std::vector<Frontend::Extra> menuRangeRows(LaunchConfig& c, const MenuHooks& h, 
             return art(s, seatArt, wh, out);
         };
     }
-    r.push_back({"Colour", [S]() { return std::string(kSightColourNames[std::clamp(S().colour, 0, kSightColours - 1)]); },
+    r.push_back({"Color", [S]() { return std::string(kSightColourNames[std::clamp(S().colour, 0, kSightColours - 1)]); },
                  [S, save]() { S().colour = (S().colour + 1) % kSightColours; save(); },
-                 "The crosshair's colour: the player's own (P1 red, P2 blue, P3 green, P4 yellow) or another"});
+                 "The crosshair's color: the player's own (P1 red, P2 blue, P3 green, P4 yellow) or another"});
     r.back().clickBack = [S, save]() { S().colour = (S().colour + kSightColours - 1) % kSightColours; save(); };
     indexed(r, namesOf(kSightColours, [](int i) { return std::string(kSightColourNames[i]); }), [S]() { return S().colour; },
             [S, save](int k) { S().colour = k; save(); });
@@ -1249,7 +1463,7 @@ std::vector<Frontend::Extra> menuRangeRows(LaunchConfig& c, const MenuHooks& h, 
                      for (int k = 0; k < 4; ++k) c.sights[k] = c.sights[std::clamp(*sp, 0, 3)];
                      save();
                  },
-                 "Give every player this player's crosshair (their own colours stay unless a colour is chosen)"});
+                 "Give every player this player's crosshair (their own colors stay unless a color is chosen)"});
     resetRow(r, h, kResetRange);
     return r;
 }
@@ -1364,6 +1578,7 @@ std::vector<Frontend::Extra> menuAdvancedRows(LaunchConfig& c, const MenuHooks& 
     r.push_back({"Guards (Teaser Cuts)", [&c]() { return onOff(c.cuts); }, [&c, save]() { c.cuts = !c.cuts; save(); },
                  "On (best): the game never waits on a part not ported yet; Off: the original's waits (it may stop there)"});
     resetRow(r, h, kResetAdvanced);
+    questRows(r);   // (questui)
     return r;
 }
 

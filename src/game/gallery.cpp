@@ -200,7 +200,7 @@ const std::vector<GalleryEntry>& galleryEntries()
         {"t66", "Baba", kGalCut, 66, 0, "MO_z_kamae MO_z_walk", "Never (cut)", "Developer name BO_pbaba. No motions of its own. Untextured",
          "A cut creature; models only. Shown with the plain zombie's stance and walks (a guess).", "", 0, "", true},
         {"t75", "Hiru", kGalCut, 75, 0, "MO_hiru", "Never (cut)", "Developer name BO_hiru_b. Six motions of its own",
-         "A cut leech: a segmented body with its own motions; never spawned. Its colours are a guess."},
+         "A cut leech: a segmented body with its own motions; never spawned. Its colors are a guess."},
         {"head", "The Hermit's second head", kGalCut, -1, 2, "", "Never (cut)", "Model boss31_kao (0x1AC6), in no skeleton",
          "A second head for the Hermit next to the one the game uses; maybe a fly-eyed head (a guess).", "1AC6", 11,
          "5:53 9:81 11:11 17:98 19:83 21:23 23:17 29:23"},

@@ -250,13 +250,30 @@ template <class P> void Game<P>::weapon_blast_at(int seat, const float at[3], fl
     if constexpr (P::pc) {
         (void)seat, (void)at, (void)radius, (void)pct;
     } else {
-        weaponBlast = WeaponBlast{};
+        // a free slot (never used, or older than the one frame its hits take); all taken: the oldest
+        WeaponBlast* slot = nullptr;
+        for (WeaponBlast& w : weaponBlast)
+            if (w.seat < 0 || weaponFrame > w.frame + 1) {
+                slot = &w;
+                break;
+            }
+        if (slot == nullptr) {
+            slot = &weaponBlast[0];
+            for (WeaponBlast& w : weaponBlast)
+                if (w.frame < slot->frame)
+                    slot = &w;
+        }
+        *slot = WeaponBlast{};
         ++blastsN;
-        std::copy(at, at + 3, weaponBlast.at);
-        weaponBlast.radius = radius;
-        weaponBlast.seat = seat;
-        weaponBlast.pct = pct;
-        weaponBlast.frame = weaponFrame;
+        std::copy(at, at + 3, slot->at);
+        slot->radius = radius;
+        slot->seat = seat;
+        slot->pct = pct;
+        slot->frame = weaponFrame;
+        static const bool blastLog = std::getenv("HOTD_BLAST_LOG") != nullptr;
+        if (blastLog)
+            std::printf("blast slot %d: seat %d frame %llu at %.0f %.0f %.0f radius %.0f %d %%\n", int(slot - weaponBlast), seat,
+                        (unsigned long long)weaponFrame, at[0], at[1], at[2], radius, pct);
         const float ring[5][2] = {{0, 0}, {1, 0.4f}, {-1, 0.3f}, {0.3f, 1}, {-0.4f, -0.8f}};
         for (int k = 0; k < 5; ++k) {
             const float s = radius * 0.45f;
@@ -307,6 +324,9 @@ template <class P> void Game<P>::weapon_bolts_update()
                 cam[i] = d;
             }
             weapon_blast_at(bt.seat, cam, bt.radius, bt.pct);
+            static const bool blastDouble = std::getenv("HOTD_BLAST_DOUBLE") != nullptr;   // (test: a second at once, the same place)
+            if (blastDouble)
+                weapon_blast_at(bt.seat, cam, bt.radius, bt.pct);
             blastsWorld += bt.what == 2 ? 1 : 0;
             // testing: HOTD_BLAST_TRACE=1: each explosion and the shootable objects near it (camera space)
             static const bool trace = std::getenv("HOTD_BLAST_TRACE") != nullptr;
@@ -319,7 +339,8 @@ template <class P> void Game<P>::weapon_bolts_update()
                     const float dx = ob.view_pos[0] - cam[0], dy = ob.view_pos[1] - cam[1], dz = ob.view_pos[2] - cam[2];
                     const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
                     if (d < bt.radius * 2.0f)
-                        std::printf("   near: obj %X (%s) d %.0f\n", mem.at<DepthEntry>(G::depth_list, i).obj.a, ob.part_root ? "creature" : "item", d);
+                        std::printf("   near: obj %X (%s) d %.0f routine %X flags %X\n", mem.at<DepthEntry>(G::depth_list, i).obj.a,
+                                    ob.part_root ? "creature" : "item", d, uint32_t(ob.routine), uint32_t(ob.flags));
                 }
             }
             // survfix3 (user 2026-11-05: "also hits breakable items / crates as a shot there would"): the item the bolt
@@ -450,16 +471,46 @@ template <class P> void Game<P>::weapon_blast_items(int seat, const float at[3],
 // nearest the point gets the seat's hit bit, as a shot's (shot_hit_nearest)
 template <class P> void Game<P>::weapon_blast_hit(uint32_t obj)
 {
-    WeaponBlast& b = weaponBlast;
     blastObj = 0;
+    std::fill(blastPct, blastPct + 4, 0);
+    int n = 0;
+    for (WeaponBlast& b : weaponBlast)
+        n += weapon_blast_hit_one(b, obj) ? 1 : 0;
+    if (n >= 2) {   // (tests: every one of the explosions of this frame did its hit)
+        ++blastsDouble;
+        if (std::getenv("HOTD_BLAST_LOG"))
+            std::printf("blast double: obj %X took %d explosions at once (%d %% / %d %% / %d %% / %d %% by seat)\n", obj, n, blastPct[0], blastPct[1],
+                        blastPct[2], blastPct[3]);
+    }
+}
+
+// hordepub: a boss's explosions (its own hit test reads the marks: magician_hit's body_hit_part_find, the Chariot's
+// chariot_part_damage_walk); blastObj / blastPct are not used (the boss's damage is its own, not part_hit's tallies)
+template <class P> void Game<P>::weapon_blast_boss(uint32_t obj, const uint32_t* ids, int nIds)
+{
+    if constexpr (P::pc) {
+        (void)obj, (void)ids, (void)nIds;
+    } else {
+        static const uint32_t kAny = 0;
+        for (WeaponBlast& b : weaponBlast)
+            if (weapon_blast_hit_one(b, obj, ids ? ids : &kAny, ids ? nIds : 0) && (std::getenv("HOTD_BLAST_TRACE") || std::getenv("HOTD_BLAST_LOG")))
+                std::printf("   blast hit: a boss, obj %X (hit points %d)\n", obj, int(mem.at<int16_t>(obj + 0x70)));
+        blastObj = 0;
+        std::fill(blastPct, blastPct + 4, 0);
+    }
+}
+
+// (true: it hit the creature)
+template <class P> bool Game<P>::weapon_blast_hit_one(WeaponBlast& b, uint32_t obj, const uint32_t* ids, int nIds)
+{
     if (b.seat < 0 || b.radius <= 0.0f || weaponFrame > b.frame + 1 || b.doneN >= 32)
-        return;
+        return false;
     for (int i = 0; i < b.doneN; ++i)
         if (b.done[i] == obj)
-            return;
+            return false;
     Obj& o = mem.at<Obj>(obj);
     if (o.part_root == 0)
-        return;
+        return false;
     uint32_t best = 0;
     float bestD = b.radius;
     const std::function<void(uint32_t, int)> walk = [&](uint32_t pa, int depth) {
@@ -473,7 +524,14 @@ template <class P> void Game<P>::weapon_blast_hit(uint32_t obj)
                                           uint32_t(part.role) * sizeof(PartRole) + 3);
         // .. and not the root (depth 0: enemy_part_hits runs part_hit on the root's children only, so a burst marking
         // the root did nothing: a creature right in front of the camera, its root nearest, never died)
-        if (depth > 0 && part.part_id != 0 && part.hit_radius > 0.0f && cls != 16 && cls != 17) {
+        // (hordepub, a boss: only the parts its own hit test damages, by their role: body_hit_part_find's +0x38)
+        bool fits = cls != 16 && cls != 17;
+        if (ids != nullptr) {
+            fits = nIds == 0;
+            for (int i = 0; i < nIds; ++i)
+                fits = fits || uint32_t(part.role) == ids[i];
+        }
+        if (depth > 0 && part.part_id != 0 && part.hit_radius > 0.0f && fits) {
             const float dx = part.view_pos[0] - b.at[0], dy = part.view_pos[1] - b.at[1], dz = part.view_pos[2] - b.at[2];
             const float d = std::sqrt(dx * dx + dy * dy + dz * dz) - part.hit_radius;
             if (d < bestD)
@@ -484,15 +542,17 @@ template <class P> void Game<P>::weapon_blast_hit(uint32_t obj)
     };
     walk(uint32_t(o.part_root), 0);
     if (best == 0)
-        return;
+        return false;
     // survfix3: the damage falls off with the distance from the burst to the part's sphere: the full percent within
     // 30 % of the radius (a hit on the creature, the ground at its feet), down to 40 % at the radius
     const float r0 = b.radius * 0.3f;
     const float f = bestD <= r0 ? 1.0f : 1.0f - 0.6f * std::min(1.0f, (bestD - r0) / (b.radius - r0));
     blastObj = obj;
-    blastPct = std::max(1, int(float(b.pct) * f + 0.5f));
-    if (std::getenv("HOTD_BLAST_TRACE"))
-        std::printf("   blast hit: obj %X, %.0f units from its part, %d %% (life %d)\n", obj, bestD, blastPct, int(o.param));
+    const int pctHit = std::max(1, int(float(b.pct) * f + 0.5f));
+    blastPct[b.seat & 3] += pctHit;
+    static const bool blastLog = std::getenv("HOTD_BLAST_LOG") != nullptr;
+    if (std::getenv("HOTD_BLAST_TRACE") || blastLog)
+        std::printf("   blast hit: seat %d obj %X, %.0f units from its part, %d %% (life %d)\n", b.seat, obj, bestD, pctHit, int(o.param));
     b.done[b.doneN++] = obj;
     ++blastHits;
     blastsHit += b.doneN == 1 ? 1 : 0;
@@ -505,6 +565,7 @@ template <class P> void Game<P>::weapon_blast_hit(uint32_t obj)
         coop4_hit_add(best, b.seat);
         coop4_hit_add(obj, b.seat);
     }
+    return true;
 }
 
 // weapons: each seat's damage in percent of the game's own (part_hit's tallies and the frame's hit_damage), after
@@ -517,7 +578,7 @@ template <class P> void Game<P>::weapon_damage()
         const uint32_t a = coop4_on() ? part_tally_at(s) : G::part_tally + uint32_t(s) * 2;
         const int32_t v = mem.at<int16_t>(a);
         // (survfix3: the explosion's hit its own percent: the shot's when fired, with the fall-off; blastObj is this body)
-        const int pct = blastObj != 0 && blastObj == mem.u32(G::body_current) && s == weaponBlast.seat ? blastPct : weaponShot[s].damage;
+        const int pct = blastObj != 0 && blastObj == mem.u32(G::body_current) && blastPct[s & 3] > 0 ? blastPct[s & 3] : weaponShot[s].damage;
         if (v <= 0 || pct == 100)
             continue;
         const int32_t nv = std::clamp((v * pct + 50) / 100, 1, 30000);

@@ -78,6 +78,17 @@ struct ModPack {
     int targets = 3;                 // bit 0: PC models, bit 1: arcade models (mod.ini models = pc / arcade / both)
     std::map<std::string, std::string> pngs;   // texture ID (lower case) -> file
     std::map<uint32_t, std::string> objs;      // object ID -> models/<label>_o<hex>.obj (custom models, docs/mods.md)
+    // modelpacks (2026-11-09, docs/modding.md "Model packs"): mod.ini [model] sections, one game model drawn as another
+    // mesh each; they come before the objs above (which act as entries without a transform). Draw only
+    struct ModelRepl {
+        uint32_t id = 0;                       // the model (object ID) replaced
+        std::string file;                      // an OBJ / glTF / GLB in the mod's folder (absolute); empty: gameId
+        uint32_t gameId = 0;                   // file = game:<hex>: another model of the same stage (the player's own files)
+        float scale[3] = {1, 1, 1}, offset[3] = {0, 0, 0}, rotation[3] = {0, 0, 0};   // scale, then rotate (degrees x, y, z), then move
+        int targets = 3;                       // models = pc / arcade / both (bit 0 PC, bit 1 arcade; within the pack's own)
+        int line = 0;                          // the [model] section's line in mod.ini (messages)
+    };
+    std::vector<ModelRepl> modelRepls;
     struct Rule { std::string pattern; Recolour op; };
     std::vector<Rule> rules;         // [recolour] <pattern> = <op>, pattern on "<label>_<id>" (* and ? wildcards)
     int bloodRgb = -1;               // [recolour] blood = #RRGGBB: the blood colour (the Blood Color option's custom path)
@@ -117,6 +128,9 @@ int modDepthFor(const ModPack& p, bool model);
 // depthopt (hotd --mods-test): a mod's depth = switches the items it draws (a custom model on a small stage). Returns
 // the failures
 int modDepthTest();
+// modelpacks (hotd --mods-test): [model] parsing, OBJ / glTF / GLB loading on a small stage, the transform, game:<id>,
+// and malformed files / lines failing cleanly (no model, a message, no crash). Returns the failures; adds its checks
+int modelPackTest(int& checks);
 // a [settings] line's value (<label> | <default> | <choices> | <help>); false: not that form
 bool parseModSetting(const std::string& key, const std::string& value, ModSetting& out);
 

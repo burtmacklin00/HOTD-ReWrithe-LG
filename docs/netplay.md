@@ -9,7 +9,7 @@ code, P<n> PAUSED, host-only cut-scene skip, late sounds after a rollback (proto
 4P Enemy Toughness in the settings for every PC (protocol 14, misc16: `boss4p` / `enemy4p` bytes after `gameText`);
 2026-10-27 one or two seats per PC among up to four PCs (protocol 15, "One or two seats per PC"), PC Mode online
 (protocol 16), a joiner's own PC Mode character in a running game (protocol 17, "PC Mode online, part 2"), Boss Mode
-online (protocol 18, "Boss Mode online").
+online (protocol 18, "Boss Mode online"); 2026-11-09 Survival online (protocol 22, "Survival online").
 
 ## Playing online
 
@@ -213,6 +213,66 @@ The old long share code `HOTD-XXXXXXXXXXXX-PASSWORD` (the address and port in Cr
 the password) stays for what the join code cannot hold: a custom password (`--code`, not 8 Crockford symbols) or a
 port outside 47800-47803. `makeShareCode` gives the join code when it fits, else the long form; `parseShareCode` (and
 `--join`) take both.
+
+## Hole punching (2026-11-10, worker "natpunch"; no protocol change)
+
+Online without port forwarding, still with no server of ours (`src/net/natpunch.*`, written from RFC 5389; no STUN /
+ICE library's code). Three parts, all on the session's own UDP socket (Options::raw: every datagram the socket's owner
+receives goes to NatTraversal::onPacket first; Session::sendPlain sends outside the protocol), so the NAT mapping
+learned is the one the other PCs use:
+
+1. **STUN** (RFC 5389 Binding Request / success response, XOR-MAPPED-ADDRESS, MAPPED-ADDRESS as the fallback; IPv4).
+   The servers (`NetArgs::stun`: `--stun a,b,...`, launcher.ini `stunservers=`, default `net::kDefaultStun` =
+   stun.l.google.com:19302, stun.cloudflare.com:3478, stun1.l.google.com:19302; `off` / `netstun=0` / the Online
+   page's **Address Lookup** Off = no STUN, as before) are resolved on a thread (up to four), each asked up to 6 times
+   500 ms apart; done after two answers (or one answer + 1 s, or 3.5 s). Two servers seeing two different mapped
+   ports = a symmetric NAT (`NatTraversal::symmetric`): the waiting rooms warn "Your network may block direct
+   connections". Who asks: a host bound to all interfaces; a joiner whose host address is on the internet (not
+   `isPrivateIp`). A loopback test without `--stun-mock` asks nothing.
+2. **The join code carries it**: `NetGame::shareCode` uses the STUN-mapped address and port when UPnP gave no
+   external address (the 16-symbol join code when the mapped port is 47800-47803, which most home NATs keep; else the
+   long `HOTD-...` share code, which holds any port). No new host code: old builds read the code as before. The LAN
+   announcement's `publicIp` is the STUN address too, so a joiner on the same network still finds the LAN address.
+3. **Punching**: punch packets are 16 bytes, `"HOTP"`, type (1 hello, 2 answer), a 32-bit id, zero padding; no
+   secret (CPace authenticates the handshake that follows); every hello is answered (same size: no amplification;
+   at most 64 answers a second). A joiner (to an internet host) sends its normal HELLO **and** punch hellos to the
+   host at once (every 150 ms for 10 s): with a full-cone NAT, UPnP or a forwarded port that alone connects. With no
+   answer after 3 s its page shows a **reply code** (`makeReplyCode`: a 2-bit kind, the joiner's STUN address, its LAN
+   address in 10/8, 172.16/12 or 192.168/16 (24 bits + the class) and LAN port = 92 bits + an 8-bit BLAKE2b check =
+   20 Crockford symbols, `XXXXX-XXXXX-XXXXX-XXXXX`; a single-symbol typo passes ~1 in 256). The host pastes it in its
+   waiting room (`NetGame::addReply`): it punches toward both addresses every 150 ms for 10 s; the host's packets open
+   its own NAT for the joiner's, the joiner's HELLOs (every 250 ms) get through, and the normal handshake runs. A punch
+   heard back from another host address than the one tried (`NatTraversal::reached`) re-aims the joiner's HELLO there
+   (`Session::retarget`, before the host's first answer only). A joiner that punches waits up to 90 s (time for the
+   reply code to travel), then: "Couldn't connect: your networks block direct connections (strict / carrier-grade
+   NAT). Try UPnP / port forwarding, or let the other player host."
+
+Up to four PCs: the host's hub socket does the STUN and the punches (a star: every joiner punches to the host).
+**One paste for the squad** (natpunch2, 2026-11-10): `findReplyCodes` finds every valid reply code in a block of text
+(a group chat's copy: a run of 20 letters / digits, or neighbouring runs joined by `-` / spaces / tabs that make 20;
+any case; only codes that pass the check, each once). Paste Reply Code / Ctrl+V hands the whole clipboard (up to
+64 KB) to `NetGame::addReply`, which punches to every code not used yet in this hosting ("3 reply codes found:
+punching..."; a repeat ignored quietly); pasting again adds the new ones. `OnlineMenu::focusGained` (the window's
+SDL_EVENT_WINDOW_FOCUS_GAINED on the host's waiting room, not in automated runs) looks at the clipboard once and acts
+only on valid new reply codes. The Reply Code rows stay while a seat is free. Tested: hotd_unit
+`net.reply_codes_in_a_chat_paste` (a chat with names, times, 3 codes in three spellings, a repeat, a typo'd one, old
+join codes, an address); three instances (the host with `--net-pcs 4 --net-wait 2` + 2 joiners, all behind
+`--net-sim-nat`, one combined chat file read by `--reply-from`, which is re-read twice a second): every PC ended with
+the same hash (the CTest harness runs pairs only, so this one is a script). **No relay**: two symmetric / carrier-grade NATs cannot be punched without a
+relay server, and we host nothing (by the user's choice: no servers). Privacy: the logs say that STUN answered (and
+how many servers), never the address; the codes contain it, and the UI says to share them only with friends. Every
+`[net]` log line goes through `redactLog` (socket.h): a public IPv4 address becomes `public#XXXX` (a hash salted per
+run: two players stay apart in one log), its port kept; LAN / loopback addresses stay readable; a join code holding an
+internet address is not logged. `HOTD_NET_LOG_IPS=1` logs everything (developers).
+
+Tests (no internet): hotd_unit `net` (`stun_messages`: the RFC 5769 section 2.2 sample response; `reply_code`: round
+trips, the LAN classes, typos; `mock_stun_and_punch`: `StunMock` servers on 127.0.0.1, one answering 7 ports off (a
+symmetric NAT detected), two sockets behind `--net-sim-nat`-style restricted NATs: the first one-way punch dropped, both
+connect once both punch). CTest `module.online_punch`: two game instances, the host's mock STUN (`--stun-mock`), both
+behind `--net-sim-nat`; the joiner reads the host's code (`--code-out` / `--join @FILE`), its direct try is dropped,
+it writes its reply code (`--reply-out`), the host reads it (`--reply-from`), punches, and both play 3000 frames with
+the same hashes. `module.online_punch_direct`: no simulated NAT: the direct try connects. Only two real homes can
+test real routers (see "Verified / not verified").
 
 ## UPnP
 
@@ -574,6 +634,41 @@ after merging main 1b61ad63):
 | arcade 2P / 4 PCs / 2P PC Mode vs main's own build (1b61ad63) | 060c037658d73c70 / d39d8480dcd11d00 / 3ceccf47f72e5133: the same |
 | offline Boss Mode vs main's build (each boss, All, 4P All) | the same times and frames (Chariot 00:25:53 at 2725); soak `-Only boss`: 8 runs, 0 failed |
 | `hotd_nettest` (new: Boss Mode settings / roster bytes, refusals, over the wire) | all passed |
+
+## Survival online (protocol 22, 2026-11-09, worker "survnet")
+
+Survival Mode (docs/survival.md) is offered online: two PCs, 4P on two PCs, up to four PCs (2-4 players). The Typing of
+the Dead 0 stays single player (never online); Horde is not online.
+
+- **The host decides**: Host page **Game Mode** Arcade -> PC Mode -> Boss Mode -> **Survival**, and in a dev build
+  **Survival Arena** (a public build: Chapter 1's courtyard only, `survivalArenaCount()`; `OnlineMenu::survivalArenas`);
+  `--survival <arena>` with `--host`. The joiner's waiting room shows "Game Mode: Survival: <arena>" (ROSTER's last
+  byte 0x10 + arena). `HOTD_ONLINE_TEST=host-alone-survival`: the menu host plays the courtyard alone.
+- **Wire**: the settings gain 10 bytes after bossMode: `survival` (0, or the arena + 1; refused with PC Mode / Boss
+  Mode), `survivalSeed` (4), `survivalCap` (1-64), `survivalCut`, `survivalSmgWave`, `survivalWeaponsWave`,
+  `survivalTest` (bit 0 the test buyer, bit 1 the weapon cycle). `netApply` puts them into the joiner's Survival options
+  (saved and put back after the game, `NetSaved`). An input **without its start** carries the Survival extras in the
+  flags' bits 3-7 (where a start carries its character): `Input::kHeld` (bit 3: the trigger held, the automatic
+  weapons) and `kWeapon` (bits 4-7: 0 none, 1 previous, 2 next, 3-8 that weapon, 9 the light gun's auto best, 10 / 11
+  auto best + previous / next); `flagsOk` takes codes 0-11. Only a Survival game sends or reads them
+  (`NetGame::applyInputs` sets `Runtime::gun[s].held`, `weapons.request[s]`, `weapons.autoBest[s]`); the prediction
+  keeps the held bit (an SMG held is not mispredicted every frame). Every other game's inputs, settings meaning and
+  hashes are as before (only the version).
+- **Local writes removed**: the wheel, the number keys and a pad's shoulders wrote `rt.weapons.request` straight from
+  the window's events (this PC only: a desync online); online they go into `gNetWeapon` and the next input.
+- **Snapshot / hash**: `RuntimeState` copies `Runtime::survival` and `Runtime::weapons` whole (and the lead-in's music
+  code); `gameHash` / `bootHash` add `SurvivalMode::digest()` and `Weapons::digest()` (the logic fields, not the texts:
+  the banner is translated per PC; not the music code: only kept with sound, a joiner's catch-up replays silently).
+- **The end**: the game's end (phase Over) is acted on only once settled; then the session ends (`finish`) and each PC
+  files the points in its own survival_scores.txt. `--survival-test N` online: the same rule.
+- Testing: headless `--autofire` in Survival plays autofire()'s Survival rule through the input (`netAutofire`: the
+  signs shot, the reload by hand, the SMG held); `HOTD_NET_SURVIVAL_SWITCH=N` switches weapon every N frames through
+  the input.
+
+Tests: see docs/survival.md "Online co-op" (2 PCs, 4P on two PCs, 4 PCs, with `--net-sim`, mid-game join, rejoin; 0
+desyncs; a control run without the snapshot desyncs at frame 124). Story online unchanged: 2 players 40000 frames
+8543b41a4be0f433 with this build and with main's. `hotd_nettest`: the Survival settings / roster / input extras, the
+refusals, over the wire: all passed.
 
 ## Same game data (protocol 19, 2026-10-27, worker "netdata")
 

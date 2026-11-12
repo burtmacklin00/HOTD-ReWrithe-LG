@@ -22,6 +22,25 @@ extern "C" {
 #include <atomic>
 #include <deque>
 #include <mutex>
+#include <cstring>
+
+// sound2 (GitHub #26): the SCSP's hardware behaviour where MAME differs (cmake/scsp_hw.cmake patches MAME's scsp.cpp):
+// 1 FM precision, 2 EG attack, 4 key-rate scaling, 8 timer reload on the prescaler tick, 16 FM interpolation quirk. All on; HOTD_SCSP_MAME=<bits>
+// (decimal, or "all") turns those fixes off: MAME's behaviour, for A/B tests
+int hotd_scsp_fix = [] {
+    const char* e = std::getenv("HOTD_SCSP_MAME");
+    if (!e)
+        return 31;
+    return std::strcmp(e, "all") == 0 ? 0 : 31 & ~std::atoi(e);
+}();
+
+// Audio > Sound Chip (user 2026-11-09, launcher.ini soundchip=): 0 Accurate (every fix), 1 MAME (none); the test
+// variable HOTD_SCSP_MAME wins when set
+void hotd_scsp_set_chip(int chip)
+{
+    if (!std::getenv("HOTD_SCSP_MAME"))
+        hotd_scsp_fix = chip == 1 ? 0 : 31;
+}
 
 namespace hotd::audio {
 
@@ -46,6 +65,32 @@ struct SoundBoard::Impl {
     std::atomic<uint32_t> fifoCount{0};   // perf: fifo.size(), read without the lock (the board looks every idle sample)
     bool trace = std::getenv("HOTD_TRACE_BOARD") != nullptr;   // once a second: the 68000's PC / SR, the IRQ lines
 
+    // sound2 (testing, HOTD_TRACE_TIMERB=1): the driver's tempo timer. For each timer B overflow, the samples / 68000
+    // cycles / sound RAM + register accesses until the 68000 writes the timer again (GitHub #26, the songs' tempo)
+    bool timerTap = std::getenv("HOTD_TRACE_TIMERB") != nullptr;
+    bool timerBWas = false;
+    uint64_t timerBFire = 0, scspAccesses = 0, accessesAtFire = 0;
+    // (testing, HOTD_SCSP_WAIT=<cycles>) wait cycles per 68000 access to the sound RAM / the SCSP's registers
+    int waitPerAccess = std::getenv("HOTD_SCSP_WAIT") ? std::atoi(std::getenv("HOTD_SCSP_WAIT")) : 0;
+    int waitCycles = 0;
+    void tapAccess(uint32_t a)
+    {
+        if ((timerTap || waitPerAccess) && (a < kRamSize || (a >= 0x100000 && a < 0x101000))) {
+            ++scspAccesses;
+            waitCycles += waitPerAccess;
+        }
+    }
+    void tapTimerWrite(uint32_t a, uint32_t v)
+    {
+        if (!timerTap || (a & 0xFFFFFE) != 0x10041A || !timerBFire)
+            return;
+        const int cyc = int(samplesRun - timerBFire) * kCyclesPerSample + m68k_cycles_run();
+        std::printf("TIMERB fire %llu write +%llu samples, %d cycles, %llu accesses, value %04X\n", (unsigned long long)timerBFire,
+                    (unsigned long long)(samplesRun - timerBFire), cyc, (unsigned long long)(scspAccesses - accessesAtFire),
+                    v);
+        timerBFire = 0;
+    }
+
     uint32_t heldLines = 0;   // lines raised with HOLD_LINE: cleared when the 68000 acknowledges that level (MAME's rule)
     // totd8 (testing, HOTD_SCSP_KEYS=1): each slot keyed on (KYONEX with KEYONB newly set) printed with its sample
     // format: PCM8B (8-bit) or 16-bit, the pitch (OCT / FNS: the rate = 44100 x 2^OCT x (1 + FNS / 1024)), the start
@@ -65,8 +110,11 @@ struct SoundBoard::Impl {
                 int oct = (r8 >> 11) & 0xF;
                 if (oct & 8) oct -= 16;
                 const double rate = 44100.0 * std::pow(2.0, oct) * (1.0 + (r8 & 0x3FF) / 1024.0);
-                std::printf("SCSP KEY slot %d %s rate %.0f SA %05X LEA %04X TL %d\n", s, (r0 & 0x10) ? "8-bit" : "16-bit", rate,
-                            ((r0 & 0xF) << 16) | scsp->read(s * 0x10 + 1), scsp->read(s * 0x10 + 3), scsp->read(s * 0x10 + 6) & 0xFF);
+                const u16 r4 = scsp->read(s * 0x10 + 4), r5 = scsp->read(s * 0x10 + 5);
+                std::printf("SCSP KEY slot %d %s rate %.0f SA %05X LEA %04X TL %d AR %d D1R %d D2R %d RR %d KRS %d OCT %d MDL %d\n", s,
+                            (r0 & 0x10) ? "8-bit" : "16-bit", rate, ((r0 & 0xF) << 16) | scsp->read(s * 0x10 + 1),
+                            scsp->read(s * 0x10 + 3), scsp->read(s * 0x10 + 6) & 0xFF, r4 & 0x1F, (r4 >> 6) & 0x1F, (r4 >> 11) & 0x1F,
+                            r5 & 0x1F, (r5 >> 10) & 0xF, oct, (scsp->read(s * 0x10 + 7) >> 12) & 0xF);
             }
             keyWas[s] = on != 0;
         }
@@ -108,6 +156,7 @@ struct SoundBoard::Impl {
     uint8_t read8(uint32_t a)
     {
         a &= 0xFFFFFF;
+        tapAccess(a);
         if (a < kRamSize)
             return ram[a];
         if (a >= 0x100000 && a < 0x101000) {
@@ -124,6 +173,7 @@ struct SoundBoard::Impl {
     uint16_t read16(uint32_t a)
     {
         a &= 0xFFFFFE;
+        tapAccess(a);
         // perf (2026-10-21): the program ROM (every opcode word) and the RAM straight (the same bytes as read8's)
         if (a - 0x600000u < 0x80000u) {
             const uint32_t o = a - 0x600000u;
@@ -140,6 +190,8 @@ struct SoundBoard::Impl {
     void write8(uint32_t a, uint8_t v)
     {
         a &= 0xFFFFFF;
+        tapAccess(a);
+        tapTimerWrite(a, v);
         if (a < kRamSize)
             ram[a] = v;
         else if (a >= 0x100000 && a < 0x101000) {
@@ -150,6 +202,8 @@ struct SoundBoard::Impl {
     void write16(uint32_t a, uint16_t v)
     {
         a &= 0xFFFFFE;
+        tapAccess(a);
+        tapTimerWrite(a, v);
         if (a < kRamSize) {
             ram[a] = uint8_t(v >> 8);
             ram[a + 1] = uint8_t(v);
@@ -312,7 +366,17 @@ void SoundBoard::render(float* out, int frames, float gain)
         b.cycleDebt = ran - want;
         if (b.cycleDebt < 0)
             b.cycleDebt = 0;
+        b.cycleDebt += b.waitCycles;
+        b.waitCycles = 0;
         b.scsp->run_timers(1.0 / 44100.0);
+        if (b.timerTap) {   // (HOTD_TRACE_TIMERB) timer B's pending bit rising = its overflow
+            const bool on = (b.scsp->read(0x420 / 2) & 0x80) != 0;
+            if (on && !b.timerBWas) {
+                b.timerBFire = b.samplesRun + 1;
+                b.accessesAtFire = b.scspAccesses;
+            }
+            b.timerBWas = on;
+        }
         b.scsp->service();
         b.scsp->render(s, 1);
         out[i * 2] += s[0] * b.scsp->gain(0) * gain;

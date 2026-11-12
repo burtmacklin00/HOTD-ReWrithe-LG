@@ -22,6 +22,13 @@ bool readPngRgba(const std::string& path, int& width, int& height, std::vector<u
         err = "cannot open " + path;
         return false;
     }
+    return readPngRgbaMem(b.data(), b.size(), path, width, height, rgba, err);
+}
+
+bool readPngRgbaMem(const uint8_t* data, size_t size, const std::string& path, int& width, int& height,
+                    std::vector<uint8_t>& rgba, std::string& err)
+{
+    const std::vector<uint8_t> b(data, data + size);
     static const uint8_t sig[8] = {0x89, 'P', 'N', 'G', 13, 10, 0x1A, 10};
     if (b.size() < 33 || !std::equal(sig, sig + 8, b.begin())) { err = path + ": not a PNG"; return false; }
     auto be32 = [&](size_t o) { return (uint32_t(b[o]) << 24) | (uint32_t(b[o + 1]) << 16) | (uint32_t(b[o + 2]) << 8) | b[o + 3]; };

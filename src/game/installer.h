@@ -41,7 +41,8 @@ struct InstallOptions {
     std::string spanishPc;     // spanish2: the Extras page's Spanish PC copy ("" none): what its features read, into data\pc_spanish
     std::string settingsFrom;  // a launcher.ini to carry over (the portable copy's), "" none
     bool desktop = true, startMenu = true, steam = false, music = true;
-    std::string version;       // this build's ("v1.1.0")
+    bool vrShortcut = false;   // vr3: a "... (VR)" shortcut too (--vr openxr), where the shortcuts go (else the Desktop)
+    std::string version;      // this build's ("v1.1.0")
 };
 struct InstallResult {
     bool ok = false;

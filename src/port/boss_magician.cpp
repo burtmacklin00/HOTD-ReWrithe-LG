@@ -455,6 +455,14 @@ template <class P> void Game<P>::magician_frame(uint32_t obj)
 {
     boss_aggression_update(obj);
     of<uint16_t>(obj, 0x2E0) = 0xFF;
+    // hordepub (ours, weapons: user 2026-11-09 "the Magician's Hand does not damage the Magician"): his hits are his own
+    // test (not enemy_part_hits, where the explosions hit the creatures): an explosion near him is a shot at the
+    // nearest of the parts that take damage (4 / 6 / 11 / 13; guarded: any part, so it sparks as a shot does)
+    if (weaponHooks && (of<uint8_t>(obj, 0x58) & 1)) {
+        static constexpr uint32_t kParts[4] = {4, 6, 11, 13};
+        const bool guarded = (of<uint8_t>(obj, 0x324) >> 3) & 1;
+        weapon_blast_boss(obj, kParts, guarded ? 0 : 4);
+    }
     if (of<uint8_t>(obj, 0x58) & 1)
         magician_hit(obj);
     if ((of<uint32_t>(obj, 0x58) >> 28) & 1)

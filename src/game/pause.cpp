@@ -117,6 +117,13 @@ void Pause::frame(const Runtime& rt, const PauseInput& in)
                 onSettings();
             return;
         }
+        if (itemAt(selection_) == kPhoto) {   // (photomode: the pause stays under Photo Mode; greyed: only the note)
+            if (onCue && !photoGrey)
+                onCue(0x10C);
+            if (onPhoto)
+                onPhoto();
+            return;
+        }
         if (itemAt(selection_) != kContinue) {
             if (itemAt(selection_) == kExit) {
                 over_ = false;

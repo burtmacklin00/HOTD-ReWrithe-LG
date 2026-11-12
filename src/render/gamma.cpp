@@ -1,6 +1,7 @@
 #include "render/gamma.h"
 
 #include "render/gl.h"
+#include "render/gl_backend.h"
 
 #include <SDL3/SDL.h>
 
@@ -137,6 +138,7 @@ void gammaApply(unsigned fbo, int w, int h)
     gl::BindTexture(gl::TEXTURE_2D, p.tex);
     if (w != p.w || h != p.h || srgb != p.texSrgb) {
         p.w = w, p.h = h, p.texSrgb = srgb;
+        gl::texTag(srgb ? "gamma copy srgb" : "gamma copy");   // (questui: the upload log)
         gl::TexImage2D(gl::TEXTURE_2D, 0, gl::GLint(srgb ? kSRGB8 : kRGB8), w, h, 0, gl::RGB, gl::UNSIGNED_BYTE, nullptr);
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST);
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST);

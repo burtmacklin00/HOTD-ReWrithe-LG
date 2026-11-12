@@ -94,6 +94,11 @@ void Runtime::skin_draw(uint32_t obj)
     std::memcpy(sd.a, mem.ptr(obj + 0x184), sizeof sd.a);
     std::memcpy(sd.b, mem.ptr(obj + 0x1B4), sizeof sd.b);
     sd.body = obj;
+    // magflash (user 2026-11-09: the Magician's torso did not flash when hit): 0x214F0 draws the skin with texture
+    // header 0x802400 (the flat white set) instead of its type's (0x20F00) while the object's draw flags bit 0 is set
+    // (the hit flash: the Magician's class 8 part hook sets it, 0x9E0F8), as the bosses' part flashes
+    if (mem.at<uint8_t>(obj + 0x3C4) & 1)
+        sd.flat = header_ram_flat(0x802400);
     skinDraws.push_back(sd);
 }
 

@@ -17,7 +17,11 @@
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
+    <!-- vrship (2026-11-09): only "normal" permissions (granted at install, no prompt): VIBRATE (SDL's haptics, a
+         gamepad's rumble), INTERNET (online co-op, docs/netplay.md). No storage permission: the game files are read
+         from the app's own folder (Android/data/com.tawhid.hotdrewrithe/files: docs/quest.md) -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- the Khronos OpenXR loader: the runtime broker -->
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />

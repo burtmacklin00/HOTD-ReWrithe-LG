@@ -14,9 +14,10 @@ ShortcutResult createShortcut(const std::string& folder, bool startMenu, const s
                               std::string& msg);
 
 // setup2 (the installer): a shortcut "<linkFolder>/<name>.lnk" to `target` (working folder = target's folder, icon =
-// iconFile or the target). Linux: "<linkFolder>/<name>.desktop" (icon: iconFile when a .png); macOS: Failed. `made`: its path
+// iconFile or the target). Linux: "<linkFolder>/<name>.desktop" (icon: iconFile when a .png); macOS: Failed. `made`: its path.
+// args: the command line after the target ("" none; vr3 2026-11-09: the setup's VR shortcut, "--vr openxr")
 ShortcutResult createShortcutTo(const std::string& linkFolder, const std::string& name, const std::string& target,
-                                const std::string& iconFile, std::string& made, std::string& msg);
+                                const std::string& iconFile, std::string& made, std::string& msg, const std::string& args = "");
 // the user's Desktop and Start menu Programs folders (Linux: ~/Desktop and ~/.local/share/applications; macOS: "")
 std::string desktopFolder();
 std::string startMenuFolder();

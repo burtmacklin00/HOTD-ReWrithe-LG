@@ -45,6 +45,13 @@ struct MenuHooks {
     std::function<void(int page)> resetPage;            // menufb: a page's Reset to Defaults (ask, then menuReset)
     std::function<void()> languagePage;                 // menufb: System > Language's page (menuLanguageRows)
     std::function<void()> advancedPage;                 // advopt: the Advanced page (Gameplay's last row)
+    std::function<void()> totdPage;                     // totdex: Gameplay > Typing of the Dead 0's page (null: no row)
+    std::function<bool()> vrDualDefault;                // vr4: a VR run: vr.ini's dual_pistols (null: flat, no Dual Pistols row)
+    std::function<bool()> vrLaserDefault;               // vrsight: a VR run: vr.ini's laser (null: flat, no Laser (VR) row)
+    std::function<bool()> vrCrosshairDefault;           // vrsight: a VR run: vr.ini's crosshair (null: no Crosshair (VR) row)
+    // vrcomfort: a VR run: vr.ini's value for the comfort rows (0 view, 1 cutscenes, 2 vignette, 3 the screen's distance
+    // in cm, 4 its size: 0 small / 1 medium / 2 large, -1 none of them); null: flat, no rows
+    std::function<int(int which)> vrComfortDefault;
     std::function<void()> filesCheck;                   // the text launcher (files check, data folders)
     std::function<void()> whatsNew;                     // setup2: the What's New page (the setup window)
     std::function<void()> shortcut;                     // create the desktop shortcut
@@ -87,8 +94,15 @@ struct MenuHooks {
     std::function<int()> gunWaiting;
     std::function<int()> gunWaitLeft;
     std::function<bool(const std::string& key)> gunConnected;
+    std::function<std::string()> gunNote;   // linuxmice: why no gun / mouse can be read (Linux: the input group), "": fine
 };
 
+// questui (user 2026-11-10: "a lot of the settings don't apply to Meta Quest"; hidden, not greyed): the standalone
+// Quest's menus: the rows that do nothing there left out (the window, the monitor, the renderer, the CRT filter, the
+// mouse / keyboard / pads / light guns, co-op, the PC's shortcuts and updates; docs/quest.md "Settings on the Quest"),
+// the VR rows on Controls. On on Android; on the PC only with --quest-sim / HOTD_QUEST_MENUS=1 (tests). The PC's own
+// menus (PC VR too) are unchanged
+extern bool menuQuest;
 // the rows of a category's page
 std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, const MenuHooks& h);
 // fxux: a settings page's rows opened from the pause (Frontend::rowsFilter): "from the next game" notes, the rows a

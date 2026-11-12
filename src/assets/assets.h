@@ -103,6 +103,11 @@ struct Mesh {
     std::vector<SortKey> sortKeys;
     // perf (2026-10-16): after the GPU upload the CPU copy can go (GameView keeps it only for models it rebuilds)
     size_t releasedCount = 0;                // vertices.size() before releaseVertices()
+    // questsim (2026-11-10): VR's CPU aim ray (the Quest's aim: OpenGL ES reads no depth) tests the creatures' parts'
+    // own triangles: their corners' positions (x, y, z each, the triangle list's order) kept when the vertices go
+    // (GameView's releaseStageCpu, while keepMeshPositions: VR on); ~1/4 of the vertices' memory
+    std::vector<float> positions;
+    static inline bool keepMeshPositions = false;
     void releaseVertices() { releasedCount = vertices.size(); std::vector<Vertex>().swap(vertices); std::vector<SortKey>().swap(sortKeys); }
     size_t vertexCount() const { return vertices.empty() ? releasedCount : vertices.size(); }
 };
@@ -202,6 +207,14 @@ struct DrawItem {
     float bloodHue = -1.0f;                  // cosmods: Rainbow Blood's creature colour (game/cosmods.h creatureBloodHue): -1 none,
                                              // 0..1 the hue of its wounds and blood texels, 2 the cycling per-item hue
     bool sideOnly = false;                   // endfloor: drawn only outside the centred 4:3 picture (widescreen's side strips)
+    // vr3 (2026-11-09, GameView::vrAround): a neighbouring zone's piece wholly outside the game camera's 4:3 view (beside,
+    // behind, above the player): drawn in a VR eye's view only (Renderer::eye), with the zone, depth-tested; never flat
+    bool around = false;
+    // vr4 (2026-11-09): what the VR frame needs to know of a game-drawn model (never read by the renderer): 1 a
+    // creature's / boss's part (the CPU aim ray's targets, the HUD's adaptive distance), 2 the shot's flash (0x95140),
+    // 3 the shot's spark (0x95630, model 0x660 / 0x661: both drawn 1 unit in front of the game camera); 4 (questsim) a
+    // creature's generated skin (the arcade's joints between the parts: the CPU aim ray's targets); 0 the rest
+    uint8_t vrKind = 0;
 };
 
 // Resolves which source draws each canonical ID of a stage. stages[s] may be null (source missing or failed to load).

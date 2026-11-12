@@ -726,6 +726,13 @@ green / yellow), or a light gun / own mouse, or Keyboard.
       crosshairs, mouse cursor or captions; shooting still works. F7 again: all back. Restart: Off again.
 - [ ] Options > Gameplay > Advanced > Trailer Mode On: a new game starts with it on, and it stays on after a restart.
 - [ ] Trailer Mode: the fades to black (chapter start, deaths) still show; Esc's pause menu and its cursor still show.
+- [ ] Photo Mode (photomode, 2026-11-09): F8 in play (and in a cut-scene, Boss Mode, Survival, TotD 0): everything
+      stops, the music holds; the help line at the top. W A S D / Q E move, hold a mouse button and drag to look, the
+      wheel / + / - zoom (FOV in the help line), 0 / middle click resets it, R the camera, C slow camera, H hides the HUD
+      and the help line, F12 saves a full-size PNG without the help line ("Screenshot saved"). F8 / Esc: the game goes on
+      from the same moment, the music from the same note, no shot fired by the clicks. Pause menu -> Photo Mode: Esc
+      goes back to the pause. A pad: sticks, LB / RB, d-pad zoom, A screenshot, Y HUD, X reset, B leaves. Online: the
+      pause shows "Photo Mode (offline only)" greyed and F8 shows "Photo Mode is for offline games only".
 - [ ] The scene's music: 2-12 starts with Chapter 2's music right away, and again on R (no blip or menu music
       from the fast-forward).
 - [ ] Record a clip: `hotd --scene-view 2:12 --players 4 --models arcade` in fullscreen, R, record: the clip shows

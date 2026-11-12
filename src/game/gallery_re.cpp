@@ -553,20 +553,20 @@ void Frontend::remakeGallery(const GalleryText& g)
         const char* const keep = "The Gallery's own: Options and Mods keep theirs.";
         auto channel = [&](const char* name, int shift, int up) {
             return Opt{name, std::to_string((g.bloodRgb >> shift) & 255),
-                       std::string("The custom colour's ") + (shift == 16 ? "red" : shift == 8 ? "green" : "blue") +
+                       std::string("The custom color's ") + (shift == 16 ? "red" : shift == 8 ? "green" : "blue") +
                            ", by 16 (picks Custom). Click < or >",
                        up, up + 1, true};
         };
         opts = {
             {"Blood Color", kColours[std::clamp(g.bloodColor, 0, 5)],
-             std::string("The blood's colour on the model, its wounds and its blood. Key: G (Shift+G back). ") + keep, 40, 41, true},
+             std::string("The blood's color on the model, its wounds and its blood. Key: G (Shift+G back). ") + keep, 40, 41, true},
             channel("Custom Red", 16, 42),
             channel("Custom Green", 8, 44),
             channel("Custom Blue", 0, 46),
-            {"Rainbow Blood", g.rainbow ? "On" : "Off", std::string("The Rainbow Blood mod's colours. Key: N. ") + keep, 48, 48, true},
-            {"Rainbow Colours", g.rainbowColours, "Rainbow Blood: all blood one colour at a time, or each splash its own", 49, 49, g.rainbow},
-            {"Rainbow Speed", g.rainbowSpeed, "Rainbow Blood: how fast the colours change", 50, 51, g.rainbow},
-            {"Creature Blood", g.creatureBlood, "Rainbow Blood: the creature's own wounds (its own colour, cycling, or as painted)", 52, 53, g.rainbow},
+            {"Rainbow Blood", g.rainbow ? "On" : "Off", std::string("The Rainbow Blood mod's colors. Key: N. ") + keep, 48, 48, true},
+            {"Rainbow Colors", g.rainbowColours, "Rainbow Blood: all blood one color at a time, or each splash its own", 49, 49, g.rainbow},
+            {"Rainbow Speed", g.rainbowSpeed, "Rainbow Blood: how fast the colors change", 50, 51, g.rainbow},
+            {"Creature Blood", g.creatureBlood, "Rainbow Blood: the creature's own wounds (its own color, cycling, or as painted)", 52, 53, g.rainbow},
             {"Blood Particles", g.particles ? "On" : "Off",
              std::string("The blood burst of a new damage step, the drips from a cut part. Key: J. ") + keep, 54, 55, true},
         };
@@ -588,7 +588,7 @@ void Frontend::remakeGallery(const GalleryText& g)
              "Its next motion (or damage step). Key: M (Shift+M back), pad: Y. Click < or > (or Left / Right)", 3, 30, !g.motion.empty()},
             {"Model", g.source, g.otherSource ? "The arcade's or the PC release's models. Key: S. Click < or >" : "Only one model source is there", 2, 2, g.otherSource},
             {"Light", g.light, "The light: the game's, or from the side (8 ways round). Key: L. Click < or > (or Left / Right)", 14, 31, true},
-            {"Background", g.background, "The stage: dark, the game's skies, plain colours, rooms. Key: B, pad: View. Click < or >", 7, 32, true},
+            {"Background", g.background, "The stage: dark, the game's skies, plain colors, rooms. Key: B, pad: View. Click < or >", 7, 32, true},
             {"Layout", "Remake", "The Gallery's other layouts: the portraits, the Classic page. Key: K. Click < or >", 15, 33, true},
         };
     }

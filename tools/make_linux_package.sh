@@ -161,7 +161,7 @@ Made by tools/make_linux_package.sh in the rewrite's repository.
 EOF
 # relprep: the repo's shipped data, as the Windows package (data/ui with the prompts and their licences, data/fonts with
 # OFL.txt, data/lang, data/mods): our own or third-party files with their licences in NOTICE.md, no game data
-for d in ui fonts lang mods typing; do   # (typing: The Typing of the Dead 0, docs/typing.md; rel130)
+for d in ui fonts lang mods typing subtitles; do   # (subtitles: docs/subtitles.md; typing: The Typing of the Dead 0, docs/typing.md; rel130)
     [ -d "$repo/data/$d" ] && mkdir -p "$out/data/$d" && cp -R "$repo/data/$d/." "$out/data/$d/"
 done
 # a release package: the modes left out leave the language files too (their "# [unreleased]" sections), as the Windows

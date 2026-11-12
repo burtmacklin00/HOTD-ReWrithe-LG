@@ -22,7 +22,11 @@ struct Camera {
     float yaw = 0, pitch = 0;   // radians; yaw 0 looks along +z, positive yaw turns toward +x (left-handed world)
     float fovY = 0.80f;         // vertical field of view (radians); about 46 degrees like the arcade picture
     float nearZ = 1.0f;         // the perspective's near plane (depth clamp keeps what is nearer; the viewer's Free Cam: less)
-    bool perPixelDepth = false; // Depth Buffer whatever Draw Depth says (the viewer's Free Cam: SceneView::freeCamToggle)
+    bool perPixelDepth = false; // Depth Buffer whatever Draw Depth says (the free camera: FreeCam::start, game/free_cam.h)
+    // vrnull (user 2026-11-09: "the first zombie and researcher sink into the pavement" in VR): >= 0: the Depth
+    // Buffer's key band (kKeyBand ...) instead of perPixelDepth's narrow kKeyBandFreeCam, and the mods' depth modes
+    // kept: the VR eyes (per pixel, the game's own band: the feet stay over the opening's kerb as in the flat game)
+    float keyBand = -1.0f;
     float shift[2] = {0, 0};    // the picture moved by (x, y) in normalised device units, the view unchanged (a moved
                                 // projection centre: the hit screen shake, GameView::draw); not for the VR eyes
     void basis(float right[3], float up[3], float fwd[3]) const;
@@ -127,6 +131,10 @@ public:
     uint64_t drawCalls = 0;
     // perf: GL state calls in draw (uniforms, texture / vertex array binds; never reset, as drawCalls)
     uint64_t stateCalls = 0;
+    // questsim (2026-11-10, the Quest 3 budget): triangles drawn so far (never reset, as drawCalls); the uploaded
+    // stages' GPU memory now (estimated: textures with mipmaps, vertices)
+    uint64_t triangles = 0;
+    uint64_t textureBytes = 0, vertexBytes = 0;
     // polish3 (debugging, hotd --render with HOTD_ZFIGHT): added to the camera position, to find depth ties (z-fighting)
     // by rendering a frame twice with a sub-pixel camera move
     float debugJitter[3] = {0, 0, 0};
@@ -177,6 +185,7 @@ private:
     // per-pixel depth)
     static void sortKeysOf(const Mesh& m, size_t count, std::vector<float>& out);
     std::map<const StageData*, GpuStage> stages_;
+    std::map<const StageData*, std::pair<uint64_t, uint64_t>> gpuBytesOf_;   // questsim: textureBytes / vertexBytes' parts
     struct Resolved { const GpuStage* g = nullptr; const std::vector<Range>* ranges = nullptr; };
     std::vector<Resolved> resolved_;   // perf: draw's items -> their stage and model ranges (kept: no allocation a frame)
     gl::GLuint program_ = 0, palAnim_ = 0;
@@ -190,6 +199,14 @@ private:
     gl::GLint uCull_ = -1, uMip_ = -1, uPcCullSign_ = -1, uClampUV_ = -1, uDepthBias_ = -1, uFloorY_ = -1, uFloorPull_ = -1, uPush_ = -1, uFade_ = -1, uSideOnly_ = -1, uSideClip_ = -1, uFlat_ = -1, uGrey_ = -1, uSepia_ = -1, uRainbow_ = -1, uRainbowPhase_ = -1, uBloodRgb_ = -1, uRainbowTable_ = -1, uRainbowGame_ = -1, uRainbowSync_ = -1, uBloodRows_ = -1, uTie_ = -1, uTieItem_ = -1, uIdMode_ = -1;
     gl::GLint uCamPos_ = -1, uM2Known_ = -1, uM2Light_ = -1, uM2Diffuse_ = -1, uM2Ambient_ = -1, uM2SpecScale_ = -1, uM2SpecCtl_ = -1, uCamFwd_ = -1, uM2Gamma_ = -1, uM2Black_ = -1;
     gl::GLint uHasRepl_ = -1, uPcFilter_ = -1, uGreyRepl_ = -1, uSort_ = -1, uSortItem_ = -1, uPrepass_ = -1, uHybrid_ = -1, uKeyless_ = -1, uProj_ = -1, uBiasScale_ = -1;
+    // render5: the zone's coverage (alpha) copied after its passes, for the neighbouring zones' side-strip pieces (draw)
+    gl::GLuint coverTex_ = 0;
+    int coverW_ = 0, coverH_ = 0;
+    gl::GLint uSideCover_ = -1, uCover_ = -1;
+    gl::GLint uPalOver_ = -1, uPcTint_ = -1, uRamp_ = -1, uRampStops_ = -1, uBodyHue_ = -1;
+    // sinkfix: the members whose uniform sits at another location in programBand_ (that location), swapped in while
+    // the band program draws (init / draw)
+    std::vector<std::pair<gl::GLint*, gl::GLint>> bandLocs_;
     bool sortFragDepth_ = false;   // earlyz: Arcade Sort through gl_FragDepth (HOTD_SORT_FRAGDEPTH / _EXACT), else vertex depth
     std::vector<size_t> order_, orderArcade_;   // draw: the items' order in the depth-writing passes (kept: no allocation)
     void uploadReplacements(const StageReplacements& rp, GpuStage& g);

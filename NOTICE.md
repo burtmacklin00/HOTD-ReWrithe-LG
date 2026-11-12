@@ -42,10 +42,17 @@ with.
   bidirectional algorithm and the Arabic shaping (`src/render/bidi.*`) are this project's own code.
 - `data/fonts/NotoSansSC-Bold.otf` (the Simplified Chinese menu font) is Noto Sans CJK SC by Google and Adobe (Version
   2.004, from github.com/notofonts/noto-cjk), Copyright 2014-2021 Adobe, and `data/fonts/NotoSans-Bold.ttf` (the
-  Latin / Greek / Cyrillic / Vietnamese menu font: Russian, Turkish, Polish, Vietnamese) is Noto Sans v2.015, Copyright 2022 The Noto Project Authors
+  Latin / Greek / Cyrillic / Vietnamese menu font: Russian, Turkish, Polish, Vietnamese, Czech, Romanian, Hungarian,
+  Ukrainian, Bulgarian, Greek) is Noto Sans v2.015, Copyright 2022 The Noto Project Authors
   (github.com/notofonts/latin-greek-cyrillic); both unchanged, under the SIL Open Font License 1.1:
   `data/fonts/OFL.txt`. SHA-256: SC `c6cb5a93abaa9edc8ee7463b7ebb7f42d618d40e6ed2f7a5371c97b0b64767c0`, Noto Sans
   `1df075a380fc7cb898acf64c1f7b3b4dd780de3caa860178bf929de35817a913` (of the files as downloaded 2026-11-03).
+- `data/fonts/NotoSansTC-Bold.otf` (the Traditional Chinese menu font) is Noto Sans TC (Noto Sans CJK TC) Bold by
+  Google and Adobe, Version 1.004, Copyright 2014, 2015 Adobe Systems Incorporated, and `data/fonts/NotoSansThai-Bold.ttf`
+  (the Thai menu font) is Noto Sans Thai Bold Version 2.000, Copyright 2016 Google Inc. (Noto, github.com/notofonts);
+  both unchanged, under the SIL Open Font License 1.1: `data/fonts/OFL.txt`. SHA-256: TC
+  `8f9f70225bcbfe7faa49b506a57553dd1ddec1de363385763eda33e20eac107b`, Thai
+  `f58889dd92142f30a4c6e5045519c4d12de22009670f046051c830c8c50c5833` (of the files as downloaded 2026-11-09).
 - `data/ui/prompts/xelu/` (the default button prompts: every controller's and the keyboard's / mouse's icons) are from
   **Xelu's Free Controller & Key Prompts** by Nicolae "Xelu" Berbece (Those Awesome Guys), updated by Paul Paun,
   thoseawesomeguys.com/prompts; public domain under Creative Commons Zero (CC0 1.0): `data/ui/prompts/LICENSE-Xelu.txt`
@@ -60,6 +67,14 @@ with.
 - The Typing of the Dead 0's design reference (no footage is included or used in the game): the playthrough video "The
   Typing of the Dead [PC] by SEGA ($6,132,600) [HD] [1080p60]" by the YouTube channel **Saturn Memories**
   (youtube.com/@SaturnMemories, https://www.youtube.com/watch?v=SDK88HHndK4).
+- Some of The Typing of the Dead 0's rules and features were inspired by **Tenome**'s **The Typing of the Dead EX –
+  Modern Community Patch** (https://github.com/Tenome/Typing-of-the-Dead-EX, MIT licence): its reverse-engineering
+  notes on SEGA's TotD (the word picker's last 16 words, the Shift grace, the word level after a hit, case-blind
+  typing, the rank by key costs and the rank points; `docs/typing.md` "SEGA's rules and ours"), its live WPM line
+  and typing statistics, and its word packs (several mixed, a pack typed in order), practice drills and mutators
+  (`docs/typing.md` "Word packs, Practice, Mutators, Speak the Words"). Ideas only: no code or data of it is included. The editable
+  subtitle files (`docs/subtitles.md`: a caption's text, timing, size and place in any language) follow its subtitle
+  files (its `mod/README.md`): the idea only.
 - The Spanish dub (Options > Audio > Voice: Spanish, `docs/spanish.md`): researched on the Spanish PC version
   ("Doblaje español") provided by **3lc3z4r** (YouTube channel **Cez4rPlay**), with his list of its differences and his
   reference playthrough "The House Of The Dead (PC) - Doblaje español ORIGINAL" (https://youtu.be/OVnjusRO1wk).

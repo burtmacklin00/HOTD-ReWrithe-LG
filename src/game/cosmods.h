@@ -39,7 +39,7 @@ RainbowBloodSettings& rainbowBloodSettings();
 bool rainbowColour(const Runtime& rt, float offset, float rgb[3], bool always = false);
 // v1.3.1 (user 2026-11-07: "the rainbow blood mod to affect the main menu blood"): the colour for the menus' blood at
 // `seconds` (the computer screens' table once a game has read it, else a plain hue; 45 steps a cycle). false: mod off
-bool rainbowMenuColour(double seconds, float rgb[3]);
+bool rainbowMenuColour(double seconds, float rgb[3], bool smooth = false);   // (smooth: the continuous cycle for the GPU-tinted menu; else 12 steps)
 void rainbowTableCache(const Runtime& rt);   // (the table read once from a runtime with the game loaded: palette_anim_copy)
 // The custom Blood Color on the arcade models (user 2026-11-03: the Rainbow Blood recolour with one colour): the
 // creatures' painted wounds take it too (RenderOptions::rainbow 3). 0xRRGGBB, -1 none; the view sets it each frame
@@ -69,6 +69,17 @@ struct BigHeadSettings {
 BigHeadSettings& bigHeadSettings();
 // mod.ini [settings] keys size / who / bosses
 void bigHeadConfigure(bool on, const std::map<std::string, std::string>& values);
+
+// Hermit Fly Head (user 2026-11-09): the Hermit (Chapter 3's boss) drawn with the game's own unused second head,
+// boss31_kao 0x1AC6 (two big glowing red eyes; docs/cut_content.md), in place of the head the game uses, boss3_kao
+// 0x1AD9. Both are in the arcade's chapter 3 models with the same texture area (11); the 1998 PC files have no
+// 0x1AC6, so with the PC models the mod draws the PC's own head (nothing changes). Draw only (GameView::addModel)
+struct HermitHeadSettings {
+    bool on = false;
+};
+HermitHeadSettings& hermitHeadSettings();
+void hermitHeadConfigure(bool on, const std::map<std::string, std::string>& values);
+constexpr uint32_t kHermitHeadModel = 0x1AD9, kHermitFlyHeadModel = 0x1AC6;
 
 // Magician Afterimages (user 2026-11-07, GitHub #54): the colour of his afterimages (polygon palette entry 583, which
 // the game sets 0xFEC0 blue as he flies, 0x801F red for the swoops and lunges) per phase: -1 Original, -2 Rainbow,

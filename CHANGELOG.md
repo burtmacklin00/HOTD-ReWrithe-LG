@@ -4,6 +4,82 @@ All notable changes for players. The format follows [Keep a Changelog](https://k
 follow [Semantic Versioning](https://semver.org/). The game shows this version's section once after an update and in
 Options > System > What's New.
 
+## [1.4.0] - 2026-11-10
+
+**About the sound:** it is not "accurate" yet. I tried to make improvements to the arcade sound chip
+(Options > Audio > Sound Chip), but it needs feedback from true fans: tell me which track or sound effect sounds
+off, and where.
+
+### Added
+- **Online without port forwarding**: send your Join Code as always; the game now punches through most home routers by
+  itself. With strict routers your friend gets a Reply Code to send back, and the host pastes the whole chat once for
+  the squad. No servers, no accounts (Online Co-op > Address Lookup; Off = as before). Very strict networks (some mobile
+  / carrier-grade NAT) may still need UPnP or port forwarding.
+- **Survival**: online co-op for up to four PCs; two new arenas (Chapter 3's platform, Chapter 4's roof facing the
+  Magician's doorway); **dog rounds** every 7th or 8th round, and clearing one gives **MAX AMMO** to every player.
+- **Character Select** (Options > Gameplay, On): pick your character before Arcade / Chapter Select, 1-4 players. Rogan
+  and G keep their own color and gunshot in any seat.
+- **Photo Mode** (F8, or the pause menu; offline only): a frozen game, a free camera, FOV, HUD hide, full-size F12 shots.
+- **Model packs** for mods (OBJ / glTF / GLB, or other game models; docs/modding.md) and the **Hermit Fly Head Mod**
+  (the Hermit wears the game's own unused fly head, arcade models).
+- **Editable subtitles** (Options > Gameplay > Subtitles: Off / Original / Custom, and Subtitle Size): change a line's
+  text, timing, size or position in `subtitles\en.txt`.
+- **The Typing of the Dead 0** (Experimental): SEGA's rules, your own word packs, Practice drills, Mutators, Speak the
+  Words, a live WPM line and a Statistics page.
+- **Sound Chip** (Options > Audio): Accurate (five fixes over MAME's chip emulation) or MAME.
+- **17 more languages** (machine translated, 33 in all).
+- **Cheats** (main menu only, offline only, never saved).
+- **VR (Experimental, still buggy; PC VR recommended)**, single player only (no Online Co-op, no 2 / 4 players): the "... VR" exe starts in VR (SteamVR, Quest Link); Dual Pistols (VR), Laser (VR) and
+  Crosshair (VR) in Options > Gameplay; shake or flick the gun to reload; the world all around you; cut-scenes around
+  you or on a cinema screen; chapter cards, credits and the title on a big screen in the dark; hands only while you
+  play; the desktop window as one eye, both eyes or the flat game (vr.ini `desktop_view`); the main menu first, on a
+  big screen in the headset (the right controller points); pause with Y or the left menu button (an on-screen hint).
+  Comfort options in Options > Gameplay: View (VR) Immersive / Screen (the whole game, play too, on a big screen at a
+  distance, aimed through it: against motion sickness), Screen Distance (VR) and Screen Size (VR), Cut-scenes (VR)
+  World / Screen and Comfort Vignette (VR); not set, vr.ini decides (nothing changes until you pick one).
+  Hands in Menus (VR) (on by default): your hands and gun in front of the menus' big screen. Survival / Horde: flick
+  the right thumbstick left / right to switch weapons. Shaking or flicking to reload never skips a cut-scene.
+- **Meta Quest 3 standalone (EXTREMELY BUGGY, EXPERIMENTAL)**: a separate APK that runs on the headset itself. A first
+  test build with bugs: for now, playing on your PC with the headset (Quest Link / Air Link / SteamVR) is the
+  recommended way to play in VR. It lowers its resolution only when the headset's GPU falls behind (never below 80 %),
+  and plays its sound through OpenSL ES (no more crackling).
+- **Horde Mode** (More Modes > Horde), **Experimental / Proof of Concept**: the arcade game from Chapter 1 with many
+  more zombies at once, after HOTD1 Remake's Horde mode, with Survival's weapons as pickups. Horde Size: Low / Normal /
+  High; its own top 10. Local games only.
+  - Weapons and ammo also come from crates and breakable props (one in 3), from each researcher you save, and float in
+    Chapter 4's bonus room; your weapons stay with you after a continue; picking up ammo for a gun you already have no
+    longer switches to it.
+  - Upgrades (Quick Reload, Big Mag, then Max Ammo): from some crates, for saving every researcher of a chapter, and for
+    finishing a chapter without losing a life (announced on screen).
+  - Some creatures are already standing at a stop when you arrive (only where the arcade's own creatures walk), and the
+    cut creatures Syndy, Baba, Neozom, Disiprin and Debu show up among the extra creatures (arcade models).
+
+### Changed
+- **The Magician's Hand** (Survival / Horde): 36 shots instead of 12, a faster reload, more damage and a bigger blast;
+  kept when empty (Ammo / Max Ammo refill it). Light guns pick it first.
+- PC models keep the PC game's storm sky after the Magician, as THOTD.EXE does.
+- VR: shots beside or behind the screen no longer fire or reload (aim below the screen to reload); the HUD comes in
+  front of close creatures; the comfort vignette is off by default.
+- US spelling ("color") in all player-facing text.
+
+### Fixed
+- Steam Deck fullscreen (#74); Linux: the Light Guns page crash and per-device mice / light guns (#67).
+- The Magician's waist now flashes white when hit (#73); PC models: the sky after the Magician (#55), the staff roll
+  (#53), the bonus room (#51).
+- Widescreen side strips no longer show the next area through openings at the 4:3 edge.
+- Online: the Magician's Hand no longer desyncs; up to 8 Hand explosions at once; with 3-4 PCs a player is no longer
+  dropped at the very end of a game.
+- Spanish: HOLD YOUR FIRE boxes, the attract's reload board, accented end-screen text, the end screen's chapter number.
+- Korean: Curien's name (#77).
+- The Typing of the Dead 0: creatures whose word is off screen no longer attack; a clearer miss sound.
+- VR: the opening's zombie and researcher no longer sink into the pavement, standing or lying (on the Quest too); the Hangedman fight no longer reloads every
+  shot; full-screen fades cover the whole view; the picture upright on SteamVR's virtual headset; closing SteamVR
+  mid-game drops back to the flat game.
+- The Magician's Hand now damages the bosses that have their own hit rules: the Magician and the Chariot (in Horde the
+  Chapter 4 Chariot could not be beaten with the Hand).
+- Syndy (Survival, Horde) carries and swings her mallet as a weapon when she walks up to you (her walk swung it about at
+  her hip).
+
 ## [1.3.1] - 2026-11-07
 
 ### Added

@@ -82,6 +82,7 @@ constexpr GLenum DEBUG_OUTPUT = 0x92E0, DEBUG_OUTPUT_SYNCHRONOUS = 0x8242, DONT_
     X(void, TexParameteri, (GLenum target, GLenum pname, GLint param)) \
     X(void, TexImage2D, (GLenum target, GLint level, GLint internalformat, GLsizei w, GLsizei h, GLint border, GLenum format, GLenum type, const void* data)) \
     X(void, TexSubImage2D, (GLenum target, GLint level, GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, const void* data)) \
+    X(void, CopyTexSubImage2D, (GLenum target, GLint level, GLint xoff, GLint yoff, GLint x, GLint y, GLsizei w, GLsizei h)) \
     X(void, TexImage3D, (GLenum target, GLint level, GLint internalformat, GLsizei w, GLsizei h, GLsizei d, GLint border, GLenum format, GLenum type, const void* data)) \
     X(void, TexSubImage3D, (GLenum target, GLint level, GLint x, GLint y, GLint z, GLsizei w, GLsizei h, GLsizei d, GLenum format, GLenum type, const void* data)) \
     X(void, GenerateMipmap, (GLenum target)) \

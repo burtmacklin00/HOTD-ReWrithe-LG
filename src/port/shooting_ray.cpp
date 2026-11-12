@@ -77,7 +77,7 @@ template <class P> void Game<P>::player_shoot(uint32_t task)
     }
     if (phase == 2 && gun.trigger != 0 && pl.on_screen != 0 && pl.rounds != 0) {
         float x = float(int32_t(pl.aim[0])), y = float(int32_t(pl.aim[1]));
-        if (mem.u32(G::ammo_enabled) != 0) {
+        if (mem.u32(G::ammo_enabled) != 0 && !cheatInfiniteAmmo) {   // (smallfix: Infinite Ammo, offline only)
             uint8_t r = uint8_t(pl.rounds - 1);
             pl.rounds = r;
             if (r == 0)
@@ -93,7 +93,7 @@ template <class P> void Game<P>::player_shoot(uint32_t task)
             pl.shot_pos[1] = int16_t(int32_t(y));
             if (test == 0) {
                 shot_effect(task);
-                sound_cue((p & 1) == 0 ? 0xA01208 : 0xA01207);
+                sound_cue(shot_cue(p));   // (charsel4: Rogan / G their own in any seat)
             }
             return;
         }
@@ -170,7 +170,7 @@ template <class P> void Game<P>::player_shoot_pc(uint32_t task)
     if (gun.trigger != 0 && pl.rounds != 0) {
         const float x = float(gun.aim[0]), y = float(gun.aim[1]);
         if (mem.u32(G::ammo_enabled) != 0) {
-            if (mem.u32(G::pc_ammo_hold) == 0)
+            if (mem.u32(G::pc_ammo_hold) == 0 && !cheatInfiniteAmmo)   // (smallfix: Infinite Ammo)
                 pl.rounds = uint8_t(pl.rounds - 1);
             if (pl.rounds == 0)
                 pl.empty = 1;

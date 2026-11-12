@@ -28,6 +28,12 @@ public:
     int netInfo = 1;                                     // the in-game connection info: 0 off, 1 small (ping), 2 detailed (launcher.ini netinfo=)
     std::function<void()> saveSettings;                  // playerName / netInfo / Game Mode / the characters changed
     uint16_t port = 47800;                               // the host's UDP port
+    // Survival Mode online (protocol 22): the arenas this build offers (main's survivalArenaCount(): a public build
+    // Chapter 1's courtyard only; 0: no Survival in this build), the Host page's Game Mode then has Survival
+    int survivalArenas = 0;
+    // hole punching: launcher.ini stunservers= (empty: kDefaultStun); base.stun "off" = the Online page's Address
+    // Lookup off (launcher.ini netstun=0)
+    std::string stunServers;
 
     void open(game::Frontend& fe, std::function<void()> back);   // the Online page
     bool active(const game::Frontend& fe) const;
@@ -48,6 +54,9 @@ public:
     void pick(int dir);
     void pickNext();
     void endEdit(game::Frontend& fe, bool keep);         // Enter (keep) / Escape
+    // natpunch2: the game's window got the focus back: on the host's waiting room, valid new reply codes on the
+    // clipboard are punched to (nothing else read or kept; never in the background)
+    void focusGained(game::Frontend& fe);
     bool pasteCode(game::Frontend& fe);                  // Ctrl+V on the Join page (not typing): the code into the box
     // ready to play: the connected session; the client's settings are the host's
     bool ready() const { return ready_; }
@@ -81,6 +90,11 @@ private:
     Address lanPick_;                                    // a LAN game clicked: the code joins it there (its LAN address)
     bool copiedShown() const { return copiedAt_ != std::chrono::steady_clock::time_point{} && std::chrono::steady_clock::now() - copiedAt_ < std::chrono::seconds(2); }
     void copyCode();
+    // hole punching (docs/netplay.md "Hole punching"): the host's waiting room takes a friend's reply code (typed /
+    // pasted: its punches start); a joiner's page shows its own reply code once the direct try had no answer
+    std::string replyText_;
+    void useReply(game::Frontend& fe, const std::string& text);
+    void copyReply();
     void joinTyped(game::Frontend& fe);                 // Join / Enter: the box's code (or address + password)
     bool boxIsAddress() const;                           // the Join box holds an address (the Password row shows)
     std::string* edit_ = nullptr;
@@ -110,6 +124,8 @@ private:
         int local = 0, seats = 2, wrong = 0;
         Session::RosterSeat roster[4];
         std::string code, share, lan, internet;
+        bool punch = false, symmetric = false;   // hole punching: STUN on (the Reply Code rows), a strict NAT seen
+        std::string reply, natNote;              // a joiner's reply code; the note (NetGame::natNote)
     };
     bool previewing_ = false;
     Shown fake_;

@@ -249,7 +249,7 @@ template <class P> void Game<P>::blood_mark_effect(uint32_t obj, bool fixed)
         copro(0x15, a, 1, none);
         uint32_t sc[3] = {fbits(s), fbits(s), fbits(s)};
         copro(0x13, sc, 3, none);
-        geo_draw_model(fixed || mem.at<uint8_t>(obj + 0x2EB) == 0 ? 0x3F5 : 0x3F6);
+        geo_draw_model(fixed || look_seat(mem.at<uint8_t>(obj + 0x2EB)) == 0 ? 0x3F5 : 0x3F6);   // (charsel4: by look_seat)
         copro(0x06, nullptr, 0, none);
     }
     mem.set32(obj + 0x50, mem.u32(obj + 0x50) + 1);

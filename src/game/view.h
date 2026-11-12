@@ -98,6 +98,11 @@ public:
     // draws them once per eye through `renderer`, from `cam`: the game's camera, blended as the picture would be).
     // Empty (always outside VR): draw draws as before
     std::function<void(const std::vector<DrawItem>& items)> drawOverride;
+    // vr3 (user 2026-11-09: "looking behind you shows the world behind you"): set by the VR frame around its draw. A
+    // draw zone's list holds what the arcade's 4:3 views show; the head turns anywhere, so the neighbouring zones'
+    // pieces wholly outside the game camera's view (any direction, behind it too) are added as DrawItem::around
+    // (drawn by the eyes only), the strips' pieces as before. Draw-only; false (always outside VR): as before
+    bool vrAround = false;
     // vr: the game camera of a frame as camera -> world (row-major 3x3 rotation, columns right / up / forward of the
     // left-handed camera, then the eye's position): Runtime::camera inverted (the eye-independent aim reference)
     static void cameraToWorld(const float* coproCamera, float rot[9], float pos[3]);
@@ -181,7 +186,20 @@ private:
     std::map<uint32_t, int> romIndexById_;  // arcade placement ID -> its table index (the PC world's objects by ID)
     std::map<uint32_t, const Placement*> arcadePlacementById_;   // the first arcade placement of each world ID (pcfix)
     std::set<uint32_t> pcRebased_;          // PC world objects the game drew (logged once)
-    int romIndexOf(uint32_t id) const { auto r = romIndexById_.find(id); return r == romIndexById_.end() ? -1 : r->second; }
+    std::multimap<uint32_t, int> romIndicesById_;   // every table index of an ID (the bonus room's 0x1920 stands at 5 and 9)
+    // pcfix (GitHub #51): the table index of a PC world object by ID; an ID the table holds more than once (the Chapter 4
+    // bonus room's room4_03a at indices 5 and 9) takes the one the draw zone lists, else the first
+    int romIndexOf(uint32_t id, int zone = -1) const
+    {
+        auto r = romIndexById_.find(id);
+        if (r == romIndexById_.end())
+            return -1;
+        if (zone >= 0 && zone < int(zoneIndices_.size()))
+            for (auto [it, end] = romIndicesById_.equal_range(id); it != end; ++it)
+                if (zoneIndices_[size_t(zone)].count(it->second))
+                    return it->second;
+        return r->second;
+    }
     std::vector<Placement> worldSubs_;      // this frame's world placements drawn with a model-list entry (stable)
     std::set<uint32_t> arcadeWorldIds_;     // every ID of the arcade placement table (PC objects outside it: always drawn)
     // generated skins (the bellies): per creature type the loader's template, drawn through kSkinSlots models of

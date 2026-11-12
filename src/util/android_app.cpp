@@ -124,6 +124,12 @@ GameFiles findGameFiles()
     const fs::path base(ext);
     // the arcade ROMs: hotd.zip (any *.zip at the top too), else roms/ (a zip in it, or the loose ROM files)
     if (fs::is_regular_file(base / "hotd.zip", ec)) f.arcade = (base / "hotd.zip").string();
+    if (f.arcade.empty()) {   // vrship: no hotd.zip: the only zip at the top under any name (two or more: none chosen)
+        int zips = 0;
+        for (const auto& e : fs::directory_iterator(base, ec))
+            if (e.is_regular_file(ec) && isZip(e.path())) ++zips, f.arcade = e.path().string();
+        if (zips != 1) f.arcade.clear();
+    }
     if (f.arcade.empty() && fs::is_directory(base / "roms", ec)) {
         f.arcade = firstZip(base / "roms");
         if (f.arcade.empty())
@@ -151,18 +157,25 @@ std::vector<std::string> missingFilesLines(const GameFiles& f)
 {
     const std::string ext = externalDir().empty() ? std::string("/sdcard/Android/data/com.tawhid.hotdrewrithe/files")
                                                   : externalDir();
+    // vrship (user 2026-11-09): the copy without adb first (a PC's file browser over USB, SideQuest's file manager), the
+    // folder as a PC shows it; adb as the other way
+    std::string shown = ext;   // (/storage/emulated/0/Android/... -> Android/...: the PC's "Internal shared storage")
+    if (const size_t a = shown.find("/Android/"); a != std::string::npos) shown = shown.substr(a + 1);
     std::vector<std::string> l;
     l.push_back("The House of the Dead: ReWrithe needs your own game files.");
     l.push_back("");
     l.push_back(std::string("Arcade ROMs (hotd.zip): ") + (f.arcade.empty() ? "MISSING" : "found"));
-    l.push_back(std::string("1998 PC game files: ") + (f.pc.empty() ? "MISSING" : "found"));
+    l.push_back(std::string("1998 PC game files (THOTD.EXE): ") + (f.pc.empty() ? "MISSING" : "found"));
     l.push_back("");
-    l.push_back("Connect the headset to your PC by USB and copy them:");
-    l.push_back("adb push hotd.zip " + ext + "/");
+    l.push_back("Connect the headset to your PC by USB (in the headset: Allow access to data),");
+    l.push_back("then in the PC's file browser (or SideQuest's file manager) open");
+    l.push_back("Quest 3 > Internal shared storage > " + shown);
+    l.push_back("Copy hotd.zip there, and your PC game's folder into pc");
+    l.push_back("");
+    l.push_back("Or with adb: adb push hotd.zip " + ext + "/");
     l.push_back("adb push \"C:\\Games\\HOTD\" " + ext + "/pc");
     l.push_back("");
-    l.push_back("(the folder of your installed PC game; docs/quest.md)");
-    l.push_back("This page looks for them again every few seconds.");
+    l.push_back("This page looks for them again every 3 seconds.");
     return l;
 }
 
@@ -186,7 +199,22 @@ std::vector<std::string> startArgs(int argc, char** argv)
         fs::create_directories(fs::path(ext) / "vr", ec);
         fs::copy_file(fs::path(root) / "data" / "vr" / "vr.ini", fs::path(ext) / "vr" / "vr.ini", ec);
     }
-    if (!has("--vr")) a.insert(a.end(), {"--vr", "openxr"});
+    // (testing, questfb2: <external folder>/args.txt, one option per line, adds options to the start: e.g. a
+    // headless --audio-wav run to compare the Quest's sound with the PC's byte for byte; "--no-vr": no --vr openxr)
+    bool noVr = false;
+    if (!ext.empty()) {
+        std::ifstream in(fs::path(ext) / "args.txt");
+        for (std::string line; std::getline(in, line);) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+            if (line == "--no-vr") noVr = true;
+            else if (line.rfind("env:", 0) == 0 && line.find('=') != std::string::npos) {   // (env:KEY=VALUE)
+                const size_t eq = line.find('=');
+                SDL_setenv_unsafe(line.substr(4, eq - 4).c_str(), line.substr(eq + 1).c_str(), 1);
+            } else if (!line.empty()) a.push_back(line);
+        }
+        if (in.is_open()) SDL_Log("quest: args.txt read (%zu options now)", a.size());
+    }
+    if (!has("--vr") && !noVr) a.insert(a.end(), {"--vr", "openxr"});
     const GameFiles f = findGameFiles();
     if (!has("--arcade") && !f.arcade.empty()) a.insert(a.end(), {"--arcade", f.arcade});
     if (!has("--pc") && !f.pc.empty()) a.insert(a.end(), {"--pc", f.pc});

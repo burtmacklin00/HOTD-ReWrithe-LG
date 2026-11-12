@@ -27,6 +27,8 @@
 #include <string>
 #include <vector>
 
+namespace hotd::test { struct Access; }   // (tests/unit: hotd_unit's look at the private parts)
+
 namespace hotd::game {
 
 class Runtime;
@@ -51,6 +53,20 @@ struct SurvivalArena {
     std::vector<std::array<float, 3>> doors;
     // old keys still taken by --survival (the arenas replaced: bedroom, furnace)
     std::vector<const char*> aliases;
+    // survmaps (user 2026-11-09, the platform and the Magician's roof): the arena is the (waitSkip + 1)-th creature
+    // wait after the lead-in captured a creature of this kind (the stop where the story's own creatures of that kind
+    // come: Chapter 3's hanging zombies, kind 7; the Magician, kind 20); -1: the old rule (a wait with captured
+    // standard creatures)
+    int takeKind = -1;
+    // the creatures of this kind captured just before the arena's wait come again as they came in the story: each
+    // such spawn is a copy of one of their records (its own entrance: kind 7 slides down its chain on the overhead rail
+    // and jumps off), entryShare % of the spawns, of the types those records had (their entrance motions are those
+    // types'); the rest walk in from the doors. -1: none
+    int entryKind = -1;
+    int entryShare = 0;
+    // the game camera's stop held at this eye (x, y, z) looking at this point (all 0: the stop's own): the turn
+    // toward the attackers and back as everywhere, from this view
+    std::array<float, 6> view{};
 };
 const std::vector<SurvivalArena>& survivalArenas();
 int survivalArenaParse(const std::string& v);   // a key, an old key or a number (1-based); -1 none
@@ -62,6 +78,7 @@ struct SurvivalCut {
     int area;               // the texture area its textures are in (gallery_cut.cpp), drawn with that area's set
     int donor;              // 0: its own motion list (the ROM has one); else the type whose motion list it borrows
     int life;               // hit points (its nearest relative's)
+    int action = 0;         // its set-up (the row of its list it walks with: hordepub, Syndy 1, Cyril's axe set)
 };
 const std::vector<SurvivalCut>& survivalCuts();
 void survivalCutTables(Runtime& rt);   // the cut creatures' borrowed tables (survival.cpp)
@@ -79,7 +96,16 @@ public:
     enum Phase { Off, LeadIn, Break, Wave, Over };
     Phase phase = Off;
     int wave = 0;                   // the round being fought (1-based; 0 before the first)
-    int special = 0;                // this round: 0 plain, 1 the runners' round, 2 the brutes' round
+    int special = 0;                // this round: 0 plain, 1 the runners' round, 2 the brutes' round, 3 the dogs' round
+    // survdogs (user 2026-11-10: "add dog rounds to survival for every 7-8 waves"; Max Ammo "only dog rounds"): every
+    // 7th or 8th round only the game's own Kenfis dogs (kind 97, Chapter 1's records), cleared: Max Ammo (docs/survival.md
+    // "Dog rounds"). The next one's round is drawn from its own stream (dogRng_), so the other rounds' draws are as before
+    static constexpr int kDogs = 3;
+    int dogWave = 0;                // the next dogs' round (7 or 8, then 7 or 8 after each)
+    int dogRounds = 0;              // dogs' rounds begun
+    int dogSpawned = 0, dogKilled = 0, dogStalled = 0;   // dogs made / killed / ended by the stall guard (testing line)
+    int refills = 0;                // Max Ammo given (a seat each)
+    bool dogs() const { return special == kDogs; }
     int toSpawn = 0;                // this round's creatures still to come
     int waveTotal = 0;              // this round's count
     int spawnTimer = 0;             // frames to the next spawn
@@ -175,7 +201,12 @@ public:
     struct Point { float pos[3]; int32_t ang[3]; uint32_t flags; int kind; int type; };
     std::vector<Point> points;      // the arena's spawn points (the lead-in's captured creatures)
     std::vector<Point> section;     // captured in the lead-in since the last creature wait
-    struct Mine { uint32_t task = 0, serial = 0; uint64_t born = 0; int type = 0; bool cut = false; };
+    // survmaps: the arena's entry records (SurvivalArena::entryKind: the story's own records, ENTBE's), each's type
+    // and the frame it is free again (its last copy off the chain: one copy on a chain at a time)
+    struct Entry { uint32_t rec = 0; int type = 0; uint64_t freeAt = 0; };
+    std::vector<Entry> entries;
+    int entrySpawned = 0;           // spawns that came by an entry record
+    struct Mine { uint32_t task = 0, serial = 0; uint64_t born = 0; int type = 0; bool cut = false; bool dog = false; };
     std::vector<Mine> mine;         // Survival's creatures made this game (task, its serial: alive while it matches)
     EngageWatch engage;             // survfix: the ones that will never attack are sent away (game/engage.h)
     int retiredN = 0;               // .. how many (not kills; the round does not wait for them)
@@ -202,10 +233,17 @@ public:
     std::string titleLine() const;
     std::string statusLine() const;
     std::string summary(const Runtime& rt) const;   // one line: the result (the test and the log)
+    // online (protocol 22, docs/netplay.md "Survival online"): a 64-bit digest of the mode's logic state (the rounds,
+    // timers, every seat's points and buys, the creatures, the random stream; not the texts: a PC's language), hashed
+    // into the desync check (NetGame::gameHash)
+    uint64_t digest() const;
 
 private:
+    friend struct ::hotd::test::Access;   // (tests/unit: the director's random stream)
     uint32_t rng_ = 0;
     std::vector<Point> all_;        // every place the lead-in captured
+    bool takeSeen_ = false;         // survmaps: a creature of the arena's takeKind captured since the last creature wait
+    std::vector<Entry> sectionEntries_;   // .. and the entryKind records captured since then
     uint32_t stallPc_ = 0;         // the lead-in: the script's place and the frames it stayed there
     int stallFrames_ = 0;
     bool reported_ = false;         // the end reported (justFinished once)
@@ -219,6 +257,10 @@ private:
     void startWave(Runtime& rt);
     void testIdleFrame(Runtime& rt);
     void spawnOne(Runtime& rt);
+    bool spawnEntry(Runtime& rt, int life);   // survmaps: a copy by an entry record (false: none free)
+    uint32_t dogRng_ = 0;           // survdogs: the dogs' rounds' own stream (which round)
+    int dogNext() { dogRng_ = dogRng_ * 1103515245u + 12345u; return 7 + int((dogRng_ >> 16) & 1); }
+    void spawnDog(Runtime& rt);     // survdogs: a dog by a copy of one of the story's records at a spawn point
     int pickType(const Runtime& rt, bool& cut);
     void countMine(Runtime& rt);
     void seats(Runtime& rt);        // each frame: lives at the start, the weapons flag, the score, the shop's models

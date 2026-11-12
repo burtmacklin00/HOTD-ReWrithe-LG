@@ -9,8 +9,10 @@
 # 2026-11-05: not in the public source at all): the folders src/unreleased and docs/unreleased, every C / C++ block
 # "#if HOTD_UNRELEASED" .. "#endif" (an "#else" part stays) and every "# [unreleased]" .. "# [/unreleased]" section
 # (language files, tool scripts): the copy builds without them (CMake: HOTD_UNRELEASED OFF). The script then checks the
-# copy: no private\ path, no ROM / EXE / archive / image / audio files, no file over 1 MB, and lists links into the
-# left-out files.
+# copy: no private\ path, no ROM / EXE / archive / image / audio files, no file over 1 MB (src/ source text: 4 MB), and lists links into the
+# left-out files. hordepub (user 2026-11-09): Horde Mode is public now ("Experimental / Proof of Concept": src/game/horde.*,
+# docs/horde.md, its "#if HOTD_HORDE" blocks): the copy must have it; what is left in the unreleased blocks (Survival's
+# old "Horde" names) is still dropped.
 param([Parameter(Mandatory)] [string]$Out, [string]$Rev = "HEAD")
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -92,11 +94,21 @@ foreach ($f in $files) {
     if ($rel -match '^private[\\/]') { $problems += "private file: $rel" }
     if ($rel -match $allowed) { continue }
     if ($f.Name -match $badExt) { $problems += "binary / game-data type: $rel" }
-    if ($f.Length -gt 1MB) { $problems += ("over 1 MB ({0:N1} MB): $rel" -f ($f.Length / 1MB)) }
+    # our own source text may go to 4 MB (src/main.cpp passed 1 MB in v1.4); everything else stays under 1 MB
+    $sizeCap = 1MB
+    if ($f.Extension -in @(".cpp", ".h", ".c", ".hpp", ".inc") -and $rel -match '^src[\\/]') { $sizeCap = 4MB }
+    if ($f.Length -gt $sizeCap) { $problems += ("over {0} MB ({1:N1} MB): $rel" -f ($sizeCap / 1MB), ($f.Length / 1MB)) }
     if ($f.Extension -in @(".cpp", ".h", ".c", ".hpp", ".inc", ".mm", ".txt", ".ps1", ".sh", ".py", ".ini") -and
         (Select-String -LiteralPath $f.FullName -Pattern '^\s*#\s*if\s+HOTD_UNRELEASED|^\s*#\s*\[/?unreleased\]' -Quiet)) {
         $problems += "an unreleased block / section left: $rel"
     }
+}
+# (hordepub: Horde Mode is in the public source: its files and its menu item)
+foreach ($need in @("src/game/horde.cpp", "src/game/horde.h", "src/game/horde_places.inc", "docs/horde.md")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $outFull $need))) { $problems += "Horde Mode missing: $need" }
+}
+if (-not (Select-String -LiteralPath (Join-Path $outFull "src/game/frontend.cpp") -Pattern '^\s*#\s*if\s+HOTD_HORDE\b' -Quiet)) {
+    $problems += "Horde Mode's menu item missing: src/game/frontend.cpp"
 }
 $links = @()
 foreach ($f in $files | Where-Object { $_.Extension -eq ".md" }) {

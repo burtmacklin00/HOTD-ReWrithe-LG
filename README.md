@@ -2,7 +2,7 @@
 
 Unofficial build of [The House of the Dead: ReWrithe](https://github.com/TawhidI-602/The-House-of-the-Dead-ReWrithe)
 for light gun setups (arcade cabinets, Gun4IR, Sinden, AimTrak and other guns that act as a mouse). Based on ReWrithe
-**v1.3.1**. New ReWrithe releases are merged in only when they are worth it, so a working setup is never broken by
+**v1.4.0**. New ReWrithe releases are merged in only when they are worth it, so a working setup is never broken by
 upstream changes. Not made by, or supported by, ReWrithe's author: please report problems with this edition here, not
 on the original's page.
 
@@ -142,7 +142,8 @@ arcade version's more detailed models and textures or the PC's.
      the two boxes, as a zip, a folder or a CD image (`.iso`, `.bin` / `.cue`), or click a box to choose. Each is
      checked at once: green is good, yellow is accepted with a note, red says why not ("This is the Saturn version",
      "This is the PC demo", "SOUND\GAMESNDS.RBH is missing" ...).
-   - **Options**: Desktop shortcut, Start menu entry (both on), Add to Steam, import the CD music (`TrackNN.ogg`).
+   - **Options**: Desktop shortcut, Start menu entry (both on), Create a VR shortcut (off; [How to play in VR](#how-to-play-in-vr)),
+     Add to Steam, import the CD music (`TrackNN.ogg`).
    - **Install**: copies the game and only the files it needs (the 29 ROM files, the PC game's files, the music)
      into the folder, so your originals are not needed any more. Or **Play from here** without installing.
    - **Play**. From then on start the game with its shortcut; it opens at the main menu.
@@ -196,6 +197,20 @@ Nothing else needs installing (the game brings its own SDL; sound through PipeWi
 desktop icon may first need a right-click -> **Allow Launching**. A `.7z` / `.rar` of the PC game needs `bsdtar`
 (`sudo apt install libarchive-tools`) or 7-Zip; a zip, a folder or a CD image need nothing. Linux does not update
 itself: the game tells you when a new version is out and opens the download page.
+
+**Light guns and several mice on Linux** (GitHub #67): the desktop (Wayland always, X11 too) gives the game one cursor
+for every mouse, so the game reads the mice and light guns straight from `/dev/input/event*` (the kernel's evdev, no
+extra software). That needs read access, once: add yourself to the `input` group,
+
+    sudo usermod -aG input $USER
+
+then log out and back in (or restart). Two mice then work as on Windows: Player 1 Input **Mouse**, Player 2 Input
+**Mouse 2**; the desktop cursor aims until a second mouse is used, then each mouse has its own crosshair (the first
+used is player 1). Light guns: set the player's input to **Light Gun** (Options -> Controls); which gun / mouse is
+whose: Options -> Controls -> **Light Guns** (Assign): click a seat, then click that mouse / pull that gun's trigger.
+Without the access the Light Guns page shows **Mice Not Readable** and `hotd.log` says so. A plain single mouse
+needs none of this. The `input` group can read every keyboard and mouse on the PC
+(as Steam's controller support does); `sudo gpasswd -d $USER input` undoes it.
 
 **Steam Deck (SteamOS)**:
 
@@ -351,7 +366,7 @@ Windows 10 / 11, 64-bit, Visual Studio 2022 build tools, CMake, a GPU with OpenG
 
 Controls: mouse = light gun (left trigger, right reload; a shot off screen also reloads); player 2 = a second mouse or the
 keyboard (arrows, Space, Enter); keys 1 / 2 = start / join; Esc / P pause (as the PC game:
-Continue / Exit, Exit = back to the menu); F11 / Alt+Enter fullscreen (the game starts in borderless fullscreen; Options -> Video "Display Mode": Windowed / Borderless (the desktop's resolution) / Fullscreen (exclusive), applied at once, `displaymode=` in launcher.ini, `--windowed`; it opens the way you left it; Options -> Video "Resolution": the window's size, or in Fullscreen the display mode (Auto = the desktop's; a 10-second "Keep this resolution?"); `resolution_fullscreen=` / `resolution_window=` in launcher.ini); F12 screenshot. Gamepads and light guns: below.
+Continue / Exit, Exit = back to the menu); F11 / Alt+Enter fullscreen (the game starts in borderless fullscreen; Options -> Video "Display Mode": Windowed / Borderless (the desktop's resolution) / Fullscreen (exclusive), applied at once, `displaymode=` in launcher.ini, `--windowed`; it opens the way you left it; Options -> Video "Resolution": the window's size, or in Fullscreen the display mode (Auto = the desktop's; a 10-second "Keep this resolution?"); `resolution_fullscreen=` / `resolution_window=` in launcher.ini); F12 screenshot; F8 Photo Mode (below). Gamepads and light guns: below.
 
 **Rebinding keys and buttons:** Options -> Controls -> **Keys & Buttons**. Pick the player (1-4) on the top row. Page 1
 is the keyboard (Aim Up / Down / Left / Right, Fire, Reload, Start, Pause; two keys each), page 2 the gamepad (Fire,
@@ -359,7 +374,7 @@ Reload, Start, Pause, Recentre, Gyro Hold, Precise Aim; any number of buttons, b
 row (or move the hand there with the keys / pad and press Enter / Cross / A), then press the key or button: a new one is
 added, one the row already has is taken off. Esc, a click or 5 seconds cancels. A key or button used for two things
 shows "!" and the Status row names the other use. **Reset Keys** / **Reset Pad** / **Reset Everyone** go back to the
-defaults (a pad's default is "Auto": the buttons of its control style). Esc always pauses and F1 / F3 / F9 / F11 / F12
+defaults (a pad's default is "Auto": the buttons of its control style). Esc always pauses and F1 / F3 / F8 / F9 / F11 / F12
 cannot be bound. The default keys are the ones listed above (player 1: 1 start, P pause; player 2: arrows, Space /
 Right Ctrl fire, Right Shift / Enter reload, 2 start; players 3 / 4: see 4 players). Kept in launcher.ini (`key1.fire=`,
 `padbind1.fire=`, only the ones you changed); online co-op uses the same keys and buttons.
@@ -406,7 +421,9 @@ music, read from your PC files), reorganised:
   CRT filter, **Crosshairs >** the Firing Range), **Audio** (sound source, effects and music volume bars,
   music, menu music), **Controls** (each player's input, Keys & Buttons, the controller pages, Light Guns (Assign),
   light gun type, Shot Flash, Gun Border, calibration), **Gameplay** (blood color incl. custom Red / Green / Blue bars,
-  auto reload, **Free Play** (PC Mode's continues never run out; arcade games are always free play), Score Display,
+  auto reload, **Free Play** (PC Mode's continues never run out; arcade games are always free play), the cheats
+  **Invincibility** and **Infinite Ammo** (Off at every start, never saved, never online; a game with one on gets no
+  high score), Score Display,
   Sonic Mode, title / attract, FBI screen, **PC Start-up Screens** (the 1998 PC's SEGA screen and zombie title art at
   start-up; off by default); **Advanced**: game speed, music numbering, Trailer Mode, the 4P
   boss hit points and enemy toughness, guards), **Mods** (each mod On / Off, its Settings page) and **System** (Language,
@@ -492,6 +509,19 @@ is only the picture (command line: `--scene-no-subtitles`).
 says On / Off; F7 lasts for that run only, Options keeps it). While on, the game shows only the picture: no lamps,
 score, ammo, prompts, players 3 / 4's bands, online info, crosshairs, mouse cursor or subtitles. You still aim and
 shoot as usual (the game plays the same; only the drawing changes). Off by default. Command line: `--trailer`.
+
+**Photo Mode:** **F8** in any game (Arcade, PC Mode, Boss Mode, Survival, The Typing of the Dead 0 ...), or **Photo
+Mode** in the pause menu. The game stops completely (nothing moves, no timer runs, the music and sounds are held where
+they are) and a free camera starts where the game's camera is. Keys: W A S D / arrows move, Q / E down / up, Shift
+faster, Ctrl slower, hold a mouse button and drag to look, the wheel or + / - change the field of view (0 or the middle
+button resets it), R puts the camera back, C slow camera, **H hides the HUD** (and the help line at the top), **F12**
+(or Enter) saves a full-size screenshot to `screenshots\`; F8 / Esc / Backspace leave it (from the pause menu: back to
+the pause). Pad: sticks move / look, LB / RB or the triggers down / up, d-pad up / down field of view, R3 resets it, X
+(Square) puts the camera back, Y (Triangle) hides the HUD, A (Cross) screenshot, B (Circle) / Start leave, L3 faster,
+Back slow camera. On leaving, the game goes on exactly where it stopped (nothing in it changed). Offline only: in an
+online game the pause shows it greyed ("offline only") and F8 says why. Not in VR. Inspired by Tenome's Typing of the
+Dead EX community patch (idea only). Test run: `--photo-test F:N` (with `--frames`; add `--render --shot-dir <dir>`
+for pictures).
 
 **Jukebox** (main menu, under Gallery): listen to anything the game plays. Three lists: **Music** (each song named by
 where the game plays it: Title and attract, Chapter 1-4, Boss: Chariot / Hanged Man / Hermit, Boss: Magician, Game over,
@@ -605,10 +635,80 @@ on every pull, as the arcade's gun cycle times it; Auto / Off / On, `--shot-flas
 the screen on every shot (photosensitivity). launcher.ini `guntype=` `gunflash=` `gunborder=`. One gun alone also works
 as player 1's plain Mouse (the desktop cursor), without the calibration. A
 gun that reports relative motion (like an ordinary mouse) is a Mouse / Mouse 2 input instead. (tools\calibrate_gun.ps1
-is the old MAME-era tool, disabled; it is not used.)
+is the old MAME-era tool, disabled; it is not used.) On **Linux** the guns and mice are read through evdev
+(`/dev/input`) instead of Windows' raw input: once, `sudo usermod -aG input $USER`, then log out and in
+([Light guns and several mice on Linux](#linux-steam-deck-and-macos)). Light guns there: any that the kernel lists
+as a mouse with a left button (relative or absolute X / Y); touchpads are left out.
 
 Only a DualSense has been tried by a person so far (no light gun yet; no pads or guns on the development PC): docs/teaser_status/pads.md
 lists what the automated test covers and what needs a real device.
+
+## How to play in VR
+
+**Experimental.** The game can be played in a **VR headset connected to your PC**: you stand inside the game's world (look around,
+behind you too), the right controller is your gun, with the game's own gun hand and crosshair. The game still moves
+you along its track as in the arcade; you only look and shoot. **New**: it has not been tried with every headset yet;
+if it does not start, `settings\hotd.log` says why, and the game plays on the monitor as usual. Details: docs/vr.md.
+**VR is single player only**: no Online Co-op and no 2 / 4 players (Co-op is greyed, "Not available in VR").
+
+**What you need**: a PC VR headset (or a Meta Quest connected to the PC), and the headset's PC app, which is also
+the "OpenXR runtime" the game talks to. Only one of these needs to be set up:
+
+- **Meta Quest 3 / 3S / 2 / Pro** (Link or Air Link):
+  1. Install the **Meta Horizon Link** app on the PC (from meta.com; it was called Meta Quest Link and the Oculus app
+     before) and sign in.
+  2. In the app: **Settings > General > OpenXR Runtime: "Set Meta Horizon Link as active"** (one time).
+  3. Connect the headset: a **USB-C cable** that carries data (Link), or **Air Link** over Wi-Fi (the PC on a
+     cable to the router, the headset on 5 GHz Wi-Fi). In the headset: **Quick Settings > Link > Launch**. You
+     now see the Link home (a grey room with a menu bar).
+- **Meta Quest through SteamVR** (Meta's free **Steam Link** app on the headset): install Steam and SteamVR on the
+  PC, Steam Link from the headset's Store, start it in the headset and pick your PC; then SteamVR is the runtime
+  (below). Step by step, and switching between Meta and SteamVR: docs/vr.md "SteamVR".
+- **Valve Index, HTC Vive, Pico, Windows Mixed Reality and other SteamVR headsets**:
+  1. Install **Steam** and **SteamVR** (Steam's Library > Tools), connect the headset, start SteamVR (its small window
+     shows the headset and the controllers green).
+  2. In SteamVR: **Settings > OpenXR: "Set SteamVR as OpenXR runtime"** (one time; shown when another app is the active one).
+  (A Quest can use SteamVR too, through Steam Link, Quest Link or Virtual Desktop.)
+
+**Is it set up right?** Run **VR Check.bat** in the portable folder (or `bin\hotd.exe --vr-check`): it lists the active
+runtime, the headset it sees, its picture formats and controller profiles, and ends with `RESULT: OK` or what is
+missing. The same lines go to `settings\hotd.log`: send that file with a VR problem report.
+
+**Start the game in VR**:
+
+1. Start **"The House of the Dead ReWrithe VR.exe"** (the setup makes it beside "The House of the Dead ReWrithe.exe",
+   with the same icon), or the **"(VR)" shortcut** (tick **Create a VR shortcut** in the setup's Options), or
+   **Play in VR.bat** in the portable folder, or from a terminal: `hotd --vr openxr`. VR always uses the OpenGL
+   renderer, whatever Options > Video > Renderer says.
+2. Put the headset on: the attract plays, pull the trigger (or press A / X) for the **main menu**, shown on a big
+   screen in the headset. Point with the right controller (a red ray) and pull the trigger to choose (A = Enter,
+   B = back); pick Arcade to play. The window shows what the left eye sees. (`menu_panel = off` in
+   `data\vr\vr.ini` keeps the menus on the monitor instead, for the mouse.)
+
+**Standalone on a Meta Quest (no PC while you play)**: an Android build (an APK) that you install on the headset
+yourself (sideloading; Developer Mode, free). First-timer steps, copying your game files to the headset and where its
+log is: docs/quest.md. Not tested on a headset yet.
+
+**Controls** (Meta Quest Touch; other controllers: docs/vr.md "Controls"):
+
+| | |
+|---|---|
+| shoot | right trigger |
+| reload | grip, A or B; or point the gun at the floor; or shoot off the screen, as with a light gun |
+| Start / join / continue | X |
+| pause | Y or the left menu button (shown for a few seconds as you start; in the pause point the gun at an item and pull the trigger) |
+| recentre (after you move your chair) | hold a thumbstick down for 1 second |
+
+**Comfort**: play seated. The settings are in `data\vr\vr.ini` (read at each start): `cutscenes = cinema` shows the
+cut-scenes on a big screen in front of you (the camera's fast cuts do not move you; the default `world` plays them
+around you), `follow = level` keeps the horizon level when the game's camera looks up or down, `vignette = on` darkens the
+edges on fast turns (off by default), `dual_pistols = on` gives you a gun in each hand; a shake of the gun or a sharp flick of its nose upward (the
+Wii light-gun reload) reloads too (`shake_reload` / `flick_reload`, both on by default). In VR, Options > Gameplay
+also has **Dual Pistols (VR)**, **Laser (VR)** and **Crosshair (VR)** (off: no laser / no crosshair, the aim still
+works), saved for the next time.
+If the gun sits wrong in your hand: `gun_offset` / `gun_rotate`. Taking the headset off and on again is fine (the
+picture comes back; the game does not pause by itself: press Y or the menu button); quitting
+from the headset's menu goes back to the flat game on the monitor.
 
 ## Online co-op
 
@@ -646,6 +746,11 @@ Hebrew**. Arabic and Hebrew read right to left (joined Arabic letters, mirrored 
 itself (RELOAD, CONTINUE?, the chapter cards) stay as they are. Anyone can make a language, no programming:
 [docs/translating.md](docs/translating.md) (`--export-lang en`, F5 reloads in the menu, `--lang-check <code>` lists
 what does not fit). The bundled Noto Sans fonts (Korean, Japanese, Arabic, Hebrew) are under the SIL OFL.
+
+**Subtitles:** Options > Gameplay > Subtitles (Off / Original / Custom) and Subtitle Size. Custom reads your own
+subtitle file (`subtitles\<language>.txt`, any language): each caption's text, timing, size and place
+([docs/subtitles.md](docs/subtitles.md); the idea after Tenome's
+[Typing of the Dead EX](https://github.com/Tenome/Typing-of-the-Dead-EX), MIT).
 
 ### Spanish (Castilian, Spain: doblaje en castellano)
 
@@ -707,6 +812,32 @@ concept:** playable from Chapter 1 to the ending, but rough (placeholder HUD loo
 - **Tuning:** `data\typing\typing.ini` (word lengths per difficulty, the dictionary, how slowly thrown things fly, the
   grades); the word lists are in `data\typing\default\`. A mod can ship its own `typing.ini`. Details:
   [docs/typing.md](docs/typing.md).
+- **Live WPM and statistics:** Options > Gameplay > Typing of the Dead 0: a live WPM / accuracy line (off by default)
+  and a Statistics page (this session and all games: WPM, accuracy, words, your most missed keys and words).
+- **Word packs, Practice, Mutators, Speak the Words:** your own word lists in `data/typing/packs` (one word or phrase
+  a line; `order = text` in a pack.ini types a text in order), mixed on Options > Gameplay > Typing of the Dead 0 >
+  Word Packs; More Modes > The Typing of the Dead 0 > Practice (words float by, no attacks); Mutators (long / short
+  words, one life, no Backspace, double speed, reversed words: no high score table); Speak the Words (the system's
+  voice reads each new word, off by default). `docs/typing.md`.
+- Some rules and features were inspired by Tenome's [The Typing of the Dead EX – Modern Community
+  Patch](https://github.com/Tenome/Typing-of-the-Dead-EX) (MIT): its notes on SEGA's TotD, its statistics, word packs,
+  in-order typing, practice, mutators and model packs, and the patch as the inspiration for our Photo Mode (F8)
+  (ideas only).
+
+## Horde Mode (Experimental / Proof of Concept)
+
+The arcade game from Chapter 1 to the ending (its story, rescues, bosses and routes) with many more zombies at once,
+after HOTD1 Remake's Horde mode. **Experimental / proof of concept:** playable, but the extra creatures' places and
+numbers are still being tuned (local games only: online co-op starts without it).
+
+- **Start it:** main menu > More Modes > **Horde** (or `hotd.exe --horde-mode [low|normal|high]`); **Horde Size** below
+  it: Low, Normal or High. Own top 10 (High Scores > Horde).
+- **Weapons:** Survival's guns (SMG, assault rifle, double pistols, shotgun, the Magician's Hand) drop from some kills,
+  crates and saved researchers (and wait in Chapter 4's bonus room); shoot a pickup to take it. A gun you already have
+  gets ammo (no switch); your weapons stay after a continue. **Upgrades** (Quick Reload, Big Mag, Max Ammo) come from
+  some crates, from saving every researcher of a chapter and from a chapter without losing a life. Details:
+  [docs/horde.md](docs/horde.md), [docs/weapons.md](docs/weapons.md).
+- Some creatures already stand at a stop when you arrive, and Survival's cut creatures appear among the extra ones.
 
 ## If something goes wrong
 

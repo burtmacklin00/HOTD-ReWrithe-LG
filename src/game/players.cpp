@@ -88,7 +88,8 @@ void Runtime::player_join(int p)
         p = 1 - p;
     if (lgModes.hardcore && lgOut_[p & 3])   // Light Gun Edition: Hardcore: out of lives is out for the game
         return;
-    if (lgSolo && p != 0 && mem.at<int16_t>(G::game_mode) != 3)   // (one player only: The Typing of the Dead 0)
+    if ((lgSolo && p != 0 && mem.at<int16_t>(G::game_mode) != 3)   // (one player only: The Typing of the Dead 0)
+        || (vrSolo && p != 0))   // (fix140a: VR is single player only: a second player's Start does not join)
         return;
     startRequest[p] = true;
 }

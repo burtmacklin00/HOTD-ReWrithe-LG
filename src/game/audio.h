@@ -11,14 +11,18 @@
 // the music cues are logged and skipped.
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace hotd::audio { class SoundBoard; }
@@ -84,6 +88,7 @@ public:
     uint64_t frameNo = 0;                    // set by the frame loop (the cue trace's frame numbers)
     bool traceCues = false;                  // HOTD_TRACE_SOUND: every cue with its frame
     std::string describe(int cue) const;     // "type name / value" of a PC cue (the report)
+    void reportCues(float peak);             // (testing, HOTD_TOTD_SOUNDLIST: the cues by loudness at that peak)
     int pcCueOf(uint32_t arcadeCode) const;  // -1: none
     bool isMusicCode(uint32_t arcadeCode) const;   // its PC cue starts a music track or turns the music off
     bool isMusicStart(uint32_t arcadeCode) const;  // its PC cue starts a music track
@@ -199,6 +204,14 @@ private:
     Voice tails_[8];   // stopped / replaced voices ramping down (cut)
     std::unique_ptr<Music> music_;
     SDL_AudioStream* stream_ = nullptr;
+    // questaudio: the device when opened by hand (Android: at 48 kHz; 0 = SDL_OpenAudioDeviceStream's own), and the
+    // log's count of the output's late pulls (audio.cpp, callback)
+    uint32_t device_ = 0;
+    uint64_t deviceBufNs_ = 0, lastPullNs_ = 0, lateWorstNs_ = 0, lateLogNs_ = 0, lateCount_ = 0;
+    // (questaudio2: the output callback's own time and the wait for lock_ in it, worst per 10 s, logged with the late pulls)
+    uint64_t cbWorstNs_ = 0, lockWaitWorstNs_ = 0, cbSlow_ = 0;
+    std::atomic<uint64_t> lockWaitNs_{0};
+    std::atomic<uint64_t> lateTotal_{0};
     float sfxVolume_ = 0.8f, musicVolume_ = 0.6f;
     bool quietEffects_ = false;
     bool musicOn_ = true;
@@ -212,6 +225,32 @@ private:
     bool boardOn_ = false, boardHeld_ = false;
     float boardPeak_ = 0, boardVolume_ = -1;
     std::vector<float> boardBuf_;
+    // audioload (user 2026-11-10: "my audio was crackling", PC VR with the CPU saturated): with a device the board no
+    // longer runs inside SDL's callback (under lock_, just in time) but ahead on its own thread into a ring, lead_
+    // frames (HOTD_AUDIO_AHEAD_MS, default 46 ms; 0 = the old way); the game's codes go in stamped at the output
+    // position + lead_, so they land on the board sample the stamp says whatever the thread timing (a constant
+    // latency). The board's samples are the same, only when they are made changes. An underrun fades out, is logged.
+    void boardLoop();
+    void fakeDeviceLoop();
+    void takeBoard(float* out, int frames);
+    void ringReset();   // (ringLock_ held) after the board's reset / load / skip: the ring is empty, positions 0
+    bool boardCommand(uint32_t code);   // into the ring's queue (false: no ring, the board takes it directly)
+    std::thread boardThread_, fakeThread_;
+    uint64_t fakeUntil_ = 0;   // HOTD_AUDIO_FAKE_DEVICE=<seconds>: shutdown waits until then (SDL ticks, ns)
+    std::atomic<bool> threadsRun_{false};
+    mutable std::mutex boardLock_;   // board_ between the board thread and the game thread (lock order: boardLock_, ringLock_)
+    mutable std::mutex ringLock_;    // the ring, its positions, the code queue
+    std::condition_variable ringSpace_, ringData_;
+    std::vector<float> ring_;                    // ringCap_ stereo frames
+    size_t ringCap_ = 0, ringRead_ = 0, ringFill_ = 0;
+    uint64_t emuPos_ = 0, consumed_ = 0;         // board frames made / taken since the ring's reset
+    int lead_ = 0, want_ = 0, resume_ = 0;       // want_: the WAV test's waiting consumer; resume_: frames to start on
+    bool ringOn_ = false, ringTest_ = false, primed_ = false, underrun_ = false, boardReady_ = false;
+    std::deque<std::pair<uint64_t, uint32_t>> cmds_;   // (board frame, code)
+    float lastOut_[2] = {};
+    int fadeIn_ = 0;
+    uint64_t underrunFrames_ = 0;                // this underrun's length so far
+    std::atomic<uint64_t> underruns_{0}, underrunTotal_{0}, underrunLog_{0};   // underrunLog_: frames to log
 };
 
 } // namespace hotd::game

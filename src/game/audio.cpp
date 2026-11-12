@@ -245,9 +245,16 @@ bool Audio::startBoard(const std::vector<uint8_t>& program, const std::vector<ui
 {
 #ifdef HOTD_HAVE_ARCADE_SOUND
     std::lock_guard<std::recursive_mutex> g(lock_);
+    std::lock_guard<std::mutex> bl(boardLock_);
     if (!board_)
         board_ = std::make_unique<audio::SoundBoard>();
-    if (!board_->load(program, samples, err)) {
+    const bool ok = board_->load(program, samples, err);
+    {
+        std::lock_guard<std::mutex> rl(ringLock_);
+        ringReset();
+        boardReady_ = ok;
+    }
+    if (!ok) {
         boardOn_ = false;
         return false;
     }
@@ -266,8 +273,12 @@ void Audio::resetBoard()
 {
 #ifdef HOTD_HAVE_ARCADE_SOUND
     std::lock_guard<std::recursive_mutex> g(lock_);
-    if (boardOn_ && board_)
+    if (boardOn_ && board_) {
+        std::lock_guard<std::mutex> bl(boardLock_);
         board_->reset();   // the 68000 and the SCSP start over: no voice plays
+        std::lock_guard<std::mutex> rl(ringLock_);
+        ringReset();       // (audioload: what was made ahead is from before the reset)
+    }
     boardHeld_ = false;
 #endif
 }
@@ -276,7 +287,11 @@ uint64_t Audio::boardSamples() const
 {
 #ifdef HOTD_HAVE_ARCADE_SOUND
     std::lock_guard<std::recursive_mutex> g(lock_);
-    return boardOn_ && board_ ? board_->samplesRun() : 0;
+    if (!boardOn_ || !board_)
+        return 0;
+    std::lock_guard<std::mutex> bl(boardLock_);
+    std::lock_guard<std::mutex> rl(ringLock_);
+    return board_->samplesRun() - (ringOn_ ? ringFill_ : 0);   // (audioload: the samples played, not those made ahead)
 #else
     return 0;
 #endif
@@ -288,6 +303,13 @@ void Audio::boardSkip(int frames)
     std::lock_guard<std::recursive_mutex> g(lock_);
     if (!boardOn_ || !board_ || frames <= 0)
         return;
+    std::lock_guard<std::mutex> bl(boardLock_);
+    {   // audioload: the codes still queued go in first (the Jukebox's song, then its seek)
+        std::lock_guard<std::mutex> rl(ringLock_);
+        for (const auto& c : cmds_)
+            board_->command(c.second);
+        cmds_.clear();
+    }
     std::vector<float> scratch(size_t(std::min(frames, 4410)) * 2);
     while (frames > 0) {
         const int n = std::min(frames, 4410);
@@ -295,6 +317,8 @@ void Audio::boardSkip(int frames)
         board_->render(scratch.data(), n, 0.0f);
         frames -= n;
     }
+    std::lock_guard<std::mutex> rl(ringLock_);
+    ringReset();
 #else
     (void)frames;
 #endif
@@ -304,6 +328,184 @@ void Audio::stopBoard()
 {
     std::lock_guard<std::recursive_mutex> g(lock_);
     boardOn_ = false;
+}
+
+// audioload: the board's ring (audio.h). The board thread makes board frames up to consumed_ + lead_ (+ want_, the WAV
+// test's request) and puts the game's codes in at their stamped frame; the output (SDL's callback, the fake device or
+// the WAV test) takes them from the ring
+namespace {
+constexpr size_t kRingFrames = 16384;   // 371 ms: room for any lead
+constexpr int kBoardChunk = 256;        // board frames per turn (5.8 ms; boardLock_ is held that long)
+constexpr int kResumeFrames = 441;      // after an underrun / a reset: the output starts again with 10 ms in the ring
+constexpr int kFadeInFrames = 64;       // after an underrun: 1.5 ms fade in
+void audioThreadBoost();                // Windows: MMCSS "Pro Audio" (end of the file)
+}
+
+void Audio::ringReset()
+{
+    ringRead_ = ringFill_ = 0;
+    emuPos_ = consumed_ = 0;
+    cmds_.clear();
+    primed_ = ringTest_;   // (the WAV test never waits)
+    underrun_ = false;
+    underrunFrames_ = 0;
+    fadeIn_ = 0;
+    lastOut_[0] = lastOut_[1] = 0;
+    ringSpace_.notify_all();
+    ringData_.notify_all();
+}
+
+bool Audio::boardCommand(uint32_t code)
+{
+    std::lock_guard<std::mutex> rl(ringLock_);
+    if (!ringOn_)
+        return false;
+    // the output's position + the lead: never a frame the board thread has made already (it stops there)
+    cmds_.emplace_back(consumed_ + uint64_t(lead_), code);
+    ringSpace_.notify_all();
+    return true;
+}
+
+void Audio::boardLoop()
+{
+    SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH);
+    audioThreadBoost();
+    std::vector<float> buf(size_t(kBoardChunk) * 2);
+    std::vector<uint32_t> due;
+    while (threadsRun_) {
+        if (const uint64_t f = underrunLog_.exchange(0))
+            note("audio: underrun " + std::to_string((f * 1000 + kRate / 2) / kRate) + " ms (" +
+                 std::to_string(underruns_.load()) + " so far)");
+        {
+            std::unique_lock<std::mutex> rl(ringLock_);
+            ringSpace_.wait(rl, [&] {
+                return !threadsRun_ || underrunLog_.load() != 0 ||
+                       (boardReady_ && emuPos_ < consumed_ + uint64_t(lead_ + want_) && ringFill_ < ringCap_);
+            });
+        }
+        if (!threadsRun_)
+            break;
+        std::lock_guard<std::mutex> bl(boardLock_);
+        std::unique_lock<std::mutex> rl(ringLock_);
+        const uint64_t limit = consumed_ + uint64_t(lead_ + want_);
+        if (!boardReady_ || !board_ || emuPos_ >= limit || ringFill_ >= ringCap_)
+            continue;
+        due.clear();
+        while (!cmds_.empty() && cmds_.front().first <= emuPos_) {
+            due.push_back(cmds_.front().second);
+            cmds_.pop_front();
+        }
+        uint64_t end = std::min<uint64_t>({limit, emuPos_ + kBoardChunk, emuPos_ + (ringCap_ - ringFill_)});
+        if (!cmds_.empty())
+            end = std::min(end, cmds_.front().first);   // the next code goes in at its own frame
+        const int n = int(end - emuPos_);
+        rl.unlock();
+        for (uint32_t c : due)
+            board_->command(c);
+        std::fill(buf.begin(), buf.begin() + size_t(n) * 2, 0.0f);
+        board_->render(buf.data(), n, 1.0f);   // (as mix() did: into zeros, gain 1)
+        rl.lock();
+        size_t w = (ringRead_ + ringFill_) % ringCap_;
+        for (int i = 0; i < n; ++i, w = (w + 1) % ringCap_) {
+            ring_[w * 2] = buf[size_t(i) * 2];
+            ring_[w * 2 + 1] = buf[size_t(i) * 2 + 1];
+        }
+        ringFill_ += size_t(n);
+        emuPos_ += uint64_t(n);
+        ringData_.notify_all();
+    }
+}
+
+void Audio::takeBoard(float* out, int frames)
+{
+    std::unique_lock<std::mutex> rl(ringLock_);
+    if (ringTest_) {   // the WAV test: exactly these frames, made now (the same board frames as without the ring)
+        want_ = frames;
+        ringSpace_.notify_all();
+        ringData_.wait(rl, [&] { return ringFill_ >= size_t(frames) || !threadsRun_ || !boardReady_; });
+        want_ = 0;
+    }
+    if (!primed_ && ringFill_ >= size_t(std::min(kResumeFrames, std::max(lead_, 1)))) {
+        primed_ = true;
+        if (underrun_) {   // the end of an underrun: logged by the board thread, faded in
+            underrunLog_ += underrunFrames_;
+            underrun_ = false;
+            fadeIn_ = kFadeInFrames;
+            ringSpace_.notify_all();
+        }
+    }
+    int i = 0;
+    if (primed_) {
+        const int n = int(std::min(size_t(frames), ringFill_));
+        for (; i < n; ++i) {
+            const float* s = &ring_[ringRead_ * 2];
+            float g = 1.0f;
+            if (fadeIn_ > 0)
+                g = 1.0f - float(fadeIn_--) / kFadeInFrames;
+            out[i * 2] = lastOut_[0] = s[0] * g;
+            out[i * 2 + 1] = lastOut_[1] = s[1] * g;
+            ringRead_ = (ringRead_ + 1) % ringCap_;
+        }
+        ringFill_ -= size_t(n);
+        consumed_ += uint64_t(n);
+        if (n < frames) {   // underrun: the board thread is late
+            primed_ = false;
+            underrun_ = true;
+            underrunFrames_ = 0;
+            ++underruns_;
+        }
+    }
+    if (i < frames) {   // no board frames: the last sample fades out (no click), then silence
+        const int missing = frames - i;
+        for (; i < frames; ++i) {
+            lastOut_[0] *= 0.9f;
+            lastOut_[1] *= 0.9f;
+            out[i * 2] = lastOut_[0];
+            out[i * 2 + 1] = lastOut_[1];
+        }
+        if (underrun_) {
+            underrunFrames_ += uint64_t(missing);
+            underrunTotal_ += uint64_t(missing);
+        }
+    }
+    ringSpace_.notify_all();
+}
+
+// HOTD_AUDIO_FAKE_DEVICE (tests): no device, a thread that pulls the mix as WASAPI would (10 ms periods, two of them
+// buffered, time-critical like SDL's device thread) and counts the periods that came too late (an audible gap)
+void Audio::fakeDeviceLoop()
+{
+    SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_TIME_CRITICAL);
+    audioThreadBoost();
+    constexpr int kPeriod = 441;
+    constexpr uint64_t kPeriodNs = 10'000'000;
+    std::vector<float> buf(size_t(kPeriod) * 2);
+    const uint64_t start = SDL_GetTicksNS();
+    uint64_t t0 = start, k = 0, late = 0, lateNs = 0, worst = 0, slowest = 0;
+    while (threadsRun_) {
+        const uint64_t due = t0 + k * kPeriodNs;
+        uint64_t now = SDL_GetTicksNS();
+        if (now < due)
+            SDL_DelayPrecise(due - now);
+        const uint64_t began = SDL_GetTicksNS();
+        mix(buf.data(), kPeriod);
+        now = SDL_GetTicksNS();
+        slowest = std::max(slowest, now - began);
+        const uint64_t deadline = t0 + (k + 1) * kPeriodNs;   // period k - 1 has played
+        if (now > deadline) {
+            ++late;
+            lateNs += now - deadline;
+            worst = std::max(worst, now - deadline);
+            t0 += now - deadline;   // the device goes on from the gap
+        }
+        ++k;
+    }
+    char line[320];
+    std::snprintf(line, sizeof line, "audio: fake device %.1f s, %llu periods: %llu late (%.1f ms in all, worst %.2f ms), "
+                  "slowest pull %.2f ms; board ring underruns %llu (%.1f ms)", (SDL_GetTicksNS() - start) / 1e9,
+                  (unsigned long long)k, (unsigned long long)late, lateNs / 1e6, worst / 1e6, slowest / 1e6,
+                  (unsigned long long)underruns_.load(), underrunTotal_.load() * 1000.0 / kRate);
+    note(line);
 }
 
 bool Audio::musicAvailable() const
@@ -341,18 +543,110 @@ bool Audio::init(const std::string& pcRoot, bool device, std::string& err)
             note("spanish voices: cannot read " + voiceDir_ + "'s SOUND/GAMESNDS.RBH");
         }
     }
-    if (!device)
+    // audioload: the board thread (with a device; tests: HOTD_AUDIO_FAKE_DEVICE = a paced puller instead of the
+    // device, HOTD_AUDIO_RING_TEST = --audio-wav through the ring, no lead: the same file as without it)
+    const bool fake = !device && std::getenv("HOTD_AUDIO_FAKE_DEVICE") != nullptr;
+    const bool ringTest = !device && !fake && std::getenv("HOTD_AUDIO_RING_TEST") != nullptr;
+    auto startThreads = [&]() {
+        const char* ms = std::getenv("HOTD_AUDIO_AHEAD_MS");
+        // (v1.4.0: the ring on Android only, user 2026-11-11 "the standalone audio crackling" with the deeper AAudio
+        // buffer already on: the board runs 60 ms ahead there; the PC keeps the board in the callback, as tested for
+        // 1.4.0, unless HOTD_AUDIO_AHEAD_MS asks: 46 ms was the PC's test value)
+#if defined(__ANDROID__)
+        constexpr int kDefaultLeadMs = 60;
+#else
+        constexpr int kDefaultLeadMs = 0;
+#endif
+        const int lead = ringTest ? 0 : std::clamp(ms ? std::atoi(ms) : kDefaultLeadMs, 0, 180) * kRate / 1000;
+        {
+            std::lock_guard<std::mutex> rl(ringLock_);
+            ringTest_ = ringTest;
+            ringOn_ = ringTest || lead > 0;   // (HOTD_AUDIO_AHEAD_MS=0: the board in the callback, as before)
+            lead_ = lead;
+            want_ = 0;
+            ringCap_ = kRingFrames;
+            ring_.assign(kRingFrames * 2, 0.0f);
+            ringReset();
+        }
+        threadsRun_ = true;
+        if (ringOn_)
+            boardThread_ = std::thread(&Audio::boardLoop, this);
+        if (fake)
+            fakeThread_ = std::thread(&Audio::fakeDeviceLoop, this);
+        if (fake)   // (=<seconds>: shutdown waits for them; "1": no wait to speak of)
+            fakeUntil_ = SDL_GetTicksNS() + uint64_t(std::max(0, std::atoi(std::getenv("HOTD_AUDIO_FAKE_DEVICE")))) * 1000000000ull;
+        if (ringOn_ || fake)
+            note("audio: the arcade board " + std::string(ringOn_ ? "runs ahead on its own thread (" +
+                 std::to_string(lead * 1000 / kRate) + " ms)" : "runs in the output's callback") +
+                 (fake ? ", output: the fake device" : ringTest ? ", output: the WAV" : ""));
+    };
+    if (!device) {
+        if (fake || ringTest)
+            startThreads();
         return true;
+    }
+#if defined(__ANDROID__)
+    // questfb (user 2026-11-10 on the Quest 3: "the audio had crackling"): AAudio's low-latency mode takes tiny bursts
+    // that the game's 15-17 ms CPU spikes in Chapter 1 (the Quest's log) leave empty; its default mode keeps a deeper
+    // buffer (a few ms more latency; the gun's sound is still well under a frame pair late)
+    SDL_SetHint(SDL_HINT_ANDROID_LOW_LATENCY_AUDIO, "0");
+    // questaudio4 (user 2026-11-11 on the Quest 3: the crackling gone with OpenSL ES, after the deeper buffer, the
+    // board's ring, the 48 kHz device and more AAudio buffers all left it): SDL's OpenSL ES output, not AAudio (an
+    // env SDL_AUDIO_DRIVER still wins: SDL_HINT_DEFAULT)
+    SDL_SetHintWithPriority(SDL_HINT_AUDIO_DRIVER, "openslES", SDL_HINT_DEFAULT);
+#endif
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         err = std::string("audio: ") + SDL_GetError();
         return false;
     }
     const SDL_AudioSpec spec{SDL_AUDIO_F32, 2, kRate};
-    stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &Audio::callback, this);
+    // questaudio (user 2026-11-11, the Quest 3 standalone: "constant audio crackling", unchanged by the deeper AAudio
+    // buffer and by the board's ring): SDL opens the device at the stream's rate, so Android had to resample our
+    // 44.1 kHz to the headset's native 48 kHz itself (Meta: "the native sample rate is 48000 Hz"; 44.1 kHz "forces the
+    // platform to resample at runtime"). On Android the device is opened at 48 kHz and SDL's own resampler makes it
+    // from our 44.1 kHz stream; elsewhere as before (the device at 44.1 kHz). HOTD_AUDIO_DEVICE_RATE=<Hz> asks for a
+    // rate anywhere (tests), 0 = the old way
+#if defined(__ANDROID__)
+    int deviceRate = 48000;
+#else
+    int deviceRate = 0;
+#endif
+    if (const char* r = std::getenv("HOTD_AUDIO_DEVICE_RATE"))
+        deviceRate = std::atoi(r);
+    if (deviceRate > 0) {
+        const SDL_AudioSpec want{SDL_AUDIO_F32, 2, deviceRate};
+        device_ = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want);
+        if (device_) {
+            SDL_PauseAudioDevice(device_);   // (as SDL_OpenAudioDeviceStream: starts with SDL_ResumeAudioStreamDevice)
+            stream_ = SDL_CreateAudioStream(&spec, &want);   // (bound: its output becomes the device's real format)
+            if (stream_ && !(SDL_SetAudioStreamGetCallback(stream_, &Audio::callback, this) && SDL_BindAudioStream(device_, stream_))) {
+                SDL_DestroyAudioStream(stream_);
+                stream_ = nullptr;
+            }
+            if (!stream_) {
+                SDL_CloseAudioDevice(device_);
+                device_ = 0;
+            }
+        }
+    } else {
+        stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &Audio::callback, this);
+    }
     if (!stream_) {
         err = std::string("audio device: ") + SDL_GetError();
         return false;
     }
+    {   // the log: what the device really is (its buffer = one pull of the callback)
+        SDL_AudioSpec got{};
+        int frames = 0;
+        if (SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(stream_), &got, &frames) && got.freq > 0) {
+            deviceBufNs_ = uint64_t(frames) * 1000000000ull / uint64_t(got.freq);
+            note("audio: device " + std::to_string(got.freq) + " Hz, " + SDL_GetAudioFormatName(got.format) + ", " +
+                 std::to_string(got.channels) + " channels, " + std::to_string(frames) + " frames a buffer (" +
+                 std::to_string(deviceBufNs_ / 1000000) + " ms), driver " + (SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "?") +
+                 "; our stream " + std::to_string(kRate) + " Hz");
+        }
+    }
+    startThreads();
     SDL_ResumeAudioStreamDevice(stream_);
     return true;
 }
@@ -412,11 +706,40 @@ void Audio::closeWav()
 
 void Audio::shutdown()
 {
-    closeWav();
+    if (fakeThread_.joinable() && SDL_GetTicksNS() < fakeUntil_) {   // (the load test: the device for its whole time)
+        note("audio: the fake device runs on to its " + std::string(std::getenv("HOTD_AUDIO_FAKE_DEVICE")) + " s");
+        SDL_DelayNS(fakeUntil_ - SDL_GetTicksNS());
+    }
     if (stream_) {
         SDL_DestroyAudioStream(stream_);
         stream_ = nullptr;
     }
+    if (device_) {   // (questaudio: the device opened by hand)
+        SDL_CloseAudioDevice(device_);
+        device_ = 0;
+    }
+    if (const uint64_t n = lateTotal_.exchange(0))
+        note("audio: the output's pulls came late " + std::to_string(n) + " times in all");
+    {   // audioload: the board thread / the fake device
+        std::lock_guard<std::mutex> rl(ringLock_);
+        threadsRun_ = false;
+        ringSpace_.notify_all();
+        ringData_.notify_all();
+    }
+    if (fakeThread_.joinable())
+        fakeThread_.join();
+    if (boardThread_.joinable())
+        boardThread_.join();
+    {
+        std::lock_guard<std::mutex> rl(ringLock_);
+        ringOn_ = ringTest_ = false;
+        if (const uint64_t f = underrunLog_.exchange(0))
+            note("audio: underrun " + std::to_string((f * 1000 + kRate / 2) / kRate) + " ms");
+        if (underruns_.load())
+            note("audio: " + std::to_string(underruns_.load()) + " underruns, " +
+                 std::to_string(underrunTotal_.load() * 1000 / kRate) + " ms in all");
+    }
+    closeWav();
     music_.reset();
 }
 
@@ -818,6 +1141,51 @@ std::string Audio::describe(int n) const
     return buf;
 }
 
+// smallfix2 (HOTD_TOTD_SOUNDLIST=1, testing): every short bank sample / file cue as the typing sounds would play it
+// (brought to the peak as playExtra's normalize): its length, its RMS in dB below full scale and the pitch its zero
+// crossings suggest, loudest (by RMS) first, to pick a clearer miss sound from the game's own
+void Audio::reportCues(float peak)
+{
+    struct Row { double rms; std::string text; };
+    std::vector<Row> rows;
+    for (size_t n = 0; n < cues_.size(); ++n) {
+        const Cue& c = cues_[n];
+        std::vector<uint8_t> d;
+        uint32_t rate = 11025;
+        const int k = c.value & 0xFFFF;
+        if (c.type == 1 && k >= 0 && k < int(samples_.size()) && samples_[size_t(k)].source == 1 &&
+            samples_[size_t(k)].offset + samples_[size_t(k)].length <= bank_.size()) {
+            const SampleInfo& s = samples_[size_t(k)];
+            d.assign(bank_.begin() + s.offset, bank_.begin() + s.offset + s.length);
+            rate = s.rate ? s.rate : 11025;
+        } else if (c.type == 4) {
+            if (const auto* o = loadOneShot(c.name); o && k >= 0 && k < int(samples_.size())) {
+                d = *o;
+                rate = samples_[size_t(k)].rate ? samples_[size_t(k)].rate : 22050;
+            }
+        }
+        if (d.size() < 64)
+            continue;
+        int pk = 1;
+        for (uint8_t b : d) pk = std::max(pk, std::abs(int(b) - 128));
+        double sum = 0;
+        int zc = 0;
+        for (size_t i = 0; i < d.size(); ++i) {
+            const double v = (double(d[i]) - 128.0) / double(pk) * peak;
+            sum += v * v;
+            if (i && ((int(d[i]) - 128) < 0) != ((int(d[i - 1]) - 128) < 0)) ++zc;
+        }
+        const double ms = 1000.0 * double(d.size()) / double(rate), rms = std::sqrt(sum / double(d.size()));
+        char b[200];
+        std::snprintf(b, sizeof b, "cue %3zu %-28s %6.0f ms  rms %6.1f dB  ~%5.0f Hz", n, describe(int(n)).c_str(), ms,
+                      20.0 * std::log10(std::max(rms, 1e-6)), double(zc) * double(rate) / (2.0 * double(d.size())));
+        rows.push_back({rms, b});
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.rms > b.rms; });
+    for (const Row& r : rows)
+        std::printf("SOUNDLIST %s\n", r.text.c_str());
+}
+
 void Audio::cue(uint32_t arcadeCode)
 {
     // (testing / trailer: HOTD_MUTE_CODE=0xA01472 leaves that one code out, e.g. the attract's white flash)
@@ -844,7 +1212,8 @@ void Audio::cue(uint32_t arcadeCode)
             pcCue(it->second);
             return;
         }
-        board_->command(arcadeCode);
+        if (!boardCommand(arcadeCode))   // (audioload: into the ring at its frame, or directly)
+            board_->command(arcadeCode);
         return;
     }
 #endif
@@ -1360,7 +1729,9 @@ void Audio::stopMusic()
 void Audio::mix(float* out, int frames)
 {
     std::fill(out, out + frames * 2, 0.0f);
+    const uint64_t waitFrom = SDL_GetTicksNS();
     std::lock_guard<std::recursive_mutex> g(lock_);
+    lockWaitNs_ = SDL_GetTicksNS() - waitFrom;   // (questaudio2: the output callback's wait, logged there)
     // totd7: the direct voices (TotD 0's typing sounds) into their own buffer, added after the limiter and the board
     if (directBuf_.size() < size_t(frames) * 2)
         directBuf_.resize(size_t(frames) * 2);
@@ -1434,7 +1805,12 @@ void Audio::mix(float* out, int frames)
         if (boardBuf_.size() < size_t(frames) * 2)
             boardBuf_.resize(size_t(frames) * 2);
         std::fill(boardBuf_.begin(), boardBuf_.begin() + frames * 2, 0.0f);
-        board_->render(boardBuf_.data(), frames, 1.0f);
+        if (ringOn_)   // (audioload: made ahead by the board thread)
+            takeBoard(boardBuf_.data(), frames);
+        else {
+            std::lock_guard<std::mutex> bl(boardLock_);
+            board_->render(boardBuf_.data(), frames, 1.0f);
+        }
         const float gain = 5.5f * (boardVolume_ >= 0 ? boardVolume_ : sfxVolume_ / 0.8f);
         float peak = 0;
         for (int i = 0; i < frames * 2; ++i) {
@@ -1485,10 +1861,74 @@ void Audio::callback(void* self, SDL_AudioStream* stream, int additional, int)
     const int frames = additional / int(sizeof(float) * 2);
     if (frames <= 0)
         return;
+    // questaudio (the log): SDL pulls once per device buffer; a pull more than two buffers after the last one means
+    // the device ran dry meanwhile (SDL's AAudio output keeps three buffers): counted, logged every 10 s at most
+    if (a.deviceBufNs_) {
+        const uint64_t now = SDL_GetTicksNS();
+        if (a.lastPullNs_ && now - a.lastPullNs_ > 2 * a.deviceBufNs_ + 2000000) {
+            ++a.lateCount_;
+            ++a.lateTotal_;
+            a.lateWorstNs_ = std::max(a.lateWorstNs_, now - a.lastPullNs_);
+        }
+        a.lastPullNs_ = now;
+        // questaudio2: every 10 s, the late pulls and the callback's worst own time / wait for lock_ (the game
+        // thread holding it while the board thread computes: the output stalls without a late pull being counted)
+        if (now - a.lateLogNs_ > 10000000000ull) {
+            a.note("audio: the output pulled late " + std::to_string(a.lateCount_) + " times (worst gap " +
+                   std::to_string(a.lateWorstNs_ / 1000000) + " ms; a device buffer is " +
+                   std::to_string(a.deviceBufNs_ / 1000000) + " ms); the callback's worst " +
+                   std::to_string(a.cbWorstNs_ / 1000) + " us (lock wait " + std::to_string(a.lockWaitWorstNs_ / 1000) +
+                   " us), " + std::to_string(a.cbSlow_) + " over half a buffer");
+            a.lateCount_ = 0;
+            a.lateWorstNs_ = 0;
+            a.cbWorstNs_ = a.lockWaitWorstNs_ = a.cbSlow_ = 0;
+            a.lateLogNs_ = now;
+        }
+    }
     if (a.mixBuf_.size() < size_t(frames) * 2)
         a.mixBuf_.resize(size_t(frames) * 2);
+    const uint64_t cb0 = SDL_GetTicksNS();
     a.mix(a.mixBuf_.data(), frames);
     SDL_PutAudioStreamData(stream, a.mixBuf_.data(), frames * int(sizeof(float) * 2));
+    if (a.deviceBufNs_) {
+        const uint64_t took = SDL_GetTicksNS() - cb0;
+        a.cbWorstNs_ = std::max(a.cbWorstNs_, took);
+        a.lockWaitWorstNs_ = std::max<uint64_t>(a.lockWaitWorstNs_, a.lockWaitNs_);
+        if (took * 2 > a.deviceBufNs_) ++a.cbSlow_;
+    }
 }
 
 } // namespace hotd::game
+
+// audioload: the audio threads into Windows' multimedia class "Pro Audio" (as SDL's WASAPI thread): scheduled before
+// the ordinary threads of every process (the user's "crackling" with the CPU saturated). Elsewhere SDL's priority only
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+namespace hotd::game {
+namespace {
+void audioThreadBoost()
+{
+    using SetMm = HANDLE(WINAPI*)(LPCWSTR, LPDWORD);
+    static const SetMm setMm = [] {
+        const HMODULE avrt = LoadLibraryW(L"avrt.dll");
+        return avrt ? reinterpret_cast<SetMm>(reinterpret_cast<void*>(GetProcAddress(avrt, "AvSetMmThreadCharacteristicsW"))) : nullptr;
+    }();
+    DWORD task = 0;
+    if (setMm)
+        setMm(L"Pro Audio", &task);
+}
+} // namespace
+} // namespace hotd::game
+#else
+namespace hotd::game {
+namespace {
+void audioThreadBoost() {}
+} // namespace
+} // namespace hotd::game
+#endif

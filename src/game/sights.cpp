@@ -11,7 +11,7 @@ namespace fs = std::filesystem;
 
 const char* const kSizeNames[kSizeSteps] = {"tiny", "small", "medium", "large", "huge"};
 const char* const kThickNames[kThickSteps] = {"thin", "medium", "thick", "bold"};
-const char* const kSightColourNames[kSightColours] = {"Player Colour", "White", "Red",    "Blue", "Green",
+const char* const kSightColourNames[kSightColours] = {"Player Color", "White", "Red",    "Blue", "Green",
                                                       "Yellow",        "Orange", "Pink", "Cyan", "Purple"};
 uint32_t sightColourRgb(int colour)
 {

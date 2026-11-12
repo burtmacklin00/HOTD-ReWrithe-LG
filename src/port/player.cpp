@@ -32,6 +32,8 @@ template <class P> int32_t Game<P>::player_hit_check(int player)
 template <class P> void Game<P>::player_hit_take(int player, int shake, int side)
 {
     const uint32_t rec = player_rec(player);
+    if (cheatInvincible)   // (smallfix: Gameplay > Invincibility, offline only: no life, no points off)
+        return;
     if constexpr (!P::pc)   // the PC's hits_counter is not paired yet (no PC form of this file)
         mem.at<uint8_t>(G::hits_counter) = uint8_t(mem.at<uint8_t>(G::hits_counter) - 1);
     mem.at<int32_t>(rec + 0xC) -= 1;

@@ -149,6 +149,9 @@ public:
     // before it first runs). Nothing here: the runtime's Survival Mode captures the lead-in's creature spawns (their places
     // become the arena's spawn points). A normal game and the proofs: no effect
     virtual void evt_spawned(uint32_t task, uint32_t rec) { (void)task, (void)rec; }
+    // Horde Mode (ours, hordepub: user 2026-11-09 "weapons and ammo from shooting crates / breakable props"): told of each
+    // prop broken for good (its last break step, where its item drops). Nothing here: a normal game and the proofs
+    virtual void prop_broken(uint32_t obj) { (void)obj; }
     bool coop4_on() const
     {
         if constexpr (Seats<P>::max == 4)
@@ -246,6 +249,24 @@ public:
         else
             return pm_char[p & 3];
     }
+    // charsel4 (user 2026-11-09): the seat whose look and sound a seat takes: the HUD color (the label, the torches'
+    // flames, players 3 / 4's band), the crosshair, the shot's spark / flash and the gunshot. The seat's own (P1 red,
+    // P2 blue, P3 green, P4 yellow), except Rogan and G, "the legacy characters": in any seat Rogan is always player
+    // 1's (red, gunshot 0xA01208) and G always player 2's (blue, 0xA01207). Only with the seats' characters drawn
+    // (chars_on: PC Mode or a Character Select pick; PC Mode's defaults Rogan / G in seats 1 / 2 change nothing); the
+    // arcade's own games and the proofs keep the seat. pm_char is synced online, so both PCs compute the same.
+    // Ours: the PC's player_shoot picks its cue by seat (THOTD.EXE 0x4365C4) and no HUD code reads 0x5CE4E4
+    static constexpr int look_seat_of(int seat, int ch) { return ch == 1 ? 0 : ch == 2 ? 1 : seat; }
+    int look_seat(int p) const
+    {
+        if constexpr (P::pc)
+            return p;
+        else
+            return chars_on() ? look_seat_of(p, pm_char[p & 3]) : p;
+    }
+    // seat p's gunshot (player_shoot / the cut-scenes' shots): players 1 / 3 0xA01208, 2 / 4 0xA01207, by look_seat
+    static constexpr uint32_t shot_cue_of(int look) { return (look & 1) == 0 ? 0xA01208u : 0xA01207u; }
+    uint32_t shot_cue(int p) const { return shot_cue_of(look_seat(p)); }
     // the creature type of seat p's body in PC Mode (+0x10 through 0x5CE358: player_char_models_set 0x50C114, the
     // endings 0x4AA52C-0x4AB148; character 0 (No Player) has Rogan's type 2)
     int32_t pm_body_type(int p) const { return pm_table(pm_seat_char(p)).type; }
@@ -633,6 +654,10 @@ public:
         return survivalRounds[p & 3] ? uint8_t(survivalRounds[p & 3]) : pm_on() ? uint8_t(pm_table(pm_seat_char(p)).rounds) : uint8_t(6);
     }
     int survivalRounds[4] = {};   // Survival Mode (game/survival.h): each seat's magazine; 0 everywhere else (set by the runtime)
+    // smallfix (user 2026-11-09): Gameplay's cheats, set by the host each frame (main.cpp applyCheats: offline games only,
+    // never online; false in the proofs): Invincibility, no hit takes a life (player_hit_take, the projectiles' hit);
+    // Infinite Ammo, a shot takes no round (player_shoot)
+    bool cheatInvincible = false, cheatInfiniteAmmo = false;
     // Survival Mode (survival2, user 2026-11-03: points as in Call of Duty's Zombies): enemy_part_hits tells the runtime
     // of each frame a creature was hit (the seats whose shots hit it: bits; its killer when the hits killed it, else -1;
     // the seats that hit its head, part class 1: bits) and the game's own add_score does nothing (the score is
@@ -674,9 +699,13 @@ public:
     // pct: the damage percent of a hit at its middle (survfix3: falling off to 40 % at the radius; blastObj / blastPct:
     // the creature enemy_part_hits is on and its percent, for weapon_damage)
     struct WeaponBlast { float at[3] = {}; float radius = 0; int seat = -1; int pct = 100; uint64_t frame = 0; uint32_t done[32] = {}; int doneN = 0; };
-    WeaponBlast weaponBlast;         // the last explosion (camera space; the creatures near it take a hit once)
+    // (blastslots, user 2026-11-09: two explosions in one frame, 2-4 players or one player's two bolts, kept only the
+    // second's hits) a fixed set of explosions, each with its own point / radius / percent / seat; a slot is free
+    // when seat < 0 or one frame old (its hits take that long). Part of Survival's rollback snapshot and desync hash
+    static constexpr int kWeaponBlasts = 8;
+    WeaponBlast weaponBlast[kWeaponBlasts];   // the explosions (camera space; the creatures near each take a hit once)
     uint32_t blastObj = 0;
-    int blastPct = 100;
+    int blastPct[4] = {};            // blastObj's percent per seat (the explosions that hit it: summed; 0 = none)
     // survfix (user 2026-11-04: the Magician's Hand "shoots the Magician's own projectiles" that explode on impact): a
     // projectile weapon's shot is a bolt flying from the aim (just ahead of the camera) to what the aim ray meets first
     // (survfix3: a creature or an item the shot test finds, or the stage itself: weapon_world_ray; nothing within 300
@@ -693,6 +722,7 @@ public:
     };
     WeaponBolt weaponBolts[8];
     int blastsN = 0, blastsHit = 0, blastsMulti = 0, blastHits = 0;   // (tests: explosions, those that hit, hit 2+, creatures hit)
+    int blastsDouble = 0;            // (tests: creatures that two explosions hit in one frame, both counted: HOTD_BLAST_DOUBLE)
     int blastsWorld = 0, blastsItems = 0, blastKills = 0;             // (tests: on the stage, items hit, creatures killed by one)
     float weaponAim[4][3] = {};      // shot_resolve: a projectile seat's target this frame (camera space)
     bool weaponAimSet[4] = {};
@@ -710,7 +740,14 @@ public:
     uint64_t weaponFrame = 0;        // the runtime's frame (the explosion's age)
     virtual void weapon_kill(uint32_t obj, int killer) { (void)obj, (void)killer; }   // a creature's hits killed it (the drops)
     void weapon_extra_shots(int p, bool hitMain);   // shot_resolve: the seat's extra rays and explosion (shooting.cpp)
-    void weapon_blast_hit(uint32_t obj);            // enemy_part_hits: the explosion's hit on this creature
+    void weapon_blast_hit(uint32_t obj);            // enemy_part_hits: the explosions' hits on this creature
+    // (one of them; hordepub: ids / nIds: only parts with these ids (bosses: the parts that take damage), every part
+    // class then (the bosses' part roles are not hit_type's))
+    bool weapon_blast_hit_one(WeaponBlast& b, uint32_t obj, const uint32_t* ids = nullptr, int nIds = 0);
+    // hordepub (user 2026-11-09: "the Magician's Hand does not damage the Magician"): a boss with its own hit test (not
+    // enemy_part_hits: the Magician, the Chariot without its armour) takes the explosions near it as a shot at its part
+    // nearest the burst (that part's hit bits, the body's 0x100): the boss's own rules give the damage. ids: see above
+    void weapon_blast_boss(uint32_t obj, const uint32_t* ids = nullptr, int nIds = 0);
     void weapon_damage();                           // enemy_part_hits: the seats' damage percent
     // Survival Mode: body slots past the original's (player_bodies 0x51F440, 16 words: the creatures' slots 0-13, the
     // players' bodies 14 / 15; a body's slot +0x2E6 also picks its place in the three skin buffers, 0x348 bytes a slot):

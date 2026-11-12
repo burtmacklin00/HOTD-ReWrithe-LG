@@ -21,6 +21,7 @@
 using namespace hotd::net;
 
 static int failures = 0;
+constexpr size_t kSurvivalBytes = 10;   // (protocol 22: the settings' Survival bytes after bossMode)
 static void check(bool ok, const char* what)
 {
     std::printf("%s: %s\n", ok ? "ok  " : "FAIL", what);
@@ -241,7 +242,7 @@ int main()
         auto v4 = encodeSettings(s4);
         check(decodeSettings(v4.data(), v4.size(), t4) && t4.boss4p == 125 && t4.enemy4p == 0 && t4.players == 4,
               "settings: 4P boss / enemy percent round trip");
-        v4[v4.size() - 10] = 201;   // (protocol 16: 7 PC Mode bytes after enemy4p; protocol 18: the Boss Mode byte)
+        v4[v4.size() - 10 - kSurvivalBytes] = 201;   // (protocol 16: 7 PC Mode bytes after enemy4p; protocol 18: the Boss Mode byte; 22: Survival)
         check(!decodeSettings(v4.data(), v4.size(), t4), "settings: 4P boss percent over 200 refused");
         // protocol 15: a joiner's second seat (up to four PCs) in the seat byte's high nibble; none = the byte as before
         Settings s5 = s4;
@@ -251,7 +252,7 @@ int main()
         const bool two = decodeSettings(v5.data(), v5.size(), t5) && t5.seat == 1 && t5.seat2 == 3;
         s5.seat2 = 0;
         const auto v6 = encodeSettings(s5);
-        const bool one = decodeSettings(v6.data(), v6.size(), t5) && t5.seat == 1 && t5.seat2 == 0 && v6[v6.size() - 13] == 1;
+        const bool one = decodeSettings(v6.data(), v6.size(), t5) && t5.seat == 1 && t5.seat2 == 0 && v6[v6.size() - 13 - kSurvivalBytes] == 1;
         s5.seat2 = 1;   // the same seat twice
         const auto v7 = encodeSettings(s5);
         Settings s2p;   // a two-PC game with a second seat: refused
@@ -362,7 +363,7 @@ int main()
     // protocol 17: an input's start may carry the seat's PC Mode character (20, pmextra: bits 3-7, 1-19; 20-31 refused)
     check(Input::flagsOk(Input::kStart | 6 << Input::kCharShift) && Input::flagsOk(Input::kAll) && Input::flagsOk(0x08) &&
               Input::flagsOk(Input::kStart | 19 << Input::kCharShift) && Input::flagsOk(Input::kAll | 13 << Input::kCharShift) &&
-              !Input::flagsOk(20 << Input::kCharShift) && !Input::flagsOk(0xF8) && !Input::flagsOk(0xFF),
+              !Input::flagsOk(Input::kStart | 20 << Input::kCharShift) && !Input::flagsOk(0xF8) && !Input::flagsOk(0xFF),
           "PC Mode: an input's character 1-19 accepted (6, 13, 19: the PC's and the extras), 20-31 refused");
     {   // the settings' PC Mode bytes: out of range refused
         Settings s;
@@ -375,7 +376,7 @@ int main()
                           t.pmChar[3] == 19;
         auto bad = [&](size_t fromEnd, uint8_t val) {
             auto w = v;
-            w[w.size() - fromEnd] = val;
+            w[w.size() - kSurvivalBytes - fromEnd] = val;   // (protocol 22: the Survival bytes after them)
             return !decodeSettings(w.data(), w.size(), t);
         };
         // from the end: 1 Boss Mode, 2 free play, 3 continues, 4-7 the characters (seat 4 .. 1), 8 PC Mode
@@ -403,13 +404,13 @@ int main()
             Settings s, t;
             s.bossMode = m;
             const auto v = encodeSettings(s);
-            trip = trip && decodeSettings(v.data(), v.size(), t) && t.bossMode == m && v.back() == m;
+            trip = trip && decodeSettings(v.data(), v.size(), t) && t.bossMode == m && v[v.size() - 1 - kSurvivalBytes] == m;
         }
         bool refused = true;
         for (uint8_t m : {1, 7, 255}) {
             Settings s, t;
             auto v = encodeSettings(s);
-            v.back() = m;
+            v[v.size() - 1 - kSurvivalBytes] = m;
             refused = refused && !decodeSettings(v.data(), v.size(), t);
         }
         Settings pb, t;   // Boss Mode and PC Mode together: refused
@@ -442,6 +443,60 @@ int main()
         for (int i = 0; i < 200 && !c.rosterReceived; ++i) { h.pump(1); c.pump(1); }
         check(ok && cs.bossMode == 6 && cs.pcMode == 0 && c.rosterReceived && c.roster[0].boss == 6,
               ("Boss Mode: the host's All Bosses reaches the joiner (settings and roster): " + err).c_str());
+    }
+    // Survival online (protocol 22): the settings' Survival bytes (the arena + 1, seed, cap, cut, the testing bytes; never
+    // with PC Mode / Boss Mode), the roster's 0x10 + arena, an input's Survival extras (held, the weapon switch)
+    {
+        Settings s, t;
+        s.survival = 4, s.survivalSeed = 0xDEADBEEF, s.survivalCap = 64, s.survivalCut = 0, s.survivalSmgWave = 3;
+        s.survivalWeaponsWave = 7, s.survivalTest = 3;
+        const auto v = encodeSettings(s);
+        const bool trip = decodeSettings(v.data(), v.size(), t) && t.survival == 4 && t.survivalSeed == 0xDEADBEEF &&
+                          t.survivalCap == 64 && t.survivalCut == 0 && t.survivalSmgWave == 3 && t.survivalWeaponsWave == 7 &&
+                          t.survivalTest == 3 && t.bossMode == 0;
+        auto bad = [&](size_t at, uint8_t val) {   // (at: from the Survival bytes' start)
+            auto w = v;
+            w[w.size() - kSurvivalBytes + at] = val;
+            return !decodeSettings(w.data(), w.size(), t);
+        };
+        const bool refused = bad(0, 17) && bad(5, 0) && bad(5, 65) && bad(6, 2) && bad(9, 4);
+        Settings sb = s, sp = s;   // Survival with Boss Mode / PC Mode: refused
+        sb.bossMode = 2;
+        sp.pcMode = 1;
+        for (uint8_t& c : sp.pmChar) c = 1;
+        const auto bv = encodeSettings(sb), pv = encodeSettings(sp);
+        check(trip && refused && !decodeSettings(bv.data(), bv.size(), t) && !decodeSettings(pv.data(), pv.size(), t),
+              "Survival settings: round trip; arena 17, cap 0 / 65, cut 2, test 4, with Boss Mode / PC Mode refused");
+        RosterSeat r[4], d[4];
+        r[0] = {true, 0, "Rogan"};
+        r[0].survival = 1;
+        auto rv = encodeRoster(r);
+        const bool rgood = rv.size() == 81 && rv.back() == 0x10 && decodeRoster(rv.data(), rv.size(), d) && d[0].survival == 1 &&
+                           d[0].boss == 0;
+        rv.back() = 0x13;
+        const bool r4 = decodeRoster(rv.data(), rv.size(), d) && d[0].survival == 4;
+        rv.back() = 0x0F;
+        const bool r15 = !decodeRoster(rv.data(), rv.size(), d);
+        rv.back() = 0x20;
+        check(rgood && r4 && r15 && !decodeRoster(rv.data(), rv.size(), d),
+              "Survival: the roster's last byte 0x10 + arena round trip; 0x0F / 0x20 refused");
+        Input in;
+        in.flags = uint8_t(Input::kOnScreen | Input::kTrigger | Input::kHeld | (Input::kWeaponPick + 5) << Input::kWeaponShift);
+        const Input p = in.predicted();
+        Input st;   // a start's character bits are not held
+        st.flags = uint8_t(Input::kStart | Input::kOnScreen | 1 << Input::kCharShift);
+        check(Input::flagsOk(in.flags) && Input::flagsOk(uint8_t(11 << Input::kWeaponShift)) &&
+                  !Input::flagsOk(uint8_t(12 << Input::kWeaponShift)) && p.flags == (int(Input::kOnScreen) | int(Input::kHeld)) &&
+                  st.predicted().flags == Input::kOnScreen,
+              "Survival: an input's extras (held, weapon codes 0-11) accepted, 12+ refused; the prediction keeps held only");
+        auto hp = std::make_unique<Session>(), cp = std::make_unique<Session>();
+        Session &h = *hp, &c = *cp;
+        Settings hs, cs;
+        hs.survival = 1, hs.players = 2, hs.survivalSeed = 1234;
+        std::string err;
+        const bool ok = connectPair(h, c, freePort(), "SURVIVAL", "SURVIVAL", hs, cs, err);
+        check(ok && cs.survival == 1 && cs.survivalSeed == 1234 && cs.bossMode == 0,
+              ("Survival: the host's arena and seed reach the joiner: " + err).c_str());
     }
     // up to four PCs: a seat's PC leaves the waiting room before Start; its seat's session is renewed (NetGame::poll
     // does it after kWaitingLeftS of silence) and the next joiner gets that seat, the other joiner stays in

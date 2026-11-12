@@ -15,8 +15,9 @@ Concept" labels (the More Modes item's tag line, its help line, the 6 s notice a
 
 - Menu: **More Modes > Survival** (the players are asked first); **Survival Arena: <name>** below it picks the arena (click:
   the next one). Sonic Mode's preset (More Modes) applies to Survival as to every game.
-- Command line: `hotd --survival <arena>` (`courtyard`, `dining`, `lab`, `octagon`, or 1-4; the old `bedroom` /
-  `furnace` give the dining hall / the laboratory), with `--players 1..4`.
+- Command line: `hotd --survival <arena>` (`courtyard` / 1, `platform` / 2, `roof` / 3: every build since v1.4.0; "New
+  arenas (survmaps)" under "Arenas"), with `--players 1..4`. (The Chapter 2-4 arenas `dining`, `lab`, `octagon` were
+  taken out on 2026-11-05: git history.)
   Options: `--survival-seed N` (the director's random stream: the same seed plays the same rounds), `--survival-smg-wave N`
   (testing: the SMG free from round N; default 0 = only bought), `--survival-cap N` (creatures at once, 1-64; default
   24), `--survival-no-cut` (no cut creatures).
@@ -39,11 +40,13 @@ Concept" labels (the More Modes item's tag line, its help line, the 6 s notice a
 4 frames: "Arenas"), `HOTD_SURVIVAL_NAME=X` (a new
   table row filed under that name, also headless), `HOTD_SURVIVAL_POINTS=n` (seat p gets n x (4 - p) / 4 points at
   each round's clear: the shop's pictures), `HOTD_SURVIVAL_BUYER=saver|upgrades` (the test buyer saves for the
-  Magician's Hand after the SMG / after the SMG, ammo, Quick Reload and Big Mag), `HOTD_WEAPONS_FORCE=k` +
+  Magician's Hand after the SMG / after the SMG, ammo, Quick Reload and Big Mag; survhand: `=smg|rifle|dual|shotgun|hand`: saves for that one weapon after the SMG, buys no other, takes it back into the hand at each break when it has ammo; the line's `held(frames/reloading)`: each weapon's frames in a hand and of those reloading), `HOTD_WEAPONS_FORCE=k` +
   `HOTD_WEAPONS_FORCE_KEEP=1` (only weapon k, given back when used up: the time to kill). The round lines of the
   test end `earned E banked B lives lost L` (every seat's points earned so far / unspent at the clear, the lives lost
   in the round) and the result line `ttk=<weapon>=kills/frames,..` (per the killer's weapon: the kills and the mean
   frames from a creature's first hit to its death).
+  `HOTD_BLAST_DOUBLE=1` (with the Hand forced: every explosion twice at once; blastslots: the result line ends
+  `blastdouble=N`, creatures both took; `HOTD_BLAST_LOG=1` logs each slot and `blast double` hit).
 
 ## How it works
 
@@ -80,8 +83,56 @@ next room or on another floor, and the turned copies stood in walls or in the fu
 | Runners | none in rounds 1-3; from round 4 a share `min(6(r - 3), 60) %` start in their dash (start sub-state 2: the type's motion entry 2, `walk_variant` 1, so they dash again after each stop); `min(8(r - 3), 70) %` with the AI at once (survfix2: were 8 / 10 % a round) (flag bit 22) |
 | Aggression | the game's own rank (difficulty_level's 0x51F492, 0-15: how often creatures attack) gets a floor of `(r - 1) x 2 / 3` |
 | Mix | the arena chapter's own standard types, the early rounds from the weaker end of the list; from round 2 a cut creature with chance `min(5 + 2r, 25) %` |
-| Special rounds | every 5th: 5, 15, 25 .. **runners** (every creature dashing, AI at once, the lighter half of the types, 3/4 the count, more at once); 10, 20 .. **brutes** (the heavier half and the cut creatures, half the count, x 1.25 hit points). Cleared: **Max Ammo** (every gun full, the SMG's reserve too) |
+| Special rounds | every 5th: 5, 15, 25 .. **runners** (every creature dashing, AI at once, the lighter half of the types, 3/4 the count, more at once); 10, 20 .. **brutes** (the heavier half and the cut creatures, half the count, x 1.25 hit points). No Max Ammo since survdogs (2026-11-10): only the dogs' rounds give it |
+| Dog rounds | every 7th or 8th round only the game's Kenfis dogs, cleared: **Max Ammo** (see "Dog rounds" below) |
 | Break | 8 s ("ROUND n CLEARED"; the shop is open, a countdown at the top); **no free life** |
+
+### Dog rounds (survdogs, user 2026-11-10)
+
+"Add dog rounds to survival for every 7-8 waves", and Max Ammo "only dog rounds" (Call of Duty Zombies' hellhound
+rounds, with the game's own dogs):
+
+- **When:** the first dogs' round is round 7 or 8, then each next one 7 or 8 rounds later (7-8, 14-16, 21-24 ..). The
+  pick comes from a stream of its own (`SurvivalMode::dogNext`: the seed xor "DOGS"), not the director's, so every other
+  round's draws stay as they were: the courtyard's rounds 1-6 spawn the same creatures and earn the same points as before
+  (the only difference: no Max Ammo after round 5 any more, so round 6 ended 5 frames earlier in the bot test). A dogs'
+  round on a 5th round takes the runners' / brutes' place. Testing: `HOTD_SURVIVAL_DOG_WAVE=n` (the first one at round
+  n).
+- **The dogs:** only the Kenfis (kind 97, `src/port/enemy_dogs.cpp`), made as the story makes them: ENTBE on a kind 97
+  record (`Runtime::survival_spawn_record`), so their own set-ups, motions, pack states, bite, leap, circling and death
+  run as in Chapter 1. The records are copies of the story's first three dogs (Chapter 1 event 3, the courtyard's,
+  found with `HOTD_SURVIVAL_LOGCAP`): `0xE13F0` type 8 (the black dog) jumping in (set-up 2), `0xE1430` type 0 (the
+  grey one) jumping in, `0xE1470` type 8 running in (set-up 1); one at random each time. A copy (a ring of 32 at
+  `0x7E1000`, outside the original map, saved with the snapshots as the body table) gets the place of one of the
+  arena's spawn points (+-20), the heading toward the camera and its circling point (the part's +0x10: where a pack
+  dog waits) 40 units in front of the camera on the line to the dog (the story's: 37 from its camera stop).
+- **How many:** 6 dogs for one player the first time, 2 more each dogs' round after, + 50 % for each other player
+  (2P 9, 3P 12, 4P 15 the first time), at most 40. At once: `min(8, 2 + the dogs' round's number + players)` (the
+  original's 14 body slots, where its pack list looks); a gap of `max(20, 50 - 5k) + rand(60)` frames. Hit points:
+  the story's 1 (every hit kills) the first time, then + 40 each dogs' round (41, 81 ..; at most 400).
+- **Other chapters' arenas** (the platform, the roof): the dogs' textures are Chapter 1's (area 1), drawn from Chapter 4's
+  stage as the cut creatures' are (`Runtime::survival_areas`, its look type 0's rows). The 1998 PC models option has no
+  dog models outside Chapter 1 (as it has no cut creatures): those two arenas are dev-only.
+- **Stall guard:** a dog alive 60 s (stuck in an entrance, or circling for good: the camera never moves in an arena)
+  dies the game's own death (its hit points 0); counted as `stalled=` on the test line (0 in every test so far).
+- **Banner:** `ROUND n  DOGS` (red, as every round's start; the key `DOGS` in every language file). Cleared:
+  `ROUND n CLEARED  MAX AMMO` (gold), the game's item pick-up sound (`0xA01351`, as a buy's), and every weapon each
+  player in play holds full (magazine and reserve: `Weapons::refill(-1)`). Other rounds: no refill.
+- **Online:** the next dogs' round, its stream, the counts and every creature's dog flag are in `SurvivalMode` (the
+  snapshot copies it whole) and in `digest()`.
+- **The test line** (`--survival-test`): `dogrounds=` `dogs=<made>/<dead>` `stalled=` `maxammo=` (seats refilled)
+  `nextdogs=`; each round's line says "(dogs)".
+
+| Arena (1 player, `--survival-test 17`) | Dogs' rounds | Dogs made / dead | Max Ammo | Lives lost to dogs | Result |
+|---|---|---|---|---|---|
+| courtyard | 7, 14 (6 + 8 dogs) | 14 / 14 | 2 | 0 | ok, round 17, 49700 points |
+| platform | 7, 14 | 14 / 14 | 2 | 0 | ok, round 17, 52490 points |
+| roof | 7, 14 | 14 / 14 | 2 | 0 | ok, round 17, 57390 points |
+
+Players (courtyard, `--survival-test 8`): 2 players online (2 PCs on 127.0.0.1, `--net-sim 10,40` both, a weapon switch
+every 300 frames): dogs' round 7, 9 dogs, Max Ammo for both seats, hashes equal on all 15588 frames (f4e08a06bcb0e2ee,
+1818 rollbacks); 3 players (seed 7): round 8, 12 dogs, Max Ammo 3; 4 players: round 7, 15 dogs, Max Ammo 4. In 3-4
+player games the dogs pick their target as the original does (`kind97_ddog_kenfis`: players 1 / 2 only).
 
 **Lives:** at most **3** when a seat joins (fewer when the Lives setting is lower), up to 5 with bought ones. No
 continue: when every player is out, game over (as Boss Mode); its results line ("REACHED ROUND n POINTS p KILLS k")
@@ -106,8 +157,8 @@ back in the next wave where they get half their points back"):**
 - Every player out at the same time (or the last one in play losing the last life): game over as before (the results,
   then the Survival table). The points counted for the table are the points earned (unchanged by the halving).
 - 1 player: unchanged (game over at 0 lives). CPU teammates follow the same rule (their start button is held like a
-  player's). Deterministic: it uses only game state (no input, no random numbers), so it is the same on every PC; Survival
-  itself is still local only (see Open).
+  player's). Deterministic: it uses only game state (no input, no random numbers), so it is the same on every PC (and
+  online: "Online co-op" below).
 - Test: `HOTD_SURVIVAL_DRAIN=<seat>@<round>[+frames],..` sets that seat's lives to 0 that many frames (default 300) into
   that round, as a creature's last hit would (`--lives-kept` leaves the seat alone until it is back). The log has
   `survival: nP is out ..` / `nP is back .. lives L, points P (half of Q), weapons W (had W), .., ok`, the result line
@@ -126,10 +177,11 @@ reserves of every weapon held full again; the handgun never runs dry), **LIFE 15
 2000** (reloads take half), **BIG MAG 2500** (magazines x 1.5). "NOT ENOUGH POINTS" / "NOT NOW" when it cannot be
 bought. The weapons are **kept after a round** (the user's answer).
 
-**Reload by hand:** Survival ignores the Auto Reload setting (`autoReloadSeats` / `autoReloadWanted` in main.cpp: off
-while `survival.active()`, the setting itself untouched, every other game as set). A pull off the screen starts the
-reload: each weapon's own time (the handgun 36 frames, the SMG 72 ...: weapons.md), from its reserve; the gun does
-nothing meanwhile ("RELOADING").
+**Reload by hand:** a pull off the screen starts the reload: each weapon's own time (the handgun 36 frames, the SMG 72
+...: weapons.md), from its reserve; the gun does nothing meanwhile ("RELOADING"). Gameplay > **Auto Reload** and **Edge
+Reload** (off by default; user 2026-11-09, smallfix: until then Survival ignored Auto Reload) work here too, with every
+weapon: an empty gun's automatic pull off the screen (`autoReloadWanted` in main.cpp: not while a reload runs, not
+with an empty reserve) is that same reload, the weapon's own magazine and time. Online: the host's setting, as the story's.
 
 **HUD** (redone 2026-11-04, survfix; one title block for 1-4 players and the shop's stacks, survfix2:
 [weapons.md](weapons.md#survival)): in the font of the game's own score line (Score Display's `SCORE:00000`), on the
@@ -231,6 +283,62 @@ within 40. Contact sheets of every spot and the before / after pictures: the wor
 sets included), 0 steps crossing a wall at foot height; no creature sent away (`will never attack`: 0).
 `--survival-test 10`: ok in all four (see the worker's STATUS.md).
 
+### New arenas (survmaps, user 2026-11-09; public since v1.4.0)
+
+Two arenas built to the courtyard's standard; dev builds only at first, in every build (the public ones too) since
+v1.4.0 (survpub, user 2026-11-10: main.cpp `survivalArenaCount()`). Pick them with
+`hotd --survival platform` / `--survival roof` (or 2 / 3), or the **Survival Arena** row under More Modes > Survival (and
+the Host page's).
+
+| # | Key | Name | Start | The arena's wait | Spawns |
+|---|---|---|---|---|---|
+| 2 | platform | Chapter 3: the platform | chapter 3 event 1 | the first creature wait after the hanging zombies (kind 7) come: the first stop on the platform under the overhead rail, camera 466 / -282 / 561, the story's own view | three places on the platform's floor 124-128 units in front of the camera (z 672-688; v1.4.0's far end, z 812-815, was 253-264 units away); no chain zombies (user 2026-11-10: the location only) |
+| 3 | roof | Chapter 4: the Magician's roof | chapter 4 event 4 | the creature wait after the Magician (kind 20) comes on the roof (he is captured: not there) | three places on the roof's floor 125-126 units in front of the camera, before the doorway he blasted open out of Curien's laboratory (v1.4.0's, just inside it, were 242-245 units away) |
+
+**Spawn distance** (fix140b, user 2026-11-10 on v1.4.0: "creatures spawn too far away" on the platform and the roof):
+measured with `HOTD_SURVIVAL_DUMP` (no autofire, lives kept: each creature's walk to 70 units of the camera) the
+courtyard's places are 110 units out (its own places, kNear) and reached in 4.3 s; v1.4.0's platform 253-264 units, 19-21 s;
+the roof 242-245 units, 19 s (the creatures walk about 8-9 units a second). Now about 125 units, 5-6 s. Every new place
+on the floor (the dump's floor triangles) with 0 wall triangles crossed on its walk (walls.awk, `--survival-test 12`).
+An arena with its own view (the roof) measures kNear and the creatures' facing from that view's eye, not the lead-in's
+camera (66 units nearer the doorway there).
+
+**Never in a cut-scene** (fix140b): the roof's wait came while the Magician's entrance scene ended, its bars still
+sliding away (scene_state 1, the log's "the arena is in a cut-scene ... a bad arena" in every run, the user's window
+run, the headless test and the user's launcher.ini alike: the same 4122 lead-in frames). At the arena, any cut-scene
+state is ended at once (scene_state 6: bars off, shots on); the log says "the lead-in ended in a cut-scene (scene state
+N ...): the arena starts in play".
+
+- **How an arena is taken** (`SurvivalArena::takeKind`): such an arena is the (waitSkip + 1)-th creature wait after the
+  lead-in captured a creature of that kind (the stop where those creatures come in the story), not a wait with captured
+  standard creatures (the old rule: neither stop has any).
+- **Entries** (`entryKind` / `entryShare`): the records of that kind captured just before the arena's wait are kept;
+  `entryShare` % of the spawns are made from one of them as ENTBE makes them (`Runtime::survival_spawn_record`: the
+  record's kind, flags, place, angles and its own part at +0x35C), so a copy comes exactly as the story's creature came:
+  kind 7 slides down its chain on the rail (its record's step for its frames) and jumps off (MO 0x281,
+  `kind003_zombie_jump_down`), then walks and attacks as the standard enemy. One copy on a chain at a time (the next one
+  60 frames after the last left it: `Entry::freeAt`); the copy's type is the record's (the jump-off motion is those
+  zombies'), its hit points its type's, risen with the round as every spawn's. The other spawns use the arena's types.
+- **Fixed view** (`view`: eye and look-at): the roof's camera stands on the roof (-791.9, eye 15, 2470) looking at the
+  doorway (-791.9, 25, 2264): at the arena, record 0 and the game camera's stop point are set (angles by the game's own
+  `camera_look_at`), `camera_pos` / `camera_heading` from them (the attack positions are placed from these, as
+  `camera_frame_mode4` does). Each frozen frame the stop's wait kind is 3 and its sub-state "look at the attackers"
+  (the eye held, the look-at eased to the attackers or back to the doorway); without it the camera eased back to the
+  story's path between rounds (the Magician's sky). The platform keeps the story's own view (no `view`).
+- **Measured** (`HOTD_SURVIVAL_DUMP` + the scratch tool `walls.awk`: each creature's step every 4 frames at 6 and 14
+  units over its feet against the stage's walls; floors from the same dump): the platform's floor x 405..573, z
+  535..858 at y -282 (its railing at z 836), the far-end places clear to the camera; the roof's floor x -1021..-561, z
+  2274..2559 at y 0, the doorway x -906..-676 (z 2253..2274), the laboratory's floor inside it at y 0.
+- **Walls** (`--survival-test 10`, 192 creatures each): roof 0 crossings in 18167 steps; platform 0 crossings on the
+  floor, 158 in the air (every one over y -262, 20+ above the floor): the hanging zombies' slide down their chains,
+  through the same girder triangles the story's own kind 7 cross (`HOTD_HORDE_WALLS=1` on the plain Chapter 3: world
+  7:454 / 456 / 720 / 862 at the same places).
+- Developer: `HOTD_SURVIVAL_LOGCAP=1` logs every lead-in capture (kind, type, record words, the camera) and every
+  script step (the op, the camera): how these stops were found.
+- Open: the platform is harder (the hanging zombies land about 50 units in front of the camera, as in the story: the
+  autofire test lost 8 lives in 10 rounds, the courtyard 0); `entryShare` is the knob. Online: the entries and their
+  timers are in `SurvivalMode` (rollback's snapshot copies it whole) and in `digest()`.
+
 The balance tables below were measured on the old arenas (courtyard / bedroom / lab / furnace).
 
 ## Cut creatures
@@ -245,7 +353,7 @@ record spawns any of them; scratch tool recs.py: 1037 records of the 4 chapters)
 | 52 | Disiprin (laced body suit, gas mask) | 18 joints | none of its own | **all set**: motion list 0xC6B00 (the zombies'), attacks 0xC6EB0, choice 0xC6CE0, death 1 | its own tables as they are: a standard creature (kind 0), 160 hit points |
 | 12 | Debu (an earlier Bentley) | 18 | none | **all set**: list 0xC6B30 (Bentley's / the chainsaw's), attacks 0xC6EE0, choice 0xC6D10 | its own tables, 220 hp |
 | 56 | Neozom (Sam's parts, own clawed chest) | 18 | none | **all set**: list 0xC6B10 (Zom's), attacks 0xC6EC0, choice 0xC6CF0 | its own tables, 120 hp |
-| 10 | Syndy (leather, mask, stick) | 18 | MO_synd_demo only (a demo pose) | all 0 | borrows type 28's (BO_neil) motion list, attacks, attack choice and death motion; 180 hp |
+| 10 | Syndy (leather, mask, stick) | 18 | MO_synd_demo only (a demo pose) | all 0 | borrows type 29's (BO_siriru, Cyril) motion list, attacks, attack choice and death motion with his axe set-up (action 1; hordepub 2026-11-09, was Neil's 28: below); 180 hp |
 | 66 | Baba (skull face, coat) | 18 | none | all 0 | borrows type 29's (BO_siriru); 140 hp |
 | 5 | MrG (masked wrestler) | **19** | 4 own: MO_mrg_aruki / kiai / naguri / taore | all 0 | **not yet** (open question): 19 joints, so no 18-joint creature's motions fit (the frame records are read with the body's joint count); a list of his own four motions would cover walk / shout / punch / fall, not the hit reactions |
 | 39 | Lubin (officer, tattoos) | **16** | none | all 0 | **not yet**: the 16-joint creatures (Drake, Kageo, Moody) have no standard tables either (their own kinds' code) |
@@ -271,8 +379,19 @@ for every type Survival spawns (scratch `audit.py`: the 23 arena types and the f
 
 | Creature | Seen | Cause | Fix (written with the other borrowed words, set back at the game's end) |
 |---|---|---|---|
-| Syndy (10), the tall woman with the mallet | could not be hurt | her `part_damage_table` row (0x12F9F0 + 10 x 0x100) is all 0, and every part role has armour 0xFF: a hit did only the difficulty bonus (0x14AAF0: +20..30 at rank 0, 0 or less from rank 6-7), so she died in the early test waves (rank 0) and never once the rank rose | Neil's (28) damage row |
+| Syndy (10), the tall woman with the mallet | could not be hurt | her `part_damage_table` row (0x12F9F0 + 10 x 0x100) is all 0, and every part role has armour 0xFF: a hit did only the difficulty bonus (0x14AAF0: +20..30 at rank 0, 0 or less from rank 6-7), so she died in the early test waves (rank 0) and never once the rank rose | Neil's (28) damage row (since hordepub: Cyril's, 29, her donor now) |
 | Baba (66) | the body "glitched out" when shot | its roles 2-4, 6, 7, 10, 11, 14, 15 (head, arms, legs) have armour 1 and sever 1, but its `part_replacement` rows (0x11DFF0) are empty: no stump or damage models, so the first hit on each part cut it off with nothing in its place (the skinned body stretched to the lost joints). Siriru's (29) replacement models are another creature's meshes, so they are not borrowed | Siriru's damage row; every role armour 0xFF and sever 0 (as Syndy's and Disiprin's are): it takes hits and dies whole |
+
+**Syndy's walk (hordepub, user 2026-11-09: "Syndy's animation when she is approaching the player looks wrong"):** with
+Neil's list (the plain zombies' row 0xC6B00) she walked MO_z_a_walk7a, a shamble with the arms swinging free, so the long
+mallet in her hand (her `bagbag` parts) flailed at her hip with every step (at her type's scale 1.2, 0x118060: she covers
+1.2x Neil's distance on the same cycle, as her body is 1.2x). Her only motion of her own, MO_synd_demo (452), is a
+standing pose (hands on the hips; the Gallery), no walk. She now borrows Cyril's (29) row with his axe set-up
+(`SurvivalCut::action` 1: MO_z_ono_kamae / MO_z_ono_walk / MO_z_ono_back, the weapon carried in both hands in front, his
+axe attacks 609 / 613): the mallet is carried and swung as a weapon; Survival and Horde spawn her so. Trace:
+`HOTD_SURVIVAL_TRACE_ALIVE=N` lines end with the motion, its frame and the speed; `HOTD_SURVIVAL_TRACE_MOTIONS=1` lists
+every motion's name and the lists of types 10 / 28 / 29 / 66. Pictures (top before, bottom after; frames 300-354 of round
+1, `HOTD_SURVIVAL_TYPE=10`): scratch `hordepub\shots\syndy_before_after.png`.
 
 Disiprin (52) has the same armour-0xFF roles with a complete damage row (no part loss, by design); Debu (12) and Neozom
 (56) have full replacement rows (their own damage models). Checked: `HOTD_SURVIVAL_TYPE=10|66 HOTD_SURVIVAL_START_WAVE=10
@@ -428,15 +547,55 @@ shot's source, `HOTD_AUDIO_RESTART_AT=F` sets the sound up again at frame F (as 
 Every Survival hook does nothing while Survival Mode is off: `Game::evt_spawned` (an empty virtual), `Game::survivalRounds` /
 `extraBodySlots` (0), `Game::survivalScoring` (false: `add_score` as always, no `survival_hits`; `survivalHitSeats` is
 only written), the runtime's event task case and lead-in loop (`survival.active()`), `sound_cue`'s first look, the
-input's gun (`survival.gunInput` only while active), the Auto Reload override (only while active), the view's
+input's gun (`survival.gunInput` only while active), Auto Reload's weapons test (only while the weapons are live), the view's
 `actorAreaLook` (empty), `Game::seatsHeldOut` / `Runtime::livesKeptSkip` (0: the start check, the 4P start, the PRESS
 START prompt and `--lives-kept` as before; `coop4_seat_start` is the 4P start button's own code moved out). Checked: the input test, Chapter 1 (arcade and PC
 models) and Chapter 4 `--strict` give the same results as before (see the worker's STATUS.md).
 
+## Online co-op (worker "survnet", 2026-11-09; protocol 22)
+
+Survival plays online with 2-4 players: two PCs (one seat each, or two each in the 4P game) or up to four PCs. The host
+picks it, the joiners follow. Details of the netcode: [netplay.md](netplay.md) "Survival online".
+
+- **Menu**: Online Co-op > Host a Game > **Game Mode** Arcade -> PC Mode -> Boss Mode -> **Survival** (-> Arcade); then
+  **Survival Arena** (the three arenas in every build since v1.4.0: main.cpp `survivalArenaCount()`; both PCs
+  on v1.4.0 or later). The joiner's waiting room shows "Game Mode: Survival: <arena>". Command line:
+  `hotd --host 47800 --survival courtyard [--players 2-4]`; the joiner needs nothing (`--join <code>`).
+- **The host decides** the arena, `--survival-seed`, `--survival-cap`, `--survival-no-cut` and the testing options
+  (`--survival-smg-wave`, `--survival-weapons-wave`, `--bot`'s test buyer, `--survival-cycle-weapons`): all in the
+  online settings. Each PC files the end's points in its own Survival table (its own name entry).
+- **The Typing of the Dead 0 stays single player** (never offered online; an online game turns it off). Horde is not
+  online.
+- What made it possible: `SurvivalMode` and `Weapons` live outside the work RAM, so rollback's snapshot
+  (`RuntimeState`) now copies both whole (rounds, timers, the shop, every seat's points / weapons / magazines / perks,
+  the director's and the weapons' random streams, Survival's creatures, the engage watch) and the desync hash adds
+  their digests (`SurvivalMode::digest`, `Weapons::digest`); the shop's buys are shots at the signs (the synced gun
+  input already); the SMG's held trigger, the weapon switch (wheel, number keys, a pad's shoulders) and the light gun's
+  auto best weapon now go through the lockstep's input instead of straight into `Runtime::weapons` (a local write there
+  would desync); the end (Over) is acted on only once every frame is confirmed.
+
+Tests (127.0.0.1, headless, muted, each PC its own HOTD_PREF_DIR, `--autofire --lives-kept 1 --survival-test 10`:
+10 rounds, 9 shops, buys through the shot at a sign; `HOTD_NET_SURVIVAL_SWITCH=N` switches weapon every N frames
+through the input):
+
+| Test | Frames | Rollbacks (a PC) | Result |
+|---|---|---|---|
+| 2 PCs, 2 players, no sim | 22027 | 727 / 1015 | hashes equal on all 22027 frames, round 10 on both, the same buys |
+| 2 PCs, 2 players, `--net-sim 10,40` both, switch every 300 | 21815 | ~5700 | equal (317a025576e77170), 96 switches |
+| 2 PCs x 2 seats (4P), `--net-sim 5,30`, switch every 450 | 27692 | ~8150 | equal (38bf46489f6b1180), 184 switches |
+| 4 PCs, `--net-sim 5,30`, switch every 400 (`netplay4_test.ps1`) | 28294 | ~10900 | SYNC PASS, all four 2e06c990ea5ddb95 |
+| mid-game join (host alone, joiner at 3886, `netplay_join_test.ps1 -Mode join`) | 20000 | | equal |
+| rejoin after a kill (`-Mode rejoin`) | 20000 | | equal |
+| control: the snapshot without Survival / the weapons | | | desync at frame 124 (the test sees a miss) |
+
+Desyncs (checksum mismatches): 0 in every run. Story online is unchanged (2 players, 40000 frames: 8543b41a4be0f433, the
+same as main's build).
+
 ## Open
 
 - MrG (19 joints, 4 own motions), Lubin (16 joints) and Hiru (9 joints, 6 own motions) need behaviour of their own.
-- Online co-op: Survival is local only (its state is not in the rollback snapshot; the menu's Survival starts a local game).
+- Online co-op: not played by people over a real network yet (the headless tests below only); a joiner who arrives after
+  the lead-in hears no arena music until the next music cue (its catch-up replays silently).
 - The rounds' "speed": the creatures' own walk speeds are the motions' (not changed); faster rounds come from the
   runners (the dash motion), shorter gaps, the AI-at-once flag, the aggression floor and Sonic Mode.
 - Not checked in a window: the shop's signs' place on a wide screen and with the PC HUD, buying with a pad / light gun.

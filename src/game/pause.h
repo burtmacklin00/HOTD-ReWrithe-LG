@@ -60,26 +60,34 @@ public:
     // GitHub #5 (user 2026-11-03: "Level retry ... from the pause menu like in the remake"): Gameplay > Chapter Retry on
     // (the host sets `retry` for the games that can retry): the pause has Continue, Retry Chapter, Exit; after a game
     // over openGameOver() shows GAME OVER with Retry Chapter, Exit (Escape / P do not close it). Off: the PC's pause
-    enum Item { kContinue, kExit, kRetry, kSettings };
+    enum Item { kContinue, kExit, kRetry, kSettings, kPhoto };
     bool retry = false;
     std::function<void()> onRetry;               // Retry Chapter chosen (the host restarts the chapter)
     void openGameOver();
     bool gameOver() const { return paused_ && over_; }
     // fxux (user 2026-11-03): Settings right below Continue (the host sets `settings`): the Options pages over the paused
-    // game (onSettings; the pause stays open, Back returns to it). The pause's items: Continue, Settings, Retry Chapter
-    // (#5), Exit; the game over's: Retry Chapter, Exit
+    // game (onSettings; the pause stays open, Back returns to it). The pause's items: Continue, Settings, Photo Mode
+    // (photomode), Retry Chapter (#5), Exit; the game over's: Retry Chapter, Exit
     bool settings = false;
     std::function<void()> onSettings;
-    int itemCount() const { return over_ ? 2 : 2 + (retry ? 1 : 0) + (settings ? 1 : 0); }
+    // photomode (game/photo_mode.h): Photo Mode after Settings (the host sets `photo` for local games and online,
+    // where `photoGrey` greys it: chosen there it only calls onPhoto, which shows why). The pause stays open
+    // underneath (Photo Mode left: the pause again)
+    bool photo = false, photoGrey = false;
+    std::function<void()> onPhoto;
+    int itemCount() const { return over_ ? 2 : 2 + (retry ? 1 : 0) + (settings ? 1 : 0) + (photo ? 1 : 0); }
     Item itemAt(int i) const
     {
         if (over_)
             return i == 0 ? kRetry : kExit;
         if (i == 0)
             return kContinue;
-        if (settings && i == 1)
+        int k = 1;
+        if (settings && i == k++)
             return kSettings;
-        return retry && i == (settings ? 2 : 1) ? kRetry : kExit;
+        if (photo && i == k++)
+            return kPhoto;
+        return retry && i == k ? kRetry : kExit;
     }
 
 private:
