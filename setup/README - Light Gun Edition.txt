@@ -72,7 +72,7 @@ What this edition adds
   - Arsenal Mode: the middle button steps through Handgun, SMG, Assault Rifle, Double Pistols, Shotgun, Magician's
     Hand, Machine Gun and Rocket Launcher, each player their own, with Survival Mode's guns, sounds and HUD. Ammo never
     runs out, for any gun (one rocket a load), and a gun you switch away from is reloaded, ready when you come back; each rocket blows up every zombie on the screen in a big explosion.
-  - Shotgun Mode / Machine Gun: the whole game with that gun (the machine gun: unlimited ammo).
+  - Shotgun Mode / Machine Gun: the whole game with that gun (it never runs out: reload when the magazine is empty).
   - Free Fire: unlimited ammo, no reloading.
   - Hardcore: one life, no continues, its own high scores.
   - One Shot Kill: one shot kills any zombie (bosses as normal), its own high scores.

@@ -2969,7 +2969,7 @@ void outputsFrame(game::Runtime& rt, const game::LaunchConfig& cfg)
     static int lastMode = -1;
     const bool wasGame = lastMode == 4 || lastMode == 5, isGame = f.gameMode == 4 || f.gameMode == 5;
     if (lastMode >= 0 && wasGame != isGame)
-        gOutputs.resetAll();
+        gOutputs.resetAll(wasGame && !isGame, SDL_GetTicks());   // (a game's end: the lights out too)
     lastMode = f.gameMode;
     // (online: this PC's one or two seats as P1 / P2; offline: players 1-4, 3 / 4 in the 4-player mode)
     const int seats[4] = {gNet ? gNet->localPlayer() : 0, gNet ? gNet->secondSeat() : 1, gNet ? -1 : 2, gNet ? -1 : 3};
@@ -6732,7 +6732,9 @@ int main(int argc, char* argv[])
             const bool ownGuns = gSurvivalArena < 0 && !gTotd && !hordeGame;
             const bool arsenal = cfg.weaponSwitch && ownGuns;
             const bool shotgunOn = cfg.shotgun && ownGuns, machineGunOn = cfg.machineGun && ownGuns, freeFireOn = cfg.freeFire && ownGuns;
-            r.lgModes.freeFire = freeFireOn || (machineGunOn && !arsenal);   // (Machine Gun: unlimited ammo too)
+            // (user 2026-11-12: Machine Gun mode counts its 50 down and reloads, as the machine gun in Arsenal: the
+            // reserve endless there anyway; Free Fire alone the no-reload one)
+            r.lgModes.freeFire = freeFireOn;
             r.lgMachineGun = false;   // (v1.3.0's weapons draw every gun now: below)
             r.lgModes.hardcore = cfg.hardcore && !bossModeOpt;   // (Sudden Death: a normal game's lives and continues, user 2026-11-05)
             r.lg_one_hit = cfg.suddenDeath && !bossModeOpt;
@@ -14115,7 +14117,7 @@ int main(int argc, char* argv[])
         gOutputs.tick(SDL_GetTicks());   // Light Gun Edition: the outputs' pulses, lamps and connections (every loop)
         if (static Screen outScreen = screen; outScreen != screen) {   // (into / out of a game: the lights cleared)
             outScreen = screen;
-            gOutputs.resetAll();
+            gOutputs.resetAll(screen != Screen::Game, SDL_GetTicks());   // (back to the menu: the lights out too)
         }
         if (screen != Screen::Game && SDL_GetWindowMouseGrab(window))
             SDL_SetWindowMouseGrab(window, false);   // the mouse is kept in the window during play only

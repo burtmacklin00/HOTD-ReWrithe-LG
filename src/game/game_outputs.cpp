@@ -193,6 +193,7 @@ void GameOutputs::set(int output, int value)
     Output& o = outputs_[static_cast<size_t>(output)];
     if (o.value == value) return;
     o.value = value;
+    if (held_) return;   // (between resetAll's mame_stop and mame_start: sent at mame_start)
     sendAll(line(o.name, value));
     if (log_ && o.name.find("LmpStart") == std::string::npos)
         logLine(o.name + " = " + std::to_string(value) + "   (" + std::to_string(clients_.size()) + " tool(s) connected)");
@@ -212,7 +213,8 @@ void GameOutputs::acceptClients()
         int one = 1;
         setsockopt(c, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&one), sizeof(one));
         std::string hello = line("mame_stop", 1) + "mame_start = " + kRomName + "\r";
-        for (const Output& o : outputs_) hello += line(o.name, o.value);
+        for (const Output& o : outputs_)
+            if (o.value >= 0) hello += line(o.name, o.value);   // (-1: not known yet, resetAll)
         if (sendTo(client, hello)) {
             clients_.push_back(client);
             logLine("a tool connected (Hook of the Reaper / MAMEHooker ...): " + std::to_string(clients_.size()) + " now");
@@ -292,7 +294,7 @@ void GameOutputs::onFrame(const OutputFrame& f, bool live, uint64_t nowMs)
     }
 }
 
-void GameOutputs::resetAll()
+void GameOutputs::resetAll(bool lightsOff, uint64_t nowMs)
 {
     if (!running()) return;
     for (int i = 0; i < kSeats; ++i) {
@@ -301,24 +303,31 @@ void GameOutputs::resetAll()
         track_[i] = Track{};
         lampBlink_[i] = true;
     }
-    // (user 2026-11-08: no recoil and an error from Hook of the Reaper after a game: mame_stop / mame_start here made
-    // it close and at once open the guns' COM ports again (its hotdrw profile's Close_COM / Open_COM), twice at a
-    // game's start: the port not free yet, its error, the guns left without recoil. Every output to 0 alone puts the
-    // lights out; mame_start stays the connection's own, once)
-    std::string msg;
-    for (Output& o : outputs_) {
-        o.value = 0;
-        msg += line(o.name, 0);
+    for (Output& o : outputs_)
+        o.value = -1;   // (unknown: the next values all sent)
+    if (!lightsOff || held_ || (lastStop_ && nowMs < lastStop_ + 3000)) {
+        logLine("outputs reset (a new game): the values sent afresh");
+        return;
     }
-    for (uintptr_t c : clients_)
-        sendTo(c, msg);
-    logLine("outputs reset (the menu / a new game): every output 0");
+    lastStop_ = nowMs, restartAt_ = nowMs + 1500, held_ = true;
+    for (uintptr_t cl : clients_)
+        sendTo(cl, line("mame_stop", 1));
+    logLine("outputs reset (the menu): mame_stop sent, mame_start in 1.5 s");
 }
 
 void GameOutputs::tick(uint64_t nowMs)
 {
     if (!running()) return;
     acceptClients();
+    if (held_ && nowMs >= restartAt_) {   // (resetAll's restart: the game started again, its values after)
+        held_ = false, restartAt_ = 0;
+        std::string msg = std::string("mame_start = ") + kRomName + "\r";
+        for (const Output& o : outputs_)
+            if (o.value >= 0) msg += line(o.name, o.value);
+        for (uintptr_t cl : clients_)
+            sendTo(cl, msg);
+        logLine("outputs: mame_start sent");
+    }
     for (int i = 0; i < kSeats; ++i) {
         runPulse(recoilPulse_[i], nowMs);
         runPulse(damagedPulse_[i], nowMs);

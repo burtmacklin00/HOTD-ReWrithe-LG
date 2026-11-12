@@ -1043,7 +1043,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "unlimited ammo, no reloading (for young players and parties)"});
         killerBy(r);
         r.push_back({"Machine Gun", [&c]() { return onOff(c.machineGun); }, [&c, save]() { { const bool on = !c.machineGun; if (on) c.killerPick(2); c.machineGun = on; } save(); },
-                     "the whole game with the machine gun: hold the trigger for automatic fire (recoil on every shot), unlimited ammo"});
+                     "the whole game with the machine gun: hold the trigger for automatic fire (recoil on every shot), 50 a magazine, never runs out"});
         killerBy(r);
         r.push_back({"Arsenal Mode", [&c]() { return onOff(c.weaponSwitch); }, [&c, save]() { { const bool on = !c.weaponSwitch; if (on) c.killerPick(3); c.weaponSwitch = on; } save(); },
                      "middle button: next weapon. Handgun, SMG, Rifle, Double Pistols, Shotgun, Magician's Hand, Machine Gun, Rocket Launcher"});

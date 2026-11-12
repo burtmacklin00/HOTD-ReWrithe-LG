@@ -65,10 +65,12 @@ public:
     void onFrame(const OutputFrame& f, bool live, uint64_t nowMs);
     // Every loop (also while paused / in the menus): finishes timed pulses, blinks the lamps, takes new connections.
     void tick(uint64_t nowMs);
-    // Light Gun Edition (user 2026-11-05: the lights of the players of the last game stayed on in the menu): every
-    // output back to 0 and the tools told the game started again (mame_stop / mame_start: Hook of the Reaper clears its
-    // lights and its death / damage states), as at a tool's first connection
-    void resetAll();
+    // Light Gun Edition (user 2026-11-05 / 11-12: the lights of the last game stayed on in the menu): the outputs
+    // forgotten (sent again in full by the next game). lightsOff (back to the menu / attract): the tools told the game
+    // stopped (mame_stop: Hook of the Reaper's Close_COM, its lights out) and, 1.5 s later, started (mame_start: its
+    // Open_COM), nothing sent between; at most once in 3 s (no zeros sent: a life to 0 is its death flash, an ammo
+    // count to 0 its strip's last state; both at once and twice made its COM error, 11-08)
+    void resetAll(bool lightsOff, uint64_t nowMs);
 
 private:
     struct Output { std::string name; int value = -1; };
@@ -100,6 +102,8 @@ private:
     Pulse recoilPulse_[kSeats], damagedPulse_[kSeats];
     Track track_[kSeats];
     bool lampBlink_[kSeats] = {true, true, true, true};
+    uint64_t restartAt_ = 0, lastStop_ = 0;   // (resetAll: mame_start's time; the last mame_stop's)
+    bool held_ = false;                       // (between them: the values kept, sent at mame_start)
 };
 
 } // namespace hotd::game
