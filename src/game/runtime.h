@@ -431,12 +431,12 @@ public:
     int lgWeapon[4] = {-1, -1, -1, -1};
     // Light Gun Edition: the creator's weapons (Arsenal / Shotgun Mode / Machine Gun, not Survival): the colour of a
     // seat's bullets (Hud::drawArsenalAmmo's colours; user 2026-11-08: every gun its own: the shotgun red, the machine
-    // gun silver, the rocket green, the handgun gold, the SMG blue, the assault rifle orange, the double pistols
+    // gun silver, the rocket green, the handgun the game's own white, the SMG blue, the assault rifle orange, the double pistols
     // purple, the Magician's Hand pink)
     int lgEngineTint(int p) const
     {
         if (weapons.mode != Weapons::Arsenal || p < 0 || p >= 4) return 0;
-        static const int kOf[kWeapons] = {4, 5, 6, 7, 1, 8, 2, 3};   // (kPistol .. kRocket)
+        static const int kOf[kWeapons] = {0, 5, 6, 7, 1, 8, 2, 3};   // (kPistol .. kRocket; user 2026-11-12: the handgun the game's own white)
         const int w = weapons.seat[p].cur;
         return w >= 0 && w < kWeapons ? kOf[w] : 0;
     }

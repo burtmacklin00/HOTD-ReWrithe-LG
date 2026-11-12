@@ -67,11 +67,11 @@ What this edition adds
   time: turning one on turns the others of its group off. The looks, Married Mode, Party Scoreboard and Options >
   Mods go with anything, except Big Head with Weak Point Mode or Exploding Zombies (its heads are drawn big but hit
   where they really are). Turn All Mods Off (top of both pages) switches everything off. Each gun's bullets have
-  their own colour: handgun gold, SMG blue, assault rifle orange, double pistols purple, shotgun red,
+  their own colour: handgun white (the game's own), SMG blue, assault rifle orange, double pistols purple, shotgun red,
   Magician's Hand pink, machine gun silver, rocket green.
   - Arsenal Mode: the middle button steps through Handgun, SMG, Assault Rifle, Double Pistols, Shotgun, Magician's
     Hand, Machine Gun and Rocket Launcher, each player their own, with Survival Mode's guns, sounds and HUD. Ammo never
-    runs out, for any gun (one rocket a load); each rocket blows up every zombie on the screen in a big explosion.
+    runs out, for any gun (one rocket a load), and a gun you switch away from is reloaded, ready when you come back; each rocket blows up every zombie on the screen in a big explosion.
   - Shotgun Mode / Machine Gun: the whole game with that gun (the machine gun: unlimited ammo).
   - Free Fire: unlimited ammo, no reloading.
   - Hardcore: one life, no continues, its own high scores.
