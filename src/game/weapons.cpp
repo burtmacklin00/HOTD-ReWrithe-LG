@@ -394,7 +394,9 @@ int Weapons::reloadFrames(int p) const
 {
     const Seat& s = seat[p & 3];
     // Drops: the handgun reloads at once as the arcade's (an off-screen pull); the others take their time
-    const int f = (mode == Drops || mode == Arsenal) && s.cur == kPistol ? 0 : def(s.cur).reload;   // (Arsenal: as the arcade's too)
+    // (Light Gun Edition, user 2026-11-13: in the Killer Mods every gun reloads at once, as the arcade's handgun;
+    // the creator's Survival / Drops / Horde keep their reload times)
+    const int f = mode == Arsenal || (mode == Drops && s.cur == kPistol) ? 0 : def(s.cur).reload;
     return s.quick ? f / 2 : f;
 }
 
