@@ -1403,8 +1403,8 @@ void Runtime::lg_fired(int player)
     }
 }
 
-// Coin-Op Survival: the clock runs down in play (not in cut-scenes, the results, the continue countdowns); a kill +2 s,
-// a rescue +15 s, a lost life -10 s, a miss -1.5 s; at 0 the game is over for everyone
+// Coin-Op Survival: the clock runs down in play (not in cut-scenes, the results, the continue countdowns); a kill +3 s,
+// a rescue +20 s (no time taken off); at 0 the game is over for everyone
 void Runtime::lg_survival_frame()
 {
     if (lgClock < 0 || lgTimeUp)
@@ -1422,10 +1422,10 @@ void Runtime::lg_survival_frame()
     double d = 0;
     uint32_t kills = 0;
     for (int p = 0; p < 4; ++p) kills += lg_kills[p];
-    if (kills > lgSvKills_) d += 10.0 * double(kills - lgSvKills_);   // (user 2026-11-05: 10 s a kill)
+    if (kills > lgSvKills_) d += 3.0 * double(kills - lgSvKills_);   // (user 2026-11-16: 10 s a kill "goes up too much": 3 s)
     lgSvKills_ = kills;
     const int resc = mem.at<int16_t>(G::hostages_rescued_chapter);
-    if (resc > lgSvRescued_) d += 30.0 * double(resc - lgSvRescued_);   // (30 s a rescue)
+    if (resc > lgSvRescued_) d += 20.0 * double(resc - lgSvRescued_);   // (20 s a rescue; was 30)
     lgSvRescued_ = resc;
     bool anyone = false;
     for (int p = 0; p < seat_count(); ++p) {

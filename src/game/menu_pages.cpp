@@ -1119,7 +1119,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "about one zombie in three glows orange. Head shot: it blows up every zombie on the screen! Anywhere else: only it blows up, and it hurts you"});
         killerBy(r);
         r.push_back({"Coin-Op Survival", [&c]() { return onOff(c.survival); }, [&c, save]() { { const bool on = !c.survival; if (on) c.killerPick(9); c.survival = on; } save(); },
-                     "a 60 s clock counts down in play: each kill +10 s, each rescue +30 s; time up = game over. Its own high scores"});
+                     "a 60 s clock counts down in play: each kill +3 s, each rescue +20 s; time up = game over. Its own high scores"});
         killerBy(r);
         // Looks
         r.push_back({"Looks", []() { return std::string(); }, nullptr, "Flashlight Mode and the Screen Filter: with any mods"});

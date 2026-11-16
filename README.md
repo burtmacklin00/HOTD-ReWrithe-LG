@@ -78,7 +78,7 @@ plays.
     a hit there does double damage, whatever the gun (small creatures and bosses as normal).
   - **Exploding Zombies:** about one zombie in three glows; a head shot blows up every zombie on the screen, a hit
     anywhere else blows up only it, and costs you a life.
-  - **Coin-Op Survival:** a 60-second clock; each kill +10 s, each rescue +30 s; time up = game over. Its own high
+  - **Coin-Op Survival:** a 60-second clock; each kill +3 s, each rescue +20 s; time up = game over. Its own high
     scores.
   - **Flashlight Mode:** the mansion dark, each player's gun lights where it aims.
   - **Screen Filter:** Night Vision, VHS Camcorder or Wireframe.
