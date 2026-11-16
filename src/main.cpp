@@ -7524,7 +7524,7 @@ int main(int argc, char* argv[])
                 gl::BeginQuery(gl::TIME_ELAPSED, q3d);
                 if (fsCount) gl::BeginQuery(kFsInvocations, qfs);
                 rr.hud.clean = rr.hud.noText = gTrailer;   // (--trailer: Trailer Mode)
-                rr.hud.drawCross[0] = !(gTotd && gTyping);   // The Typing of the Dead 0: no sight for the typist
+                rr.hud.drawCross[0] = cfg.crosshairs && !(gTotd && gTyping);   // The Typing of the Dead 0: no sight for the typist (Light Gun Edition: Show Crosshairs)
                 if (gVr) {   // vr: the eyes, the HUD on their screen plane, the stereo pair into rr.fbo (docs/vr.md)
                     const std::function<void(int, int, const float[4][2])> vrHud = [&rt](int pw, int ph, const float a[4][2]) {
                         rr.hud.draw(rt, pw, ph, a, false, std::vector<std::string>());
@@ -18731,7 +18731,7 @@ int main(int argc, char* argv[])
         hud.customDirs = xhairDirs;
         hud.widescreen = cfg.aspect != 1;
         hud.widen2D = cfg.widen2d == 0;   // wide2d: Video > Widen 2D Screens
-        hud.drawCross[0] = !(gTotd && gTyping && !gNet);   // The Typing of the Dead 0: no sight for player 1 (the typist)
+        hud.drawCross[0] = cfg.crosshairs && !(gTotd && gTyping && !gNet);   // The Typing of the Dead 0: no sight for player 1 (the typist); Light Gun Edition: Show Crosshairs off (user 2026-11-16: player 1's stayed)
         hud.anchorEdges = cfg.aspect != 1;   // display2: widescreen (16:10: its edges): the per-player HUD at the window's edges
         hud.maxAspect = cfg.aspect == 2 ? 1.6f : 0.0f;   // aspect1610
         // rate: the blend between the previous game frame and the newest (Smooth motion): how far the time is past the
