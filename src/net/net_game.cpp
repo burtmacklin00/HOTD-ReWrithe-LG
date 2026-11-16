@@ -320,6 +320,8 @@ int NetGame::rollbackProbe(game::Runtime& rt, int span)
                 first < 0 ? "the same after the restore" : ("differs from frame +" + std::to_string(first)).c_str());
     return first < 0 ? 0 : 1;
 }
+static std::string gBootParts;   // (Light Gun Edition: the last start state's parts, for the log)
+
 uint64_t NetGame::bootHash(game::Runtime& rt)
 {
     Hasher h;
@@ -339,26 +341,32 @@ uint64_t NetGame::bootHash(game::Runtime& rt)
     if (rt.survival.active())   // Survival online (protocol 22): the arena, seed, cap .. as started
         hashSurvival(rt, h);
     const uint64_t v = h.done();
-    if (std::getenv("HOTD_BOOT_HASH_PARTS")) {   // developer: which part of a start state differs (a join's "came out different")
+    // which part of a start state differs (a join's "came out different"): developer HOTD_BOOT_HASH_PARTS to stdout;
+    // Light Gun Edition (user 2026-11-16: "Player 3's game is different at the start" on two PCs, alike on one): every
+    // online start writes them to the log too (one line), so the two PCs' hotd.log show where they differ
+    {
+        std::string t;
+        char b[160];
+        auto add = [&](const char* fmt, auto... a) { std::snprintf(b, sizeof b, fmt, a...); t += b; };
         Hasher a;
         hashRam(rt.mem, a);
-        std::printf("boothash parts: ram %016llx", (unsigned long long)a.done());
+        add("start state parts: ram %016llx", (unsigned long long)a.done());
         for (const port::Mem::Region& r : rt.mem.regions())
             if (r.base + r.size <= kRam || r.base >= kRamEnd) {
-                Hasher b;
-                b.words(r.bytes.get(), r.size & ~31u);
-                std::printf(" %X:%016llx", r.base, (unsigned long long)b.done());
+                Hasher hb;
+                hb.words(r.bytes.get(), r.size & ~31u);
+                add(" %X:%016llx", r.base, (unsigned long long)hb.done());
             }
         Hasher c, d;
         hashBoss(rt, c);
         hashPm(rt, d);
-        std::printf(" mode %d frameCount %llu chapter %d event %d gm %d", rt.boss.mode, (unsigned long long)rt.frameCount,
-                    int(rt.mem.at<int8_t>(game::A::G::chapter)), int(rt.mem.at<int8_t>(game::A::G::event_index)),
-                    int(rt.mem.at<int16_t>(game::A::G::game_mode)));
-        std::printf(" flags %d%d%d%d%d boss %016llx pm %016llx timeMs %.3f tickMs %.6f idx %d phase %d players %d next %d ev %u\n",
-                    int(rt.pcModels), int(rt.livesKept), int(rt.cuts.guards), int(rt.cuts.defaultRoute), int(rt.continueUnplayable),
-                    (unsigned long long)c.done(), (unsigned long long)d.done(), rt.boss.timeMs, rt.boss.tickMs, rt.boss.index,
-                    int(rt.boss.phase), rt.boss.players, int(rt.boss_next), rt.boss_events);
+        add(" frame %llu chapter %d event %d gm %d", (unsigned long long)rt.frameCount, int(rt.mem.at<int8_t>(game::A::G::chapter)),
+            int(rt.mem.at<int8_t>(game::A::G::event_index)), int(rt.mem.at<int16_t>(game::A::G::game_mode)));
+        add(" flags %d%d%d%d%d mix %d/%d boss %016llx pm %016llx; total %016llx", int(rt.pcModels), int(rt.livesKept),
+            int(rt.cuts.guards), int(rt.cuts.defaultRoute), int(rt.continueUnplayable), rt.mix.on ? 1 : 0, int(rt.mix.pc),
+            (unsigned long long)c.done(), (unsigned long long)d.done(), (unsigned long long)(v ? v : 1));
+        if (std::getenv("HOTD_BOOT_HASH_PARTS")) std::printf("%s\n", t.c_str());
+        gBootParts = t;   // (ready() logs it with the settings)
     }
     return v ? v : 1;
 }
@@ -1138,8 +1146,17 @@ bool NetGame::ready(game::Runtime& rt, std::string& err, int timeoutS)
 {
     if (solo_)   // alone: nobody to compare with yet (a joiner compares at its join frame)
         return true;
+    auto logParts = [this]() {
+        if (log)
+            log(gBootParts + " settings: players " + std::to_string(settings_.players) + " seats " + std::to_string(settings_.seats) +
+                " pcs " + std::to_string(settings_.pcs) + " seat " + std::to_string(settings_.seat) + "/" +
+                std::to_string(settings_.seat2) + " models " + std::to_string(settings_.models) + " sound " +
+                std::to_string(settings_.sound) + " lives " + std::to_string(settings_.lives) + " difficulty " +
+                std::to_string(settings_.difficulty));
+    };
     if (multi_ && session_.isHost()) {   // up to four PCs: every joined PC's started state
         const uint64_t mine = bootHash(rt);
+        logParts();
         for (int k = 1; k <= 3; ++k)
             if (seatLive(k)) seat(k).setReady(mine);
         const double t0 = nowS();
@@ -1163,6 +1180,7 @@ bool NetGame::ready(game::Runtime& rt, std::string& err, int timeoutS)
         return true;
     }
     const uint64_t mine = bootHash(rt);
+    logParts();
     session_.setReady(mine);
     const double t0 = nowS();
     uint64_t theirs = 0;

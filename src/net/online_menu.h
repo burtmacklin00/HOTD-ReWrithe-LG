@@ -25,7 +25,7 @@ public:
     NetArgs base;                                       // the command line's netplay options (tests: --lobby, --upnp)
     std::string name = "HOTD game";                      // the host's game name (the LAN list)
     std::string playerName = "Player";                   // this player's name (the waiting rooms; launcher.ini netname=)
-    int netInfo = 1;                                     // the in-game connection info: 0 off, 1 small (ping), 2 detailed (launcher.ini netinfo=)
+    int netInfo = 0;                                     // the in-game connection info: 0 off, 1 small (ping), 2 detailed (launcher.ini netinfo=)
     std::function<void()> saveSettings;                  // playerName / netInfo / Game Mode / the characters changed
     uint16_t port = 47800;                               // the host's UDP port
     // Survival Mode online (protocol 22): the arenas this build offers (main's survivalArenaCount(): a public build

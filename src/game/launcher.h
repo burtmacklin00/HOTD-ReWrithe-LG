@@ -544,7 +544,7 @@ struct LaunchConfig {
     // the in-game connection info (0 off, 1 small: the ping in a corner, 2 detailed: the F3 line). launcher.ini
     // netname=, netinfo=
     std::string netName;
-    int netInfo = 1;
+    int netInfo = 0;   // (Light Gun Edition, user 2026-11-16: "hide the ms display": Off; launcher.ini netinfo2=, the old netinfo= ignored)
     // the join code's hole punching (docs/online_howto.md "Play without port forwarding"): netstun= 1 asks public STUN
     // servers for this PC's internet address (the only outside contact; 0: as before, UPnP / port forwarding only);
     // stunservers= the servers in fallback order (empty: net::kDefaultStun)
