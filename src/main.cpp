@@ -14116,8 +14116,13 @@ int main(int argc, char* argv[])
         }
         gOutputs.tick(SDL_GetTicks());   // Light Gun Edition: the outputs' pulses, lamps and connections (every loop)
         if (static Screen outScreen = screen; outScreen != screen) {   // (into / out of a game: the lights cleared)
+            // (not for the pause's Settings and back: the game goes on, Hook of the Reaper not restarted mid-game)
+            static bool overSettings = false;
+            const bool settingsTrip = (screen == Screen::Menu && gOverGame) || (screen == Screen::Game && overSettings);
+            overSettings = screen == Screen::Menu && gOverGame;
             outScreen = screen;
-            gOutputs.resetAll(screen != Screen::Game, SDL_GetTicks());   // (back to the menu: the lights out too)
+            if (!settingsTrip)
+                gOutputs.resetAll(screen != Screen::Game, SDL_GetTicks());   // (back to the menu: the lights out too)
         }
         if (screen != Screen::Game && SDL_GetWindowMouseGrab(window))
             SDL_SetWindowMouseGrab(window, false);   // the mouse is kept in the window during play only
@@ -14323,6 +14328,11 @@ int main(int argc, char* argv[])
                     gOverTex = 0;
                 }
                 liveSettings(cfg, menu.cfg, gNet != nullptr);
+                // Light Gun Edition (user 2026-11-16: back from the pause's Settings no gun would shoot, the ammo ran
+                // down): the menus' Player-1-only gun off again (else every gun's input stays the menus') and the pull
+                // that closed the pages let go
+                lightGuns.setMenuGun("");
+                lightGuns.releaseButtons();
                 if (relMice) SDL_SetWindowRelativeMouseMode(window, true);
                 p1RelMouse = false;   // (the game's loop sets player 1's mouse mode again)
                 SDL_Log("in-game settings: closed (back to the pause)");
@@ -18912,9 +18922,10 @@ int main(int argc, char* argv[])
                 if (shots == 0 || seatBotOf(cfg, p) != 0) continue;
                 rows.push_back({p, rt.mem.u32(rt.player_rec(p) + 8), shots, hits, rt.lg_kills[p]});
             }
-            if (boardOk && rows.size() >= 2) {
-                int mvp = 0;
-                for (size_t i = 1; i < rows.size(); ++i)
+            // (user 2026-11-16: one player saw nothing: the board for one player too, the MVP with two or more)
+            if (boardOk && !rows.empty()) {
+                int mvp = rows.size() >= 2 ? 0 : -1;
+                for (size_t i = 1; mvp >= 0 && i < rows.size(); ++i)
                     if (rows[i].score > rows[size_t(mvp)].score) mvp = int(i);
                 std::vector<std::string> lines = {"PARTY SCOREBOARD", "", "PLAYER     SCORE   KILLS   SHOTS    HITS  ACCURACY"};
                 for (size_t i = 0; i < rows.size(); ++i) {

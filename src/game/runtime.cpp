@@ -1186,7 +1186,21 @@ void Runtime::lg_roulette_frame()
         const int type = mem.at<int16_t>(body + 0xCC);
         auto f = lgWeakFixed_.find(body);
         if (f == lgWeakFixed_.end() || f->second.type != type || std::find(v.begin(), v.end(), f->second.part) == v.end()) {
-            std::vector<uint32_t> big = v;
+            // (user 2026-11-16: "the weak point ... at their lower legs ... very hard" up close: always at or above the
+            // pelvis: only the parts in the body's upper half as it stands now (the view's y up: GameView::fromArcade);
+            // the pelvis about 45% of the way up from its lowest part to its highest)
+            std::vector<uint32_t> big;
+            {
+                float top = -1e30f, bottom = 1e30f;
+                for (uint32_t q : v) {
+                    const float y = mem.at<port::a::BodyPart>(q).view_pos[1];
+                    top = std::max(top, y), bottom = std::min(bottom, y);
+                }
+                const float pelvis = bottom + (top - bottom) * 0.45f;
+                for (uint32_t q : v)
+                    if (mem.at<port::a::BodyPart>(q).view_pos[1] >= pelvis) big.push_back(q);
+                if (big.empty()) big = v;
+            }
             std::sort(big.begin(), big.end(), [&](uint32_t a, uint32_t b) {
                 return mem.at<port::a::BodyPart>(a).hit_radius > mem.at<port::a::BodyPart>(b).hit_radius;
             });

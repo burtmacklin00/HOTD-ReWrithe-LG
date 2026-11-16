@@ -358,6 +358,12 @@ public:
     // buttons are kept for takeMenu, every other device's input is dropped (the game's own placement waits)
     void setMenuGun(const std::string& key) { if (key != menuKey_) { menuKey_ = key; menu_ = MenuGun{}; } }
     bool menuGunOn() const { return !menuKey_.empty(); }
+    // (user 2026-11-16: back from the pause's Settings no gun shot): every button let go (the menus' pull held over)
+    void releaseButtons()
+    {
+        for (Dev& d : devs_) d.eTrigger = d.eReload = d.eStart = d.eWeapon = d.held = false;
+        menu_ = MenuGun{};
+    }
     // the menu gun's input since the last call: its window position (calibrated, pixels of lw x lh) when it moved, a
     // trigger pull (the click), whether the trigger is held, a right-button press; false: nothing new
     bool takeMenu(int lw, int lh, bool& moved, float& x, float& y, bool& trigger, bool& held, bool& alt);

@@ -1083,7 +1083,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "Married? You don't have to play by yourself anymore! You play player 1, computer teammates fill every other seat"});
         killerBy(r);
         r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
-                     "Co-op: each player's score, shots, hits and accuracy at the end of a chapter, and the MVP"});
+                     "At the end of each chapter: each player's score, kills, shots, hits and accuracy, and the MVP with 2+ players"});
         killerBy(r);
         break;
     case kCatMods:

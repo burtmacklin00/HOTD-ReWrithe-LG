@@ -82,8 +82,8 @@ plays.
   - **Flashlight Mode:** the mansion dark, each player's gun lights where it aims.
   - **Screen Filter:** Night Vision, VHS Camcorder or Wireframe.
   - **Married Mode:** you are player 1, computer teammates fill every other seat.
-  - **Party Scoreboard:** with 2+ players, each player's score, kills, shots, hits, accuracy and the MVP at a
-    chapter's end (off by default).
+  - **Party Scoreboard:** at a chapter's end, each player's score, kills, shots, hits and accuracy,
+    plus the MVP with 2+ players (off by default).
 - **Launchers** (AutoHotkey 1.1), no pop-ups, so front-ends such as LaunchBox are never interrupted:
   - `Launch HOTD ReWrithe.ahk`: starts the game; **Esc** closes it completely; **1** is the pause menu; Hook of the
     Reaper is closed (cleanly) when the game closes. Optional argument `4x3` / `16x9`. Your settings in

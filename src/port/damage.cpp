@@ -87,6 +87,11 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
     if (weaponHooks)   // weapons: each seat's weapon's damage
         weapon_damage();
     Obj& b = mem.at<Obj>(mem.u32(G::body_current));
+    // Light Gun Edition: One Shot Kill (user 2026-11-16: a zombie going for a hostage took more than one shot: those
+    // kinds take the damage in their own code, not enemy_check_death's): any hit's damage the whole life left, here
+    // where every kind's damage is decided (not in a boss fight: the bosses as normal)
+    if (lg_one_hit && !boss_on() && mem.at<int16_t>(G::hit_damage) > 0 && int32_t(b.param) > mem.at<int16_t>(G::hit_damage))
+        mem.at<int16_t>(G::hit_damage) = int16_t(std::min<int32_t>(0x7FFF, int32_t(b.param)));
     const int32_t life = b.param;
     // PC: every killer chosen here is also the last killer
     auto credit = [&](int8_t k) {
