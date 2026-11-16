@@ -1202,7 +1202,14 @@ void Runtime::lg_roulette_frame()
                     const float y = mem.at<port::a::BodyPart>(q).view_pos[1];
                     top = std::max(top, y), bottom = std::min(bottom, y);
                 }
-                const float pelvis = bottom + (top - bottom) * 0.45f;
+                // (user 2026-11-16: the leg again: the frame a zombie first shows its parts' camera positions are not
+                // written yet (all alike: no "up" to go by, so any part, a leg too, could be picked): no choice until
+                // they are; the zombie takes hits as normal for that frame or two)
+                if (!(top - bottom > 1.0f))
+                    continue;
+                // (user 2026-11-16, again: "the first zombie had a weakpoint on his leg": the thighs' centres sit about
+                // half way up, so 45 % let them in: now the waist up, 60 %: the torso, the arms, the head)
+                const float pelvis = bottom + (top - bottom) * 0.60f;
                 for (uint32_t q : v)
                     if (mem.at<port::a::BodyPart>(q).view_pos[1] >= pelvis) big.push_back(q);
                 if (big.empty()) big = v;
@@ -1213,6 +1220,13 @@ void Runtime::lg_roulette_frame()
             big.resize(std::max<size_t>(1, (big.size() + 1) / 2));
             lgWeakSeed_ = lgWeakSeed_ * 1664525u + 1013904223u;
             lgWeakFixed_[body] = {big[(lgWeakSeed_ >> 16) % big.size()], type, frameCount};
+            if (std::getenv("HOTD_WEAK_LOG")) {   // (developer: each weak point chosen, its height up the body)
+                float top = -1e30f, bottom = 1e30f;
+                for (uint32_t q : v) { const float y = mem.at<port::a::BodyPart>(q).view_pos[1]; top = std::max(top, y), bottom = std::min(bottom, y); }
+                const port::a::BodyPart& c = mem.at<port::a::BodyPart>(lgWeakFixed_[body].part);
+                std::printf("WEAK type %d role %d height %.2f radius %.1f (parts %zu)\n", type, int(c.role),
+                            top > bottom ? (c.view_pos[1] - bottom) / (top - bottom) : -1.0f, c.hit_radius, v.size());
+            }
             f = lgWeakFixed_.find(body);
         }
         f->second.seen = frameCount;
