@@ -85,6 +85,7 @@ public:
     int musicNumbering = 0;                  // the music files' numbers: 0 auto, 1 the PC CD's, 2 the Saturn disc's
     std::map<int, uint64_t> cueCount;        // PC cues played (diagnostics)
     std::map<uint32_t, uint64_t> codeCount;  // arcade sound codes received (diagnostics)
+    std::map<int, uint64_t> voiceAt_;        // (Light Gun Edition: each voice line's last start, by frameNo: no stacked repeats)
     uint64_t frameNo = 0;                    // set by the frame loop (the cue trace's frame numbers)
     bool traceCues = false;                  // HOTD_TRACE_SOUND: every cue with its frame
     std::string describe(int cue) const;     // "type name / value" of a PC cue (the report)

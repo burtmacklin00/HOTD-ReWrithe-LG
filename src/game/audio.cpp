@@ -1207,6 +1207,24 @@ void Audio::cue(uint32_t arcadeCode)
             std::printf("[sound %llu] 0x%06X -> left out (Reload Voice: Off)\n", (unsigned long long)frameNo, arcadeCode);
         return;
     }
+    // Light Gun Edition (user 2026-11-16: two players reloading at once: "shoot outside the screen" over and over, like
+    // a reverb): a voice line (the "Reload!" call, the dubbed lines) already started in the last 1.5 s is not started
+    // again on top of itself; other sounds (shots, hits, explosions) as they come
+    // (the reload lines, cue 161 "Reload!" and 162 the longer one after 2 s of pulls on an empty gun (hud_state.cpp),
+    // sent again on every pull of every player: one group, nothing new for 2 s)
+    const bool reloadLine = it != cueMap_.end() && (it->second == kReloadCue || it->second == kReloadCue + 1);
+    if (it != cueMap_.end() && (reloadLine || isVoiceCue(it->second))) {
+        const int key = reloadLine ? kReloadCue : it->second;
+        const uint64_t gap = reloadLine ? 120 : 90;
+        auto last = voiceAt_.find(key);
+        if (last != voiceAt_.end() && frameNo >= last->second && frameNo - last->second < gap) {
+            if (traceCues)
+                std::printf("[sound %llu] 0x%06X -> left out (the same voice line %llu frames ago)\n", (unsigned long long)frameNo,
+                            arcadeCode, (unsigned long long)(frameNo - last->second));
+            return;
+        }
+        voiceAt_[key] = frameNo;
+    }
 #ifdef HOTD_HAVE_ARCADE_SOUND
     if (boardOn_) {   // the arcade board plays every code itself (0xBExxxx too)
         // spanish: Voice = Spanish: a dubbed line plays the Spanish copy's sample instead of the board's English one
