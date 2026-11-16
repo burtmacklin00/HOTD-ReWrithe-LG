@@ -269,6 +269,7 @@ private:
     Input lastRemoteAt(uint32_t f) const;
 
     // up to four PCs: the host's seat sessions (session_ is the socket's hub), the relay, the client's full frames
+    bool autoStartSent_ = false;   // (Light Gun Edition: Link Play's P3 start sent)
     bool multi_ = false, started_ = false;
     std::unique_ptr<Session> seat_[3];           // seats 1-3 (P2-P4)
     enum class Seat : uint8_t { Empty, Joining, Active };

@@ -1010,6 +1010,11 @@ void NetGame::hostStart(Settings s)
         int first = 1;
         while (first <= 3 && filled(first)) ++first;
         s.players = uint8_t(first);
+        // Light Gun Edition (user 2026-11-16: "players 2 and 4 won't auto join in 4 player mode ... shoot to join"): Link
+        // Play's 4 players (the host's P1 + P2, the friend's P3 + P4) start with player 1; the friend's PC sends its P3's
+        // start at once (main: netAutoStart), players 2 and 4 join with their trigger
+        if (!std::getenv("HOTD_NET_4P") && pair_[0])
+            s.players = 1;
         settings_ = s;
         session_.setDelay(s.delay);
         for (int k = 1; k <= 3; ++k) {
@@ -2096,6 +2101,16 @@ NetGame::Step NetGame::stepMulti(game::Runtime& rt, const std::function<Input()>
         Input own{uint8_t(s.flags), s.x, s.y};   // this PC's seat, and its second one's in the second fields
         if (secondSeat() > 0)
             own.flags2 = s.flags2, own.x2 = s.x2, own.y2 = s.y2;
+        // Light Gun Edition: Link Play's 4 players start with player 1 alone; the friend's PC presses its first seat's
+        // (P3's) start once at the start, in its input (so alike on every PC); P2 and P4 join with their triggers
+        if (!host && multi_ && !autoStartSent_ && !std::getenv("HOTD_NET_4P") && rt.mem.at<int16_t>(game::A::G::game_mode) == 4) {
+            const int me = localPlayer();
+            if (me > 0 && me < rt.seat_count() && rt.mem.at<port::a::Player>(rt.player_rec(me)).state == 9) {
+                own.flags |= Input::kStart;
+                autoStartSent_ = true;
+                if (log) log("Link Play: player " + std::to_string(me + 1) + " in (players 2 and 4 join with their trigger)");
+            }
+        }
         if (host) {
             Full& o = own_[due % kRelayRing];
             o = {due, {own, {}}};
