@@ -1192,10 +1192,11 @@ void Runtime::lg_roulette_frame()
             // the pelvis about 45% of the way up from its lowest part to its highest)
             std::vector<uint32_t> big;
             {
-                float top = -1e30f, bottom = 1e30f;
+                float top = -1e30f, bottom = 1e30f, left = 1e30f, right = -1e30f;
                 for (uint32_t q : v) {
-                    const float y = mem.at<port::a::BodyPart>(q).view_pos[1];
-                    top = std::max(top, y), bottom = std::min(bottom, y);
+                    const float* vp = mem.at<port::a::BodyPart>(q).view_pos;
+                    top = std::max(top, vp[1]), bottom = std::min(bottom, vp[1]);
+                    left = std::min(left, vp[0]), right = std::max(right, vp[0]);
                 }
                 // (user 2026-11-16: the leg again: the frame a zombie first shows its parts' camera positions are not
                 // written yet (all alike: no "up" to go by, so any part, a leg too, could be picked): no choice until
@@ -1205,14 +1206,38 @@ void Runtime::lg_roulette_frame()
                 // (user 2026-11-16, again: "the first zombie had a weakpoint on his leg": the thighs' centres sit about
                 // half way up, so 45 % let them in: now the waist up, 60 %: the torso, the arms, the head)
                 const float pelvis = bottom + (top - bottom) * 0.60f;
+                // (user 2026-11-16: "the arms get a lot of the targets": the body's centre line (the chest, the back,
+                // the neck, the head: the parts above the waist near the middle of the hips, the arms out to the sides)
+                // 3 times in 4, mostly its bigger parts; an arm 1 time in 4)
+                float cx = 0.0f;
+                int below = 0;
                 for (uint32_t q : v)
-                    if (mem.at<port::a::BodyPart>(q).view_pos[1] >= pelvis) big.push_back(q);
-                if (big.empty()) big = v;
+                    if (mem.at<port::a::BodyPart>(q).view_pos[1] < pelvis) cx += mem.at<port::a::BodyPart>(q).view_pos[0], ++below;
+                cx = below ? cx / float(below) : (left + right) / 2.0f;
+                const float reach = std::max(0.2f * (right - left), 0.12f * (top - bottom));
+                std::vector<uint32_t> centre, arms;
+                for (uint32_t q : v) {
+                    const float* vp = mem.at<port::a::BodyPart>(q).view_pos;
+                    if (vp[1] < pelvis) continue;
+                    (std::abs(vp[0] - cx) <= reach ? centre : arms).push_back(q);
+                }
+                auto bySize = [&](std::vector<uint32_t>& w) {
+                    std::sort(w.begin(), w.end(), [&](uint32_t a, uint32_t b) {
+                        return mem.at<port::a::BodyPart>(a).hit_radius > mem.at<port::a::BodyPart>(b).hit_radius;
+                    });
+                };
+                lgWeakSeed_ = lgWeakSeed_ * 1664525u + 1013904223u;
+                const bool arm = !arms.empty() && ((lgWeakSeed_ >> 24) & 3) == 0;
+                if (arm || centre.empty()) {
+                    big = arms.empty() ? v : arms;
+                    bySize(big);
+                    big.resize(std::max<size_t>(1, (big.size() + 1) / 2));   // (an arm's bigger half: no hands)
+                } else {
+                    big = centre;
+                    bySize(big);
+                    big.resize(std::min<size_t>(big.size(), 2));   // (the centre's two biggest: the chest / back mostly)
+                }
             }
-            std::sort(big.begin(), big.end(), [&](uint32_t a, uint32_t b) {
-                return mem.at<port::a::BodyPart>(a).hit_radius > mem.at<port::a::BodyPart>(b).hit_radius;
-            });
-            big.resize(std::max<size_t>(1, (big.size() + 1) / 2));
             lgWeakSeed_ = lgWeakSeed_ * 1664525u + 1013904223u;
             lgWeakFixed_[body] = {big[(lgWeakSeed_ >> 16) % big.size()], type, frameCount};
             if (std::getenv("HOTD_WEAK_LOG")) {   // (developer: each weak point chosen, its height up the body)
