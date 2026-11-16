@@ -6529,8 +6529,12 @@ int main(int argc, char* argv[])
         net::Settings ns;
         ns.chapter = uint8_t(chapterOpt >= 0 ? chapterOpt : c.chapter > 0 && game::chapterPlayable(c.chapter) ? c.chapter : 0);
         ns.event = uint8_t(std::clamp(event, 0, 255));
-        ns.seats = uint8_t(c.players >= 3 ? 4 : 2);   // the 4P mode online: two PCs, two seats each (docs/coop4.md phase 7)
-        ns.players = uint8_t(std::clamp(c.players, 1, int(ns.seats)));
+        // Light Gun Edition (user 2026-11-16): Link Play is 2 players, the host Player 1, the friend Player 2, whatever
+        // the host's Players choice (it was the 4P mode with 3-4: two seats on each PC, all four in at once);
+        // HOTD_NET_4P=1: as before (the developer's tests)
+        static const bool net4p = std::getenv("HOTD_NET_4P") != nullptr;
+        ns.seats = uint8_t(net4p && c.players >= 3 ? 4 : 2);   // the 4P mode online: two PCs, two seats each (docs/coop4.md phase 7)
+        ns.players = uint8_t(net4p ? std::clamp(c.players, 1, int(ns.seats)) : 2);
         // mixmodels (#49): Mixed: 0x80 + its PC rows (the host's, as its Models: every PC draws the host's choice and the
         // rows that steer the logic (the #52 / #81 gates, the cut creatures) match; a build without Mixed refuses the code)
         ns.models = uint8_t(modelsOf(c) == 2 ? 0x80 | (c.mixedPc & game::kMixAll) | (c.mixExtras ? 0 : 0x40) : c.models == 1 ? 1 : 0);   // (0x40: Arcade Extras off)

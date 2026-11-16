@@ -527,6 +527,11 @@ bool NetGame::open(const NetArgs& argsIn, std::string& err)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         if (a.join.empty()) { err = "no code in " + path; return false; }
     }
+    // Light Gun Edition (user 2026-11-16: "make link play just do 2 player with 2 humans, join on player 2 host on
+    // player 1"): two PCs, one seat each, whatever the Host / Join pages or the command line asked (4P Online, Your
+    // Seats 2); HOTD_NET_4P=1 keeps them (the developer's 4-PC tests)
+    if (!std::getenv("HOTD_NET_4P"))
+        a.pcs = 2, a.seats = 1;
     openedAt_ = nowS();
 #if defined(_MSC_VER) && defined(_M_X64)
     // the UCRT's math functions take FMA3 paths on CPUs that have it (other bits than without): off, so both PCs

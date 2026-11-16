@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "net/online_menu.h"
 
 #include "game/bossmode.h"
@@ -708,7 +709,9 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
                              startHost(fe);
                          }});
         rows.back().help = "Opens your game and shows the code your friends type to join";
-        // 4P: up to four PCs (one seat each, the host relays), or two PCs with two seats each
+        // 4P: up to four PCs (one seat each, the host relays), or two PCs with two seats each (Light Gun Edition: not
+        // shown: Link Play is 2 players, NetGame::open; HOTD_NET_4P=1 shows them)
+        if (std::getenv("HOTD_NET_4P")) {
         rows.push_back(X{"4P Online", [this]() { return std::string(base.pcs == 4 ? "Up to 4 PCs" : "2 PCs"); },
                          [this]() { base.pcs = base.pcs == 4 ? 2 : 4; }});
         rows.back().help = "Up to 4 PCs: one or two players each. 2 PCs: one friend (with 4 players: two on each PC)";
@@ -716,6 +719,7 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
             rows.push_back(X{"Your Seats", [this]() { return std::string(base.seats == 2 ? "2 (P1 + P3)" : "1 (P1)"); },
                              [this]() { base.seats = base.seats == 2 ? 1 : 2; }});
             rows.back().help = "2: two people play on this PC (Player 2 input plays P3)";
+        }
         }
         // PC Mode online (docs/pcmode.md "Online"): the host decides; each player picks a character on their own PC.
         // Boss Mode online (protocol 18): the host picks the boss (or All Bosses); every PC plays it
@@ -764,7 +768,7 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
             rows.push_back(X{"Your Character", [this]() { return pickName(base.pcChar[0], 1); },
                              [this]() { base.pcChar[0] = nextPick(base.pcChar[0]); if (saveSettings) saveSettings(); }});
             rows.back().help = "Your PC Mode character (friends pick their own on their PCs)";
-            if ((base.pcs == 4 && base.seats == 2) || (base.pcs != 4 && hostSettings && hostSettings().seats == 4)) {
+            if (std::getenv("HOTD_NET_4P") && ((base.pcs == 4 && base.seats == 2) || (base.pcs != 4 && hostSettings && hostSettings().seats == 4))) {
                 rows.push_back(X{"P3 Character", [this]() { return pickName(base.pcChar[1], 3); },
                                  [this]() { base.pcChar[1] = nextPick(base.pcChar[1]); if (saveSettings) saveSettings(); }});
                 rows.back().help = "The PC Mode character of this PC's second player (P3)";
@@ -876,13 +880,15 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
         }
         rows.push_back(X{"Join", nullptr, [this, &fe]() { joinTyped(fe); }});
         rows.back().help = "Connects to the host";
+        if (std::getenv("HOTD_NET_4P")) {   // (Light Gun Edition: Link Play is 2 players: one seat a PC)
         rows.push_back(X{"Your Seats", [this]() { return std::to_string(base.seats); }, [this]() { base.seats = base.seats == 2 ? 1 : 2; }});
         rows.back().help = "2: two people play on this PC (a game of up to 4 PCs, when two seats are free)";
+        }
         // PC Mode online: this PC's character(s), used when the host's game is PC Mode (Auto: the seat's default)
         rows.push_back(X{"Your Character", [this]() { return pickName(base.pcChar[0], 0); },
                          [this]() { base.pcChar[0] = nextPick(base.pcChar[0]); if (saveSettings) saveSettings(); }});
         rows.back().help = "Your character when the host plays PC Mode (Auto: Rogan / G / Rogan 2 / G 2 by seat)";
-        if (base.seats == 2) {
+        if (base.seats == 2 && std::getenv("HOTD_NET_4P")) {
             rows.push_back(X{"2nd Character", [this]() { return pickName(base.pcChar[1], 0); },
                              [this]() { base.pcChar[1] = nextPick(base.pcChar[1]); if (saveSettings) saveSettings(); }});
             rows.back().help = "The PC Mode character of this PC's second player";
