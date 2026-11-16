@@ -1236,6 +1236,59 @@ void Frontend::screenQuit()
     }, &Frontend::hitText);
 }
 
+// ---- screen 24 (Light Gun Edition): a title and a few big choices (frontend.h askChoice), laid out as the quit box ----
+void Frontend::askChoice(const std::string& title, std::vector<Choice> items, std::function<void(int)> pick, std::function<void()> back)
+{
+    choiceTitle_ = title;
+    choiceItems_ = std::move(items);
+    choicePick_ = std::move(pick);
+    choiceBack_ = std::move(back);
+    screenChoice();
+}
+
+void Frontend::screenChoice()
+{
+    if (style == kStyleRemake) {
+        remakeChoice();
+        return;
+    }
+    screen_ = 24;
+    freeTree();
+    texts_.clear();
+    texts_.reserve(choiceItems_.size() + 2);
+    Widget* root = widgetNew();
+    root_ = root;
+    setRect(root, 0, 0, 0, 0);
+    setImage(root, 0xD3, -1, 0x20000A);
+    auto text = [&](const std::string& t, int y, int h, uint32_t flags) {
+        Widget* w = widgetNew();
+        addChild(root, w);
+        setRect(w, 0, y, 0, h);
+        texts_.push_back(t);
+        setText(w, texts_.back(), flags);
+        return w;
+    };
+    text(choiceTitle_, 0xB0, 32, 0x10020);   // (white 32, as "Are you sure?")
+    int y = 0x100;
+    for (size_t k = 0; k < choiceItems_.size(); ++k, y += 0x30) {
+        Widget* w = text(choiceItems_[k].label, y, 32, 0x10020);   // (big: easy to shoot)
+        w->help = choiceItems_[k].help;
+        w->tag = k == 0 ? 2 : 0;
+        const int pick = int(k);
+        setHandlers(w, [this, pick](Widget&) {
+            walking_ = false;
+            if (const auto f = choicePick_) f(pick);
+        }, &Frontend::hitText);
+    }
+    Widget* back = text("Back", y + 8, 24, 0x20020);
+    back->tag = 1;   // Escape
+    back->help = "Back to the main menu (Escape)";
+    setHandlers(back, [this](Widget&) {
+        walking_ = false;
+        if (const auto f = choiceBack_) f(); else screenMainMenu();
+    }, &Frontend::hitText);
+}
+
 // ---- screen 22 (ours, playerpick): the players' quick choice before a local game (frontend.h askPlayers) ----
 void Frontend::askPlayers(const std::string& mode, std::function<void()> go, std::function<void()> back)
 {

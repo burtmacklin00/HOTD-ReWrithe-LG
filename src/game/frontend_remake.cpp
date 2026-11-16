@@ -202,6 +202,7 @@ void Frontend::setStyle(int s)
     case 2: screenOptions(); break;
     case 21: screenQuit(); break;
     case 22: screenPlayers(); break;   // (playerpick)
+    case 24: screenChoice(); break;    // (Light Gun Edition: askChoice)
     case 100: screenExtras(); break;
     case 7: screenBossMode(); break;   // remakepages: these pages have both layouts too
     case 8: screenRanking(); break;
@@ -389,6 +390,46 @@ void Frontend::remakeQuit()
         remakeFocus(0);
         remakeFocus(1);
     }
+}
+
+// Light Gun Edition: askChoice (screen 24) on the quit box's panel: the title, a big strip per choice, Back
+void Frontend::remakeChoice()
+{
+    remakeBegin(24, "choice");
+    rebuild_ = [this]() { remakeChoice(); };
+    root_->user = 2;
+    const int n = int(choiceItems_.size());
+    const int pw = 420, ph = 92 + (n + 1) * 46, px = (cw_ - pw) / 2, py = std::max(60, 220 - n * 23);
+    rPanel_[0] = px, rPanel_[1] = py, rPanel_[2] = pw, rPanel_[3] = ph;
+    Widget* q = widgetNew();
+    addChild(root_, q);
+    setRect(q, px, py + 26, pw, 30);
+    q->text = choiceTitle_;
+    q->draw = &Frontend::drawRLabel;
+    q->flags |= 0x100;
+    q->user = int(kRowLit), q->seed = 17;
+    for (int k = 0; k <= n; ++k) {
+        const bool back = k == n;
+        Widget* w = widgetNew();
+        addChild(root_, w);
+        const int sw = back ? 160 : 340, sh = back ? 26 : 36;
+        setRect(w, cw_ / 2 - sw / 2, py + 72 + k * 46, sw, sh);
+        w->text = back ? std::string("Back") : choiceItems_[size_t(k)].label;
+        w->help = back ? std::string("Back to the main menu (Escape)") : choiceItems_[size_t(k)].help;
+        w->seed = 300 + k * 11;
+        w->draw = &Frontend::drawRStrip;
+        w->flags |= 0x100;
+        w->nav = true;
+        w->tag = back ? 1 : k == 0 ? 2 : 0;
+        if (back)
+            setHandlers(w, [this](Widget&) { walking_ = false; if (const auto f = choiceBack_) f(); else screenMainMenu(); }, &Frontend::hitRect);
+        else
+            setHandlers(w, [this, k](Widget&) { walking_ = false; if (const auto f = choicePick_) f(k); }, &Frontend::hitRect);
+    }
+    rHelp_[1] = py + ph + 14;
+    remakePrompts(root_, false, [this]() { if (const auto f = choiceBack_) f(); else screenMainMenu(); });
+    if (remakeFirstFocus_ && !handShown_)
+        remakeFocus(0);
 }
 
 // playerpick: the players' quick choice (the Classic's screen 22) on a torn panel: the game's name, "Players" and the

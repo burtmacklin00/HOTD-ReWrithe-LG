@@ -247,6 +247,11 @@ public:
     // Back (Escape / B: `back`). The last choice comes from playersGet (launcher.ini players= / p2bot..p4bot) and
     // Start keeps it with playersSet before `go`. playersAsk null or false (online): `go` at once
     void askPlayers(const std::string& mode, std::function<void()> go, std::function<void()> back);
+    // Light Gun Edition (screen 24, user 2026-11-16: "our own pop up menu with the choices the host can shoot"): a title
+    // and a few big choices, as the quit box (Classic and Remake); `pick(k)` with the choice shot, `back` on Escape / B
+    struct Choice { std::string label, help; };
+    void askChoice(const std::string& title, std::vector<Choice> items, std::function<void(int)> pick, std::function<void()> back);
+    void screenChoice();
     void screenPlayers();
     std::function<bool()> playersAsk;
     std::function<void(int& players, int bot[4])> playersGet;
@@ -863,6 +868,11 @@ private:
     void remakeMainMenu();
     void remakeQuit();
     void remakePlayers();              // playerpick: screen 22's Remake layout
+    void remakeChoice();               // (Light Gun Edition: screen 24's Remake layout)
+    std::string choiceTitle_;
+    std::vector<Choice> choiceItems_;
+    std::function<void(int)> choicePick_;
+    std::function<void()> choiceBack_;
     std::string pickMode_;             // playerpick: the game the choice is for ("Arcade", "Chapter 2" ...)
     std::function<void()> pickGo_, pickBack_;
     int pickN_ = 1, pickBot_[4] = {}, pickLevel_[4] = {2, 2, 2, 2};   // the choice; each seat's CPU level when CPU
