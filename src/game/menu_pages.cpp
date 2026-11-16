@@ -1113,7 +1113,7 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "shoot a hostage or scientist and it's game over for everyone: no continues. Aim carefully!"});
         killerBy(r);
         r.push_back({"Weak Point Mode", [&c]() { return onOff(c.roulette); }, [&c, save]() { { const bool on = !c.roulette; if (on) c.killerPick(7); c.roulette = on; } save(); },
-                     "each zombie has one weak point, marked by a pulsing target: only shots there hurt it (dogs, other small creatures and bosses as normal)"});
+                     "each zombie has one weak point, marked by a pulsing target: only shots there hurt it (the larger zombies only: small creatures and bosses as normal)"});
         killerBy(r);
         r.push_back({"Exploding Zombies", [&c]() { return onOff(c.exploding); }, [&c, save]() { { const bool on = !c.exploding; if (on) c.killerPick(8); c.exploding = on; } save(); },
                      "about one zombie in three glows orange. Head shot: it blows up every zombie on the screen! Anywhere else: only it blows up, and it hurts you"});

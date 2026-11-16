@@ -1149,14 +1149,16 @@ void Runtime::lg_weapon_next(int p)
 
 namespace hotd::game {
 
-// Light Gun Edition: Weak-Point Roulette: the zombies (the humanoid creature types that lose parts: zom, debu,
-// zonbiman, mummy, haris, gilmoa, mummy2, dkiller, mon) get one glowing body part each, another one every 2 s (by the
-// body and the moment, so it never flickers within the 2 s); other creatures and the bosses as normal. (User
-// 2026-11-16: "the little flying winged dogs ... I had to shoot the crap out of it": the Kenfis dogs, types 0 / 8 / 40 /
-// 79-81 (enemy_dogs.cpp), leap too fast for one small spot: they take hits anywhere, as the other small creatures)
+// Light Gun Edition: Weak-Point Roulette: only the larger, human-shaped zombies get a weak point (user 2026-11-16:
+// "just apply that to the larger zombies and none of the smaller creatures"): every zombie skeleton of THOTD.EXE's
+// body list (frontend.cpp kPcBodyNames): zom (Sam), neil, siriru (Cyril), samson, bentry and its variants, zonbiman
+// (Simon), gilmoa / haris / mummy / mummy2 and theirs, tetuman (Robert), burner, zonbi_b_2, and the cut debu / syndy /
+// disiprin / neozom / pbaba (Survival). Not the dogs (dkiller: they leap too fast for one spot), Moody, Kage, Drake,
+// Rubin, the monkeys, Ebitan, frogs, worms, spiders, bats, background creatures; the bosses as normal
 static bool lgZombieType(int type)
 {
-    static const int kTypes[] = {11, 12, 16, 24, 31, 32, 57, 70};
+    static const int kTypes[] = {10, 11, 12, 16, 24, 28, 29, 30, 31, 32, 33, 45, 47, 51, 52, 53, 54, 56, 57, 58,
+                                 61, 62, 63, 65, 66, 71, 72, 73, 74, 77, 84, 85, 86, 88};
     return std::find(std::begin(kTypes), std::end(kTypes), type) != std::end(kTypes);
 }
 
