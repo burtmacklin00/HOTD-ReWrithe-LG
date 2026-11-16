@@ -410,6 +410,28 @@ private:
     // LightgunHID.ini are taken in the order used at each game's start) each gun's seat in the last game (this run):
     // the same seat again, before the order of use
     std::map<std::string, int> lastSeat_;
+    // (Light Gun Edition, user 2026-11-16: "the gun order needs to match the order in the LightgunHID.ini file") each
+    // player's ID from LightgunHID.ini (VID_xxxx&PID_xxxx): a gun's device path containing it takes that seat even
+    // when its input comes through another of the gun's interfaces than the one picked at the start (several guns
+    // list more than one mouse); not for an ID two players share (two identical guns: by the paths, as before)
+    std::string hidId_[kInputPlayers];
+    // the menus' gun: Player 1's device, or (LightgunHID.ini) any interface of Player 1's gun
+    bool isMenuGun(const Dev& d) const
+    {
+        if (d.key == menuKey_) return true;
+        if (hidId_[0].empty() || d.key.empty()) return false;
+        for (int q = 1; q < kInputPlayers; ++q)
+            if (hidId_[q] == hidId_[0]) return false;
+        std::string u = d.key;
+        for (char& ch : u) ch = char(std::toupper(static_cast<unsigned char>(ch)));
+        return u.find(hidId_[0]) != std::string::npos;
+    }
+public:
+    void setHidIds(const std::string (&ids)[4])
+    {
+        for (int p = 0; p < kInputPlayers && p < 4; ++p) hidId_[p] = ids[p];
+    }
+private:
     static std::string seatKey(const Dev& d) { return d.key.empty() ? "id:" + std::to_string(d.id) : d.key; }
     struct MenuGun { bool moved = false, trigger = false, held = false, alt = false; float u = 0.5f, v = 0.5f; } menu_;
     std::vector<std::string> listed_;   // connected(): the raw-input mice listed (device paths), and when

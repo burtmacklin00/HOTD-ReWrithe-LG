@@ -201,6 +201,7 @@ using namespace hotd;
 // hook on its own window's WM_INPUT, registered while a game runs with P2 input "a second mouse"). A device that is
 // only listed (a gaming keyboard's mouse interface) never counts. The input test feeds it directly.
 static std::vector<SDL_MouseID> gMiceUsed;
+static std::string gHidIds[4];   // Light Gun Edition: LightgunHID.ini's IDs (LightGuns::setHidIds)
 static game::LightGuns* gLightGuns = nullptr;   // pads: while a player uses a light gun, every mouse's raw input goes there
 static void mouseUsed(SDL_MouseID id)
 {
@@ -5876,6 +5877,7 @@ int main(int argc, char* argv[])
             const std::vector<std::string> paths = game::rawMousePaths();
             const std::vector<std::string> found = hid.resolve(paths);
             std::string keys[4], names[4];
+            for (int p = 0; p < 4; ++p) gHidIds[p] = hid.id[p];   // (Light Gun Edition: LightGuns::setHidIds)
             for (int p = 0; p < 4; ++p) {
                 keys[p] = found[size_t(p)];
                 if (!hid.id[p].empty())
@@ -8694,6 +8696,7 @@ int main(int argc, char* argv[])
     pads.virtualOnly = !inputTestFile.empty() || std::getenv("HOTD_GALLERY_SHOT") || std::getenv("HOTD_JUKEBOX_SHOT") || std::getenv("HOTD_CURSOR_TEST");   // the input test: its own virtual pads only (a real pad plugged in changes nothing)
     game::LightGuns lightGuns;
     gLightGuns = &lightGuns;
+    lightGuns.setHidIds(gHidIds);
     game::GunFlash gunFlash;   // padpass: the shot flash's cycle (Controls > Shot Flash)
     if (!inputTestFile.empty() || std::getenv("HOTD_SCENE_TEST") || std::getenv("HOTD_CURSOR_TEST"))   // the hidden test window never has the focus: SDL would drop the pads' events
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -13161,6 +13164,8 @@ int main(int argc, char* argv[])
                     ++n;
                 }
                 if (n > 0) {
+                    for (int p = 0; p < 4; ++p) gHidIds[p] = hid.id[p];
+                    lightGuns.setHidIds(gHidIds);
                     if (hid.save(gHid.file))
                         SDL_Log("LightgunHID.ini: written (%d gun%s): %s", n, n == 1 ? "" : "s", gHid.file.c_str());
                     else
@@ -13306,6 +13311,8 @@ int main(int argc, char* argv[])
                             if (q != a.seat && !id.empty() && hid.id[q] == id && hid.resolve(game::rawMousePaths())[size_t(q)] == a.key)
                                 hid.id[q].clear();   // (that gun was another player's)
                         hid.id[a.seat] = id.empty() ? game::LightgunHid::normalise(a.key) : id;
+                        for (int q = 0; q < 4; ++q) gHidIds[q] = hid.id[q];
+                        lightGuns.setHidIds(gHidIds);
                         if (hid.save(gHid.file))
                             SDL_Log("LightgunHID.ini: player %d: %s (Assign)", a.seat + 1, hid.id[a.seat].c_str());
                     }

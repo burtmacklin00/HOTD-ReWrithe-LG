@@ -99,6 +99,25 @@ void LightGuns::place(Dev& d)
             SDL_Log("light guns: player %d: its assigned device %s (%llu)", p + 1, d.name.c_str(), (unsigned long long)d.id);
             return;
         }
+    // (Light Gun Edition) LightgunHID.ini's ID: its player's seat, whatever interface of the gun reports
+    if (!d.key.empty()) {
+        std::string u = d.key;
+        for (char& ch : u) ch = char(std::toupper(static_cast<unsigned char>(ch)));
+        for (int p = 0; p < kInputPlayers; ++p) {
+            if (hidId_[p].empty() || !(d.absolute ? want[p] : mouseWant[p]) || u.find(hidId_[p]) == std::string::npos)
+                continue;
+            bool shared = false;
+            for (int q = 0; q < kInputPlayers; ++q)
+                shared = shared || (q != p && hidId_[q] == hidId_[p]);
+            if (shared)
+                break;
+            for (Dev& o : devs_)
+                if (o.player == p) o.player = -1;
+            d.player = p;
+            SDL_Log("light guns: player %d: device %llu (LightgunHID.ini's %s)", p + 1, (unsigned long long)d.id, hidId_[p].c_str());
+            return;
+        }
+    }
     // (Light Gun Edition) the seat this gun had in the last game, if it is wanted and free (not another's assigned one)
     if (const auto it = lastSeat_.find(seatKey(d)); it != lastSeat_.end()) {
         const int p = it->second;
@@ -117,6 +136,8 @@ void LightGuns::place(Dev& d)
             continue;
         if (!pin[p].empty() && connected(pin[p]))
             continue;   // (ipolish) kept for its own device
+        if (!hidId_[p].empty() && !pin[p].empty())
+            continue;   // (Light Gun Edition: LightgunHID.ini's player: its own gun's, through any interface)
         bool taken = false;
         for (const Dev& o : devs_)
             taken = taken || o.player == p;
@@ -133,7 +154,7 @@ void LightGuns::absolute(uint64_t id, float u, float v)
 {
     Dev& d = dev(id);
     if (!menuKey_.empty() && !capture_ && assignSeat_ < 0) {   // Light Gun Edition: the menus follow Player 1's gun only
-        if (d.key == menuKey_) menu_.u = u, menu_.v = v, menu_.moved = true;
+        if (isMenuGun(d)) menu_.u = u, menu_.v = v, menu_.moved = true;
         d.u = u, d.v = v;   // (where every gun points: PC Mode's select reads a pull off the screen)
         return;
     }
@@ -173,7 +194,7 @@ void LightGuns::buttons(uint64_t id, unsigned flags)
     }
     if (!menuKey_.empty() && assignSeat_ < 0) {   // Light Gun Edition: the menus follow Player 1's gun only
         const bool off = d.u < 0.0f || d.u > 1.0f || d.v < 0.0f || d.v > 1.0f;
-        if (d.key == menuKey_) {
+        if (isMenuGun(d)) {
             if (seatPick_ == 4 && ((flags & 0x14) || ((flags & 0x1) && off))) {   // (PC Mode, 4 panels: player 1's Ready)
                 seatPress[0].reload = true;
                 return;
