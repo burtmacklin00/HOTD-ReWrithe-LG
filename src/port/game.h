@@ -18,6 +18,19 @@
 
 namespace hotd::port {
 
+// Light Gun Edition: the larger, human-shaped zombies' creature types (every zombie skeleton of THOTD.EXE's body list:
+// Sam, Neil, Cyril, Samson, Bentley and its variants, Simon, Gilmore, Harris, the Mummies, Robert, Burner, the cut
+// ones); not the dogs, Moody, Kage, Drake, Rubin, the monkeys, Ebitan, frogs, worms, spiders, bats. Weak Point's
+// zombies, Coin-Op Survival's bigger kills
+inline bool lgLargeZombie(int type)
+{
+    static const int kTypes[] = {10, 11, 12, 16, 24, 28, 29, 30, 31, 32, 33, 45, 47, 51, 52, 53, 54, 56, 57, 58,
+                                 61, 62, 63, 65, 66, 71, 72, 73, 74, 77, 84, 85, 86, 88};
+    for (int t : kTypes)
+        if (t == type) return true;
+    return false;
+}
+
 // The Typing of the Dead 0 (ours, game/typing.h, user 2026-11-03: "a clear window before it hits"): asked by the
 // standard enemy's attack choice (enemy_ai states 5 / 6) and pick_target_player whether this creature's attack waits
 // (true: no free player for it this frame). Set only for the ticks of a Typing of the Dead 0 game; null everywhere
@@ -69,6 +82,7 @@ public:
     bool lg_hide_bullets[4] = {false, false, false, false};
     bool lg_one_hit = false;                  // Sudden Death: any hit kills an enemy (the bosses keep their own fights)
     uint32_t lg_kills[4] = {0, 0, 0, 0};      // each seat's enemy kills (the Party Scoreboard, Vampire Mode)
+    uint32_t lg_big_kills = 0;                // (Light Gun Edition: the larger zombies' kills, all seats: Coin-Op Survival's time)
     bool lg_hostage_crisis = false;           // Hostage Crisis: a shot hostage / researcher ends the game for everyone
     bool lg_crisis_fail = false;              // (a hostage was shot: the runtime ends the game)
     bool lg_roulette = false;                 // Weak-Point Roulette: a zombie takes hits only on its glowing part

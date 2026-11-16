@@ -501,6 +501,8 @@ public:
     bool lgSvInit_ = false;   // (the counts taken at the first frame: nothing credited for what came before)
     uint32_t lgSvKills_ = 0, lgSvMiss_[4] = {};
     int lgSvRescued_ = 0, lgSvLives_[4] = {};
+    uint32_t lgSvBig_ = 0;    // (Coin-Op Survival: the larger zombies' kills counted)
+    bool lgSvBoss_ = false;   // (Coin-Op Survival: a boss's life bar up last frame)
     float lgClockDelta = 0;
     uint64_t lgClockDeltaFrame = 0;
     void lg_survival_frame();

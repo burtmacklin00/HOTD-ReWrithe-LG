@@ -199,6 +199,8 @@ template <class P> void Game<P>::enemy_check_death(uint32_t obj)
         add_score(e.killer, 0x50);
     if (e.killer >= 0 && e.killer < (coop4_on() ? 4 : 2))   // Light Gun Edition: the kill's count (not "either": 2 in 1-2P)
         ++lg_kills[e.killer & 3];
+    if (e.killer >= 0 && e.killer < (coop4_on() ? 4 : 2) && lgLargeZombie(e.type))
+        ++lg_big_kills;   // (Light Gun Edition: Coin-Op Survival: more time for the larger zombies)
     e.flags &= ~1u;
     if (uint8_t(e.target) != 0xFF) {
         uint32_t t = G::player_targeted + uint32_t(int32_t(e.target));

@@ -1155,12 +1155,7 @@ namespace hotd::game {
 // (Simon), gilmoa / haris / mummy / mummy2 and theirs, tetuman (Robert), burner, zonbi_b_2, and the cut debu / syndy /
 // disiprin / neozom / pbaba (Survival). Not the dogs (dkiller: they leap too fast for one spot), Moody, Kage, Drake,
 // Rubin, the monkeys, Ebitan, frogs, worms, spiders, bats, background creatures; the bosses as normal
-static bool lgZombieType(int type)
-{
-    static const int kTypes[] = {10, 11, 12, 16, 24, 28, 29, 30, 31, 32, 33, 45, 47, 51, 52, 53, 54, 56, 57, 58,
-                                 61, 62, 63, 65, 66, 71, 72, 73, 74, 77, 84, 85, 86, 88};
-    return std::find(std::begin(kTypes), std::end(kTypes), type) != std::end(kTypes);
-}
+static bool lgZombieType(int type) { return port::lgLargeZombie(type); }
 
 void Runtime::lg_roulette_frame()
 {
@@ -1403,8 +1398,9 @@ void Runtime::lg_fired(int player)
     }
 }
 
-// Coin-Op Survival: the clock runs down in play (not in cut-scenes, the results, the continue countdowns); a kill +3 s,
-// a rescue +20 s (no time taken off); at 0 the game is over for everyone
+// Coin-Op Survival: the clock runs down in play (not in cut-scenes, the results, the continue countdowns, a boss fight);
+// a kill +2 s, a larger zombie's +5 s, a rescue +20 s, a boss beaten +30 s (no time taken off); at 0 the game is over
+// for everyone
 void Runtime::lg_survival_frame()
 {
     if (lgClock < 0 || lgTimeUp)
@@ -1413,6 +1409,8 @@ void Runtime::lg_survival_frame()
         lgSvInit_ = true;
         lgSvKills_ = lg_kills[0] + lg_kills[1] + lg_kills[2] + lg_kills[3];
         lgSvRescued_ = mem.at<int16_t>(G::hostages_rescued_chapter);
+        lgSvBig_ = lg_big_kills;
+        lgSvBoss_ = mem.at<uint8_t>(0x543530) != 0;
         for (int p = 0; p < 4; ++p) {
             lgSvMiss_[p] = lg_shots[p] > lg_hits[p] ? lg_shots[p] - lg_hits[p] : 0;
             lgSvLives_[p] = mem.at<port::a::Player>(player_rec(p)).lives;
@@ -1422,8 +1420,15 @@ void Runtime::lg_survival_frame()
     double d = 0;
     uint32_t kills = 0;
     for (int p = 0; p < 4; ++p) kills += lg_kills[p];
-    if (kills > lgSvKills_) d += 3.0 * double(kills - lgSvKills_);   // (user 2026-11-16: 10 s a kill "goes up too much": 3 s)
+    // (user 2026-11-16: 10 s a kill "goes up too much", then "extra time for larger zombies": the small creatures
+    // +2 s, the larger zombies (lgLargeZombie) +5 s)
+    if (kills > lgSvKills_) {
+        const uint32_t all = kills - lgSvKills_;
+        const uint32_t big = std::min(all, lg_big_kills - lgSvBig_);
+        d += 2.0 * double(all - big) + 5.0 * double(big);
+    }
     lgSvKills_ = kills;
+    lgSvBig_ = lg_big_kills;
     const int resc = mem.at<int16_t>(G::hostages_rescued_chapter);
     if (resc > lgSvRescued_) d += 20.0 * double(resc - lgSvRescued_);   // (20 s a rescue; was 30)
     lgSvRescued_ = resc;
@@ -1436,12 +1441,18 @@ void Runtime::lg_survival_frame()
         lgSvLives_[p] = pl.lives;
         anyone = anyone || pl.state == 5;
     }
+    // a boss fight (its life bar up: sprites.cpp 0x543530): the clock stops (user 2026-11-16: "what about a boss
+    // scenario?": nothing to kill but the boss); the boss beaten (the bar gone, a player still in) +30 s
+    const bool boss = mem.at<uint8_t>(0x543530) != 0;
+    if (lgSvBoss_ && !boss && anyone)
+        d += 30.0;
+    lgSvBoss_ = boss;
     if (d != 0) {
         lgClock += d;
         lgClockDelta = float(d);
         lgClockDeltaFrame = frameCount;
     }
-    if (anyone && mem.at<uint8_t>(G::scene_state) == 2 && !clear.active && letterbox == 0 && mem.u32(G::shot_enable) != 0)
+    if (anyone && !boss && mem.at<uint8_t>(G::scene_state) == 2 && !clear.active && letterbox == 0 && mem.u32(G::shot_enable) != 0)
         lgClock -= 1.0 / 57.524;
     lgClock = std::min(lgClock, 599.0);
     if (lgClock <= 0) {
