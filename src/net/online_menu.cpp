@@ -1063,9 +1063,11 @@ void OnlineMenu::script(game::Frontend& fe, const std::string& cmd)
         // into the in game menus"): a Link Play box, 2 Players / 4 Players; a shot hosts at once (the code copied, the
         // game starts once the friend is in); Back: the main menu
         autoHost_ = true;
+        choosing_ = true;
         fe.askChoice("Link Play: Host", {{"2 Players (1 per PC)", "You are Player 1, your friend is Player 2"},
                                          {"4 Players (2 per PC)", "You are Players 1 + 2, your friend's PC Players 3 + 4"}},
                      [this, &fe](int k) {
+                         choosing_ = false;
                          base.pcs = k == 1 ? 4 : 2, base.seats = k == 1 ? 2 : 1;
                          if (base.code.empty() || normaliseCode(base.code).empty()) password_ = randomCode();
                          show(fe, Page::Host);
@@ -1077,6 +1079,7 @@ void OnlineMenu::script(game::Frontend& fe, const std::string& cmd)
                      },
                      [this, &fe]() {
                          autoHost_ = false;
+                         choosing_ = false;
                          if (back_) back_(); else fe.screenMainMenu();
                      });
     } else if (cmd.rfind("auto-join:", 0) == 0) {   // Light Gun Edition: --online-join [code]

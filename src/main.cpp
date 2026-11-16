@@ -15975,7 +15975,9 @@ int main(int argc, char* argv[])
             online.frame(fe);
             // Light Gun Edition: --online-host / --online-join: the Online page opened and started once the menu is up
             // (not while the light gun set-up asks for the guns)
-            if (static bool onlineAutoDone = false; !onlineAutoDone && !onlineAutoOpt.empty() && fe.screen() == 1 &&
+            // (user 2026-11-16: the Link Play box never showed: it opened in the frame the splash ended, then the splash's
+            // end put the main menu (fe.start) and the attract over it: now from the next frame, once the menu is up)
+            if (static bool onlineAutoDone = false; !onlineAutoDone && !onlineAutoOpt.empty() && fe.screen() == 1 && !splashing &&
                                                     !fe.splashActive() && !gHid.active && !online.busy()) {
                 onlineAutoDone = true;
                 if (onlineAutoOpt == "auto-join-clipboard") {   // (SDL's clipboard needs the video started)
@@ -16034,7 +16036,8 @@ int main(int argc, char* argv[])
             if (splashing && !fe.splashActive()) {   // the start-up splash ended: the attract (else the menu)
                 // (menuhost: never while hosting / joining from the menu: the attract's game screen does not poll the
                 // waiting room, so the host would answer no joiner and a joiner would lose the host)
-                if (!online.busy() && enterAttract()) {
+                // (Light Gun Edition: a Link Play launcher's start (--online-host / --online-join): no attract, the menu)
+                if (!online.busy() && onlineAutoOpt.empty() && enterAttract()) {
                     attractKind = menu.cfg.menuStyle == 1 ? 1 : 0;
                     attractRanked = false;
                     SDL_ShowCursor();
