@@ -1848,10 +1848,14 @@ void NetGame::frameHashAll(uint32_t f, uint64_t h)
 
 bool NetGame::ownKnown(uint32_t f, Input& own)
 {
-    if (session_.isHost()) {
+    if (session_.isHost()) {   // (this PC's input: P1, and its second seat's in the second fields, as sampled)
         const Full& o = own_[f % kRelayRing];
         if (o.frame != f) return false;
-        own = o.in[0];
+        own = seatOf(o.in, 0);
+        if (pair_[0]) {
+            const Input p = seatOf(o.in, pair_[0]);
+            own.flags2 = p.flags, own.x2 = p.x, own.y2 = p.y;
+        }
         return true;
     }
     return session_.localInput(f, own);
@@ -2130,12 +2134,19 @@ NetGame::Step NetGame::stepMulti(game::Runtime& rt, const std::function<Input()>
             }
         }
         if (host) {
+            // this PC's seats in the four-seat layout: P1, and its second seat where that seat is (Light Gun Edition,
+            // user 2026-11-16: the host's second seat is P2 now, not P3: its input sat in P3's fields, the friend's P3
+            // over it, and P2's trigger / start never reached the game: "tried to join player 2 ... didn't work")
             Full& o = own_[due % kRelayRing];
-            o = {due, {own, {}}};
+            o = {due, {}};
+            auto mine = [&]() {
+                setSeat(o.in, 0, Input{own.flags, own.x, own.y});
+                if (pair_[0]) setSeat(o.in, pair_[0], Input{own.flags2, own.x2, own.y2});
+            };
+            mine();
             if (hostSeats) {   // computer teammates in the free seats (this PC's own seats stay)
                 hostSeats(rt, due, o.in);
-                setSeat(o.in, 0, own);
-                if (pair_[0]) setSeat(o.in, pair_[0], Input{own.flags2, own.x2, own.y2});
+                mine();
             }
         }
         else session_.submit(due, own);
