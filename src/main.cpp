@@ -7524,7 +7524,7 @@ int main(int argc, char* argv[])
                 gl::BeginQuery(gl::TIME_ELAPSED, q3d);
                 if (fsCount) gl::BeginQuery(kFsInvocations, qfs);
                 rr.hud.clean = rr.hud.noText = gTrailer;   // (--trailer: Trailer Mode)
-                rr.hud.drawCross[0] = cfg.crosshairs && !(gTotd && gTyping);   // The Typing of the Dead 0: no sight for the typist (Light Gun Edition: Show Crosshairs)
+                rr.hud.drawCross[0] = !(gTotd && gTyping);   // The Typing of the Dead 0: no sight for the typist
                 if (gVr) {   // vr: the eyes, the HUD on their screen plane, the stereo pair into rr.fbo (docs/vr.md)
                     const std::function<void(int, int, const float[4][2])> vrHud = [&rt](int pw, int ph, const float a[4][2]) {
                         rr.hud.draw(rt, pw, ph, a, false, std::vector<std::string>());
