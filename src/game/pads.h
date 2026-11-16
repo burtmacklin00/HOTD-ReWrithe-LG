@@ -58,6 +58,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -405,6 +406,11 @@ private:
     int assignSeat_ = -1;
     bool capture_ = false;   // (Light Gun Edition) startCapture()
     std::string menuKey_;    // (Light Gun Edition) setMenuGun()
+    // (Light Gun Edition, user 2026-11-16: a tester's players 1 / 2 swapped after a mod was changed: guns not set up in
+    // LightgunHID.ini are taken in the order used at each game's start) each gun's seat in the last game (this run):
+    // the same seat again, before the order of use
+    std::map<std::string, int> lastSeat_;
+    static std::string seatKey(const Dev& d) { return d.key.empty() ? "id:" + std::to_string(d.id) : d.key; }
     struct MenuGun { bool moved = false, trigger = false, held = false, alt = false; float u = 0.5f, v = 0.5f; } menu_;
     std::vector<std::string> listed_;   // connected(): the raw-input mice listed (device paths), and when
     uint64_t listedAt_ = 0;

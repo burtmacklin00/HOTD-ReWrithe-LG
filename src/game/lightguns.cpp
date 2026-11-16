@@ -99,6 +99,19 @@ void LightGuns::place(Dev& d)
             SDL_Log("light guns: player %d: its assigned device %s (%llu)", p + 1, d.name.c_str(), (unsigned long long)d.id);
             return;
         }
+    // (Light Gun Edition) the seat this gun had in the last game, if it is wanted and free (not another's assigned one)
+    if (const auto it = lastSeat_.find(seatKey(d)); it != lastSeat_.end()) {
+        const int p = it->second;
+        bool taken = false;
+        for (const Dev& o : devs_)
+            taken = taken || o.player == p;
+        if (p >= 0 && p < kInputPlayers && (d.absolute ? want[p] : mouseWant[p]) && !taken &&
+            (pin[p].empty() || !connected(pin[p]))) {
+            d.player = p;
+            SDL_Log("light guns: player %d: device %llu again (its seat in the last game)", p + 1, (unsigned long long)d.id);
+            return;
+        }
+    }
     for (int p = 0; p < kInputPlayers; ++p) {
         if (!(d.absolute ? want[p] : mouseWant[p]))
             continue;
@@ -563,6 +576,8 @@ void LightGuns::evdevPoll(bool on)
 
 void LightGuns::reset()
 {
+    for (const Dev& d : devs_)   // (Light Gun Edition: the seats kept for the next game, lastSeat_)
+        if (d.player >= 0) lastSeat_[seatKey(d)] = d.player;
     for (Dev& d : devs_) {
         d.player = -1;
         d.dx = d.dy = 0;
