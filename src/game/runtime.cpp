@@ -1297,16 +1297,30 @@ void Runtime::lg_blast_hit(int player, const LgBody& b)
         coop4_hit_add(b.part, player);
         coop4_hit_add(b.body, player);
     }
-    if (lgZombieType(b.type) && mem.at<uint8_t>(0x543530) == 0 && mem.at<int16_t>(b.body + 0x70) > 1)
+    if ((lgZombieType(b.type) || lgRocketTarget(b)) && mem.at<uint8_t>(0x543530) == 0 && mem.at<int16_t>(b.body + 0x70) > 1)
         mem.at<int16_t>(b.body + 0x70) = 1;
 }
 
 // every zombie on the screen blown up by the shooter (a blast drawn on each); bodies blown up here glow no more
+// (user 2026-11-16: the rocket blew up only some kinds: every creature now, the people never, the bosses as normal)
+bool Runtime::lgRocketTarget(const LgBody& b) const
+{
+    if (boss_on() || !mem.mapped(b.body) || (mem.at<port::a::Obj>(b.body).flags & 1u) == 0)
+        return false;   // (a boss fight; one not shootable: dying / a prop)
+    const int t = b.type;
+    const bool human = t == 14 || t == 15 || t == 17 || (t >= 19 && t <= 23) || (t >= 25 && t <= 27);   // (Bot::isHuman)
+    return t >= 0 && t <= 0x7F && !human;
+}
+
 void Runtime::lg_blast_all(int player, bool big)
 {
+    if (big && lgRocketAim_[player & 3].valid) {   // the rocket: a blast where it hit too, a creature there or not
+        const LgAim& a = lgRocketAim_[player & 3];
+        lgBlasts.push_back({a.x, a.y, a.z, frameCount, true});
+    }
     for (const LgBody& b : lgBodies_) {
-        if (!lgZombieType(b.type))
-            continue;   // (zombies only: never the hostages / scientists)
+        if (!lgZombieType(b.type) && !(big && lgRocketTarget(b)))
+            continue;   // (zombies only, the rocket every creature: never the hostages / scientists)
         lgBoomed_.insert(b.body);
         lgBlasts.push_back({b.x, b.y, b.z, frameCount, big});
         lg_blast_hit(player, b);
@@ -1344,8 +1358,14 @@ void Runtime::lg_fired(int player)
 {
     const bool rocket = lgWeapon[player & 3] == 3 ||
                         (weapons.mode == Weapons::Arsenal && weapons.seat[player & 3].cur == kRocket);
-    if (rocket && mem.at<int16_t>(G::game_mode) == 4)
+    if (rocket && mem.at<int16_t>(G::game_mode) == 4) {
+        // the aim, 600 units deep (as the view: arcade screen = 496 x / z)
+        const port::a::Player& pl = mem.at<port::a::Player>(player_rec(player));
+        const float z = 600.0f;
+        lgRocketAim_[player & 3] = {true, float(int32_t(pl.aim[0])) * z / 496.0f, float(int32_t(pl.aim[1])) * z / 496.0f, z};
         lg_blast_all(player, true);
+        lgRocketAim_[player & 3].valid = false;
+    }
 }
 
 // Coin-Op Survival: the clock runs down in play (not in cut-scenes, the results, the continue countdowns); a kill +2 s,

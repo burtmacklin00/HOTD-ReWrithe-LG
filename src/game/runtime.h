@@ -466,6 +466,9 @@ public:
     void lg_fired(int player) override;
     void lg_blast_hit(int player, const LgBody& b);
     void lg_blast_all(int player, bool big = false);
+    bool lgRocketTarget(const LgBody& b) const;
+    struct LgAim { bool valid = false; float x = 0, y = 0, z = 0; };
+    LgAim lgRocketAim_[4];
     void lg_bodies_frame();   // (the bodies' list, the glow / heat colours)
     // the looks (Night Vision 1, Wireframe 2, VHS 3: RenderOptions::look); Night Vision: the creatures in heat colours
     int lgLook = 0;
