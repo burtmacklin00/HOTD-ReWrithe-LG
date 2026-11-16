@@ -89,8 +89,10 @@ plays.
     Reaper is closed (cleanly) when the game closes. Optional argument `4x3` / `16x9`. Your settings in
     `Launch HOTD ReWrithe.ini` beside it (`[Launcher]` `IgnorePads=1`, `CloseHotr=0`, `Debug=1`).
   - `Launch HOTD ReWrithe - Link Play Host.ahk` / `- Link Play Join.ahk`: online or same-network co-op in one click
-    (the host's join code is copied to the clipboard; on the same network the join needs no code). Link Play is always
-    2 players: the host is Player 1, the friend who joins is Player 2.
+    (the host's join code is copied to the clipboard; on the same network the join needs no code). The Host launcher opens
+    the Host page first: pick **Players**, **2 (1 per PC)** (you Player 1, your friend Player 2) or **4 (2 per PC)** (you
+    Players 1 + 2, your friend's PC Players 3 + 4), then **Start Hosting**; the game starts by itself once your friend
+    is in.
   - `setup\Launch HOTD ReWrithe - Debug.ahk` (for testing): writes `settings\launcher.log` and `settings\outputs.log`,
     and leaves Hook of the Reaper open.
 - **Quick settings as programs** (close the game first): `2 - Display - 4x3.exe`, `2 - Display - 16x9.exe`,

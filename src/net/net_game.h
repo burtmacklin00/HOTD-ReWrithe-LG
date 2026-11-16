@@ -84,6 +84,7 @@ public:
     bool open(const NetArgs& a, std::string& err);
     int poll(Settings& settings, std::string& err, int waitMs = 0);
     void hostStart(Settings s);                  // host: Start (the input delay from the measured ping when auto)
+    bool autoStartReady() const;   // (Light Gun Edition: Link Play's host starts once the friend is in)
     bool peerIn() const;                         // host: a player is in; client: in the waiting room
     // up to four PCs (docs/netplay.md "Four PCs"): one seat each, the host relays every frame's four inputs
     bool multi() const { return multi_ || session_.multi(); }

@@ -100,7 +100,7 @@ private:
     std::string* edit_ = nullptr;
     std::string editBackup_;
     size_t editMax_ = 32;
-    bool ready_ = false, joinAfterEdit_ = false, scriptHost_ = false, tookHost_ = false, rosterLogged_ = false;
+    bool ready_ = false, joinAfterEdit_ = false, scriptHost_ = false, autoHost_ = false, tookHost_ = false, rosterLogged_ = false;
     std::string scriptLan_;                              // testing (join-lan:<code>): the code typed once the LAN list shows a game
     bool scriptLanOpen_ = false;                         // testing (join-lan-open): the LAN list's first game clicked, no code
     // Light Gun Edition (auto-join, --online-join): a game open on this network is joined at once; else after 3 s the code

@@ -530,8 +530,15 @@ bool NetGame::open(const NetArgs& argsIn, std::string& err)
     // Light Gun Edition (user 2026-11-16: "make link play just do 2 player with 2 humans, join on player 2 host on
     // player 1"): two PCs, one seat each, whatever the Host / Join pages or the command line asked (4P Online, Your
     // Seats 2); HOTD_NET_4P=1 keeps them (the developer's 4-PC tests)
-    if (!std::getenv("HOTD_NET_4P"))
-        a.pcs = 2, a.seats = 1;
+    if (!std::getenv("HOTD_NET_4P")) {
+        // (user 2026-11-16, again: the host picks 2 players (one a PC: the friend is Player 2) or 4 players (two a PC: the
+        // host Players 1 + 2, the friend's PC Players 3 + 4)): the host's Players choice (Host page: pcs 4 = the 4-player
+        // game) decides; a joiner always offers two seats (a 2-player host gives it one: Player 2)
+        if (!a.host.empty())
+            a.seats = a.pcs == 4 ? 2 : 1;
+        else
+            a.seats = 2;
+    }
     openedAt_ = nowS();
 #if defined(_MSC_VER) && defined(_M_X64)
     // the UCRT's math functions take FMA3 paths on CPUs that have it (other bits than without): off, so both PCs
@@ -633,9 +640,10 @@ bool NetGame::open(const NetArgs& argsIn, std::string& err)
         own_.assign(kRelayRing, {});
         for (int s = 1; s <= 3; ++s)
             renewSeat(s);
-        if (a.seats == 2) {   // the host plays two seats: P1 and P3 (the 4P mode's left side); joiners get P2, P4
-            pair_[0] = 2, owner_[2] = 0;
-            seat(2).reserved = true;
+        if (a.seats == 2) {   // the host plays two seats: P1 and P2 (Light Gun Edition, user 2026-11-16: "the second PC
+            // would be players 3 and 4"; was P1 + P3); a two-seat joiner gets P3 + P4 (takePair)
+            pair_[0] = 1, owner_[1] = 0;
+            seat(1).reserved = true;
         }
     }
     if (o.host) {
@@ -728,6 +736,19 @@ int NetGame::poll(Settings& settings, std::string& err, int waitMs)
         charsFixed_ = true;
     }
     return r;
+}
+
+bool NetGame::autoStartReady() const
+{
+    // (the Link Play host starts by itself: a friend in, its pings measured, and a two-seat friend given both its seats)
+    if (multi_ && session_.isHost()) {
+        if (started_) return false;
+        for (int s = 1; s <= 3; ++s)
+            if (owner_[s] < 0 && seat(s).peerConnected() && seat(s).pingSamples() >= 6 && (seat(s).peerWants() != 2 || pair_[s]))
+                return true;
+        return false;
+    }
+    return session_.peerConnected() && session_.pingSamples() >= 6 && !session_.released();
 }
 
 bool NetGame::peerIn() const
@@ -874,7 +895,8 @@ void NetGame::takePair(int s)
         return t >= 1 && t <= 3 && t != s && owner_[t] < 0 && !pair_[t] && seatState_[t] == Seat::Empty &&
                !seat(t).peerConnected() && !seat(t).pending();
     };
-    int t = freeSeat(s + 2) ? s + 2 : 0;
+    // (Light Gun Edition: the seat after it first: P3 + P4 beside the host's P1 + P2)
+    int t = freeSeat(s + 1) ? s + 1 : freeSeat(s + 2) ? s + 2 : 0;
     for (int k = 1; k <= 3 && !t; ++k)
         if (freeSeat(k)) t = k;
     if (!t) {   // (the waiting room asks again while it lasts: a seat may come free)

@@ -707,10 +707,22 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
         rows.push_back(X{"Start Hosting", nullptr, [this, &fe]() {
                              if (base.code.empty() || normaliseCode(base.code).empty()) password_ = randomCode();   // (a new code each time)
                              startHost(fe);
+                             if (autoHost_ && game_) {   // (the Link Play Host launcher: the code copied, the game starts
+                                 copyCode();             // by itself once the friend is in)
+                                 scriptHost_ = true;
+                             }
                          }});
         rows.back().help = "Opens your game and shows the code your friends type to join";
         // 4P: up to four PCs (one seat each, the host relays), or two PCs with two seats each (Light Gun Edition: not
         // shown: Link Play is 2 players, NetGame::open; HOTD_NET_4P=1 shows them)
+        // Light Gun Edition (user 2026-11-16): Link Play's players: 2 (one a PC: the friend is Player 2) or 4 (two a PC:
+        // you Players 1 + 2, the friend's PC Players 3 + 4)
+        if (!std::getenv("HOTD_NET_4P")) {
+            rows.push_back(X{"Players", [this]() { return std::string(base.pcs == 4 ? "4 (2 per PC)" : "2 (1 per PC)"); },
+                             [this]() { base.pcs = base.pcs == 4 ? 2 : 4; base.seats = base.pcs == 4 ? 2 : 1; }});
+            rows.back().help = base.pcs == 4 ? "4 players: you are Players 1 + 2, your friend's PC Players 3 + 4"
+                                             : "2 players: you are Player 1, your friend is Player 2";
+        }
         if (std::getenv("HOTD_NET_4P")) {
         rows.push_back(X{"4P Online", [this]() { return std::string(base.pcs == 4 ? "Up to 4 PCs" : "2 PCs"); },
                          [this]() { base.pcs = base.pcs == 4 ? 2 : 4; }});
@@ -1046,10 +1058,10 @@ void OnlineMenu::script(game::Frontend& fe, const std::string& cmd)
             game_->hostStart(settings_);
         }
     } else if (cmd == "auto-host") {   // Light Gun Edition: --online-host
+        // (user 2026-11-16: "prompt the host to setup": the Host page (Players 2 / 4, the game mode), then Start Hosting)
+        base.pcs = 2, base.seats = 1;
+        autoHost_ = true;
         show(fe, Page::Host);
-        startHost(fe);
-        if (game_) copyCode();
-        scriptHost_ = game_ != nullptr;
     } else if (cmd.rfind("auto-join:", 0) == 0) {   // Light Gun Edition: --online-join [code]
         show(fe, Page::Join);
         scriptLanOpen_ = true;
@@ -1132,7 +1144,7 @@ void OnlineMenu::frame(game::Frontend& fe)
     } else if (!pendingJoin_.empty() && page_ != Page::Join) {
         pendingJoin_.clear();
     }
-    if (scriptHost_ && game_ && game_->peerIn() && game_->session().pingSamples() >= 6 && !game_->session().released() && hostSettings) {
+    if (scriptHost_ && game_ && game_->autoStartReady() && hostSettings) {
         settings_ = hostSettings();   // (testing: the Start button)
         game_->hostStart(settings_);
     }
