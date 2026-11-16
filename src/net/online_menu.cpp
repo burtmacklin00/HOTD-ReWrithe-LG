@@ -318,6 +318,10 @@ std::unique_ptr<NetGame> OnlineMenu::take(Settings& s)
         s.pcMode = g.pcMode, s.pmContinues = g.pmContinues, s.pmFreePlay = g.pmFreePlay;
         std::copy(g.pmChar, g.pmChar + 4, s.pmChar);
         s.bossMode = g.bossMode;   // (Boss Mode online, protocol 18: the host's boss)
+        // the players and seats hostStart settled (up to four PCs: the seats in at the start; Link Play's 4 players:
+        // player 1 alone). User 2026-11-16: the host played the menu's copy (2 players) and the friend's PC the sent
+        // one (1): "Player 3's game is different at the start"
+        s.players = g.players, s.seats = g.seats, s.pcs = g.pcs, s.seat = g.seat, s.seat2 = g.seat2, s.delay = g.delay;
         s.survival = g.survival;   // (Survival online, protocol 22: the host's arena, seed, cap ..)
         s.survivalSeed = g.survivalSeed, s.survivalCap = g.survivalCap, s.survivalCut = g.survivalCut;
         s.survivalSmgWave = g.survivalSmgWave, s.survivalWeaponsWave = g.survivalWeaponsWave, s.survivalTest = g.survivalTest;
