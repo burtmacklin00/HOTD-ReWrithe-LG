@@ -15984,7 +15984,7 @@ int main(int argc, char* argv[])
                 }
                 online.open(fe, [&]() { fe.screenMainMenu(); });
                 online.script(fe, onlineAutoOpt);
-                SDL_Log("[net] %s", onlineAutoOpt == "auto-host" ? "--online-host: hosting, the code copied"
+                SDL_Log("[net] %s", onlineAutoOpt == "auto-host" ? "--online-host: the Host page (Players, then Start Hosting)"
                                                                               : "--online-join: joining");
             }
             static bool scripted = false;   // testing: the Online page's Host / Join without clicks (hidden window)

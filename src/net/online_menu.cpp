@@ -704,6 +704,14 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
         rows.back().help = "On: a public STUN server tells your PC its internet address, so codes work without port forwarding";
         break;
     case Page::Host:
+        // Light Gun Edition (user 2026-11-16): Link Play's players (the page's first row: "I don't see" it): 2 (one a PC: the friend is Player 2) or 4 (two a PC:
+        // you Players 1 + 2, the friend's PC Players 3 + 4)
+        if (!std::getenv("HOTD_NET_4P")) {
+            rows.push_back(X{"Players", [this]() { return std::string(base.pcs == 4 ? "4 (2 per PC)" : "2 (1 per PC)"); },
+                             [this]() { base.pcs = base.pcs == 4 ? 2 : 4; base.seats = base.pcs == 4 ? 2 : 1; }});
+            rows.back().help = base.pcs == 4 ? "4 players: you are Players 1 + 2, your friend's PC Players 3 + 4"
+                                             : "2 players: you are Player 1, your friend is Player 2";
+        }
         rows.push_back(X{"Start Hosting", nullptr, [this, &fe]() {
                              if (base.code.empty() || normaliseCode(base.code).empty()) password_ = randomCode();   // (a new code each time)
                              startHost(fe);
@@ -715,14 +723,6 @@ std::vector<game::Frontend::Extra> OnlineMenu::makeRows(game::Frontend& fe)
         rows.back().help = "Opens your game and shows the code your friends type to join";
         // 4P: up to four PCs (one seat each, the host relays), or two PCs with two seats each (Light Gun Edition: not
         // shown: Link Play is 2 players, NetGame::open; HOTD_NET_4P=1 shows them)
-        // Light Gun Edition (user 2026-11-16): Link Play's players: 2 (one a PC: the friend is Player 2) or 4 (two a PC:
-        // you Players 1 + 2, the friend's PC Players 3 + 4)
-        if (!std::getenv("HOTD_NET_4P")) {
-            rows.push_back(X{"Players", [this]() { return std::string(base.pcs == 4 ? "4 (2 per PC)" : "2 (1 per PC)"); },
-                             [this]() { base.pcs = base.pcs == 4 ? 2 : 4; base.seats = base.pcs == 4 ? 2 : 1; }});
-            rows.back().help = base.pcs == 4 ? "4 players: you are Players 1 + 2, your friend's PC Players 3 + 4"
-                                             : "2 players: you are Player 1, your friend is Player 2";
-        }
         if (std::getenv("HOTD_NET_4P")) {
         rows.push_back(X{"4P Online", [this]() { return std::string(base.pcs == 4 ? "Up to 4 PCs" : "2 PCs"); },
                          [this]() { base.pcs = base.pcs == 4 ? 2 : 4; }});
