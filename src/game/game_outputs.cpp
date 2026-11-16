@@ -267,6 +267,12 @@ void GameOutputs::onFrame(const OutputFrame& f, bool live, uint64_t nowMs)
     if (!running()) return;
     const bool inGame = f.gameMode == kModeGame;
     const bool gameOver = f.gameMode == kModeGameOver;
+    if (menuHold_) {   // (resetAll: back to the menu: held until a player plays again)
+        bool any = false;
+        for (const OutputSeat& p : f.seat) any = any || (p.valid && inGame && p.state == kStatePlaying);
+        if (!any) return;
+        menuHold_ = false;
+    }
     for (int out = 0; out < kSeats; ++out) {
         const OutputSeat& p = f.seat[out];
         Track& t = track_[out];
@@ -305,14 +311,14 @@ void GameOutputs::resetAll(bool lightsOff, uint64_t nowMs)
     }
     for (Output& o : outputs_)
         o.value = -1;   // (unknown: the next values all sent)
-    if (!lightsOff || held_ || (lastStop_ && nowMs < lastStop_ + 3000)) {
-        logLine("outputs reset (a new game): the values sent afresh");
-        return;
-    }
-    lastStop_ = nowMs, restartAt_ = nowMs + 1500, held_ = true;
-    for (uintptr_t cl : clients_)
-        sendTo(cl, line("mame_stop", 1));
-    logLine("outputs reset (the menu): mame_stop sent, mame_start in 1.5 s");
+    // (user 2026-11-16: "don't worry about turning the LED strips off when you exit to the menu, just have them update
+    // properly while in game": no mame_stop / mame_start any more, Hook of the Reaper keeps the guns' COM ports open
+    // from the connection to the end; lightsOff and the restart below unused)
+    // Back to the menu or into a new game: nothing more sent until a player plays (the life / ammo set to 0 there was
+    // a death flash and a strip's change on the way out): the strips keep the last game's state till then
+    menuHold_ = true;
+    (void)lightsOff, (void)nowMs;
+    logLine("outputs reset (a new game / the menu): the values sent afresh");
 }
 
 void GameOutputs::tick(uint64_t nowMs)

@@ -104,6 +104,7 @@ private:
     bool lampBlink_[kSeats] = {true, true, true, true};
     uint64_t restartAt_ = 0, lastStop_ = 0;   // (resetAll: mame_start's time; the last mame_stop's)
     bool held_ = false;                       // (between them: the values kept, sent at mame_start)
+    bool menuHold_ = false;                   // (resetAll: back to the menu: nothing sent until a player plays)
 };
 
 } // namespace hotd::game
