@@ -239,7 +239,9 @@ void GameOutputs::acceptClients()
 void GameOutputs::fire(Pulse& pulse, uint64_t nowMs)
 {
     if (pulse.on || pulse.until > nowMs) {
-        if (pulse.queued < 3) ++pulse.queued;   // rapid fire: separate pulses, never merged into one
+        // rapid fire: separate pulses, never merged into one; one waiting at most (user 2026-11-16: three queued kept
+        // the gun kicking after the trigger was let go, into the HOLD YOUR FIRE! transitions)
+        if (pulse.queued < 1) ++pulse.queued;
         return;
     }
     pulse.on = true;

@@ -1151,10 +1151,12 @@ namespace hotd::game {
 
 // Light Gun Edition: Weak-Point Roulette: the zombies (the humanoid creature types that lose parts: zom, debu,
 // zonbiman, mummy, haris, gilmoa, mummy2, dkiller, mon) get one glowing body part each, another one every 2 s (by the
-// body and the moment, so it never flickers within the 2 s); other creatures and the bosses as normal
+// body and the moment, so it never flickers within the 2 s); other creatures and the bosses as normal. (User
+// 2026-11-16: "the little flying winged dogs ... I had to shoot the crap out of it": the Kenfis dogs, types 0 / 8 / 40 /
+// 79-81 (enemy_dogs.cpp), leap too fast for one small spot: they take hits anywhere, as the other small creatures)
 static bool lgZombieType(int type)
 {
-    static const int kTypes[] = {0, 8, 11, 12, 16, 24, 31, 32, 40, 57, 70, 79, 80, 81};
+    static const int kTypes[] = {11, 12, 16, 24, 31, 32, 57, 70};
     return std::find(std::begin(kTypes), std::end(kTypes), type) != std::end(kTypes);
 }
 

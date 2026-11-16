@@ -377,7 +377,7 @@ struct LaunchConfig {
     bool partyBoard = false;   // (off by default, user 2026-11-05) co-op: each player's score, shots, hits and accuracy at a chapter's end, the MVP
     bool hardcore = false;     // one life, no continues, its own high scores
     bool freeFire = false;     // unlimited ammo, no reloading
-    bool machineGun = false;   // hold the trigger: automatic fire (about 9 shots a second), unlimited ammo
+    bool machineGun = false;   // hold the trigger: automatic fire (8 shots a second), unlimited ammo
     bool suddenDeath = false;  // one life, no continues, any hit kills an enemy (bosses as normal); its own high scores
     bool vampire = false;      // a blood meter drains: hits and kills refill it, empty costs a life
     bool hostageCrisis = false; // Hostage Crisis (launcher.ini hostagecrisis=): shooting a hostage / researcher: game over for everyone

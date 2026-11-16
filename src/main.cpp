@@ -18341,15 +18341,18 @@ int main(int argc, char* argv[])
             if (!rt.weapons.on() && (cfg.machineGun || rt.lgWeapon[0] >= 0)) {   // (the creator's weapons: their own held fire)
                 static Uint64 nextShot[game::kInputPlayers] = {};
                 const Uint64 now = SDL_GetTicks();
+                // (user 2026-11-16: it fired on through HOLD YOUR FIRE!: only while the game takes shots)
+                const bool shotsOn = rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && rt.mem.u32(game::A::G::shot_enable) != 0;
                 if (cfg.p1Input == 0 && !lightGuns.active())
                     guns[0].held = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0 && !paused;
                 for (int p = 0; p < rt.seat_count(); ++p) {
                     // (Arsenal Mode: only a player holding the machine gun; else the Machine Gun mode: every player)
                     if (rt.lgWeapon[p] >= 0 ? rt.lgWeapon[p] != 2 : !cfg.machineGun) continue;
-                    if (guns[p].trigger) { nextShot[p] = now + 110; continue; }   // (a pull: its own shot, the next one later)
-                    if (guns[p].held && rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5 && now >= nextShot[p]) {
+                    // (user 2026-11-16 "slow down the recoil a bit": every 125 ms, 8 a second; was 110)
+                    if (guns[p].trigger) { nextShot[p] = now + 125; continue; }   // (a pull: its own shot, the next one later)
+                    if (shotsOn && guns[p].held && rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5 && now >= nextShot[p]) {
                         guns[p].trigger = true;
-                        nextShot[p] = now + 110;
+                        nextShot[p] = now + 125;
                     }
                 }
             }

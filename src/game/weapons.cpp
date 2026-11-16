@@ -81,7 +81,9 @@ std::vector<WeaponDef> defaults()
     // Runtime::lg_fired)
     WeaponDef& mg = v[kMachine];
     mg.key = "machinegun", mg.name = "MACHINE GUN";
-    mg.magazine = 50, mg.reserveMags = 4, mg.reload = 96, mg.period = 4, mg.burst = 5, mg.damage = 110;
+    // (user 2026-11-16: "slow down the recoil a bit": every 4 frames (15 a second) outran a recoil kick (40 ms on / 40
+    // off): the kicks queued and went on after the trigger; every 6 frames, 10 a second)
+    mg.magazine = 50, mg.reserveMags = 4, mg.reload = 96, mg.period = 6, mg.burst = 5, mg.damage = 110;
     mg.fireSound = "machinegun_fire", mg.fireCue = 30, mg.firePitch = 1.0f, mg.fireClip = 0.38f, mg.fireVolume = 1.0f;
     mg.reloadSound = "machinegun_reload", mg.reloadPitch = 0.6f;
     mg.price = 0, mg.drop = 0, mg.rank = 7;
