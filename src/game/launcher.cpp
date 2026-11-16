@@ -270,7 +270,7 @@ bool LaunchConfig::load(const std::string& file)
             else if (k == "funlook") funLook = std::clamp(n, 0, 3);
             else if (k == "turbo") turbo = std::clamp(n, 0, 2);
             else if (k == "bossrush") bossRush = n != 0;
-            else if (k == "married") married = n != 0;
+            else if (k == "married") married = false;   // (Married Mode taken out, user 2026-11-16: an old married=1 is off)
             else if (k == "arsenal") weaponSwitch = n != 0;
             else if (k == "crosshairs") crosshairs = n != 0;   // (before the crosshair keys of the chain below)
             else if (k == "lgupdatecheck") updateCheck = n != 0;

@@ -61,7 +61,7 @@ plays.
 - **Killer Mods** (Options > **Killer Mods** tab; local games only, online games play as normal). Each shows "Killer
   Mod, by NF". When a game starts, the names of the mods that are on (Options > Mods and Killer Mods) show for 5 seconds.
   One gun mode (Shotgun, Free Fire, Machine Gun, Arsenal) and one challenge (Hardcore to Coin-Op Survival) at a
-  time: turning one on turns the others of its group off. The looks, Married Mode, Party Scoreboard and Options >
+  time: turning one on turns the others of its group off. The looks, Party Scoreboard and Options >
   Mods go with anything, except Big Head with Weak Point Mode or Exploding Zombies (its heads are drawn big but hit
   where they really are). **Turn All Mods Off** (top of both pages) switches everything off. Each gun's bullets have
   their own colour: handgun white (the game's own), SMG blue, assault rifle orange, double pistols purple, shotgun red,
@@ -74,14 +74,14 @@ plays.
   - **Hardcore:** one life, no continues, its own high scores.
   - **One Shot Kill:** one shot kills any zombie (bosses as normal), its own high scores.
   - **Hostage Crisis:** shoot a hostage or scientist and it is game over for everyone.
-  - **Weak Point Mode:** each zombie can be hurt only at its weak point, marked by a pulsing target.
+  - **Weak Point Mode:** each of the larger zombies can be hurt only at its weak point, marked by a pulsing target
+    (small creatures and bosses as normal).
   - **Exploding Zombies:** about one zombie in three glows; a head shot blows up every zombie on the screen, a hit
     anywhere else blows up only it, and costs you a life.
   - **Coin-Op Survival:** a 60-second clock; each kill +10 s, each rescue +30 s; time up = game over. Its own high
     scores.
   - **Flashlight Mode:** the mansion dark, each player's gun lights where it aims.
   - **Screen Filter:** Night Vision, VHS Camcorder or Wireframe.
-  - **Married Mode:** you are player 1, computer teammates fill every other seat.
   - **Party Scoreboard:** at a chapter's end, each player's score, kills, shots, hits and accuracy,
     plus the MVP with 2+ players (off by default).
 - **Launchers** (AutoHotkey 1.1), no pop-ups, so front-ends such as LaunchBox are never interrupted:

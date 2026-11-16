@@ -1131,10 +1131,8 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
                      "Night Vision: green with glowing heat; VHS Camcorder: tracking lines, static, a REC time stamp; Wireframe: 80s neon vector lines"});
         killerBy(r);
         // Co-op
-        r.push_back({"Extras", []() { return std::string(); }, nullptr, "Married Mode and the Party Scoreboard: with any mods"});
-        r.push_back({"Married Mode", [&c]() { return onOff(c.married); }, [&c, save]() { c.married = !c.married; save(); },
-                     "Married? You don't have to play by yourself anymore! You play player 1, computer teammates fill every other seat"});
-        killerBy(r);
+        // (user 2026-11-16: Married Mode taken out: "it seems silly"; launcher.ini's married= is read as off)
+        r.push_back({"Extras", []() { return std::string(); }, nullptr, "The Party Scoreboard: with any mods"});
         r.push_back({"Party Scoreboard", [&c]() { return onOff(c.partyBoard); }, [&c, save]() { c.partyBoard = !c.partyBoard; save(); },
                      "At the end of each chapter: each player's score, kills, shots, hits and accuracy, and the MVP with 2+ players"});
         killerBy(r);
