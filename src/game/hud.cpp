@@ -4377,7 +4377,10 @@ void Hud::drawClock(const Runtime& rt, int ww, int wh)
     const int unit = pc ? 10 : 8;
     const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
     const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
-    const bool low = rt.lgClock < 10.0;
+    // (user 2026-11-16: the clock stopped (a boss fight, a cut-scene, HOLD YOUR FIRE!): yellow, steady, and a pause
+    // mark beside it; running: white, red and blinking under 10 s)
+    const bool held = rt.lgClockHeld;
+    const bool low = rt.lgClock < 10.0 && !held;
     if (low && mem.u32(G::frame_counter) % 30 >= 18)
         return;   // (blinking)
     const int secs = int(std::ceil(rt.lgClock));
@@ -4397,14 +4400,35 @@ void Hud::drawClock(const Runtime& rt, int ww, int wh)
                 uint8_t* d = &o.px[(size_t(y) * o.w + x) * 4];
                 std::copy_n(q, 4, d);
                 if (low) d[1] = uint8_t(d[1] / 5), d[2] = uint8_t(d[2] / 5);   // (red)
+                else if (held) d[1] = uint8_t(d[1] * 0.85f), d[2] = uint8_t(d[2] / 6);   // (yellow)
             }
         tw += o.w + unit / 4;
         gl.push_back(std::move(o));
     }
+    if (held) {   // the pause mark: two yellow bars with a dark edge, two thirds of the digits' height
+        SeatImg o;
+        const int bw = std::max(2, unit / 2), gap = std::max(2, unit / 3);
+        o.w = bw * 2 + gap + 2, o.h = dh * 2 / 3 + 2;
+        o.px.assign(size_t(o.w) * o.h * 4, 0);
+        for (int y = 0; y < o.h; ++y)
+            for (int x = 0; x < o.w; ++x) {
+                const bool bar = (x >= 1 && x < 1 + bw) || (x >= 1 + bw + gap && x < 1 + 2 * bw + gap);
+                const bool inner = bar && y >= 1 && y < o.h - 1;
+                const bool edge = !inner && ((x >= 0 && x <= bw + 1) || (x >= bw + gap && x <= 2 * bw + gap + 1));
+                uint8_t* d = &o.px[(size_t(y) * o.w + x) * 4];
+                if (inner) d[0] = 255, d[1] = 216, d[2] = 40, d[3] = 255;
+                else if (edge) d[0] = d[1] = d[2] = 0, d[3] = 200;
+            }
+        tw += unit / 2 + o.w;
+        gl.push_back(std::move(o));
+    }
     std::vector<uint8_t> canvas(size_t(W) * H * 4, 0);
     int x = (W - tw) / 2;
-    for (const SeatImg& g : gl) {
-        paste(canvas, W, H, g, x, unit / 2);
+    for (size_t i = 0; i < gl.size(); ++i) {
+        const SeatImg& g = gl[i];
+        const bool mark = held && i + 1 == gl.size();
+        if (mark) x += unit / 4;   // (a little more room before the pause mark)
+        paste(canvas, W, H, g, x, unit / 2 + (mark ? (dh - g.h) / 2 : 0));
         x += g.w + unit / 4;
     }
     upload(canvas, W, H, ww, wh);

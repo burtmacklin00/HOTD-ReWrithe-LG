@@ -497,6 +497,7 @@ public:
     bool lgRocketLoaded[4] = {true, true, true, true};   // Machine Gun mode (not Arsenal's): its rounds drawn as the machine gun's (silver)   // a one-player mode (The Typing of the Dead 0): seats 2-4 never join
     // Coin-Op Survival: the clock (seconds left; < 0 off), what was counted so far, the last change (shown by the clock)
     double lgClock = -1;
+    bool lgClockHeld = false;   // (Coin-Op Survival: the clock not running this frame: the HUD's yellow and pause mark)
     bool lgTimeUp = false;
     bool lgSvInit_ = false;   // (the counts taken at the first frame: nothing credited for what came before)
     uint32_t lgSvKills_ = 0, lgSvMiss_[4] = {};

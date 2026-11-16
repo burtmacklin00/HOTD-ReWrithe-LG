@@ -1452,7 +1452,10 @@ void Runtime::lg_survival_frame()
         lgClockDelta = float(d);
         lgClockDeltaFrame = frameCount;
     }
-    if (anyone && !boss && mem.at<uint8_t>(G::scene_state) == 2 && !clear.active && letterbox == 0 && mem.u32(G::shot_enable) != 0)
+    const bool runs = anyone && !boss && mem.at<uint8_t>(G::scene_state) == 2 && !clear.active && letterbox == 0 &&
+                      mem.u32(G::shot_enable) != 0;
+    lgClockHeld = !runs;   // (user 2026-11-16: "when the clock pauses ... yellow ... a little pause logo": Hud::drawClock)
+    if (runs)
         lgClock -= 1.0 / 57.524;
     lgClock = std::min(lgClock, 599.0);
     if (lgClock <= 0) {
