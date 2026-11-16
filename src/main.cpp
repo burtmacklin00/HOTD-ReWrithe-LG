@@ -18356,8 +18356,12 @@ int main(int argc, char* argv[])
                     // (Arsenal Mode: only a player holding the machine gun; else the Machine Gun mode: every player)
                     if (rt.lgWeapon[p] >= 0 ? rt.lgWeapon[p] != 2 : !cfg.machineGun) continue;
                     // (user 2026-11-16 "slow down the recoil a bit": every 125 ms, 8 a second; was 110)
-                    if (guns[p].trigger) { nextShot[p] = now + 125; continue; }   // (a pull: its own shot, the next one later)
-                    if (shotsOn && guns[p].held && rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5 && now >= nextShot[p]) {
+                    // (and "still just firing before the level even starts": the held fire only after a pull made while
+                    // the shots are on; a trigger held from the menu or the opening scene does nothing until pulled again)
+                    static bool armed[game::kInputPlayers] = {};
+                    if (!guns[p].held) armed[p] = false;
+                    if (guns[p].trigger) { armed[p] = shotsOn && guns[p].held; nextShot[p] = now + 125; continue; }
+                    if (shotsOn && armed[p] && guns[p].held && rt.mem.at<port::a::Player>(rt.player_rec(p)).state == 5 && now >= nextShot[p]) {
                         guns[p].trigger = true;
                         nextShot[p] = now + 125;
                     }

@@ -298,7 +298,7 @@ uint64_t Weapons::digest() const
             mix(uint64_t(s.own[w]) | uint64_t(uint32_t(s.mag[w])) << 8 | uint64_t(uint32_t(s.reserve[w])) << 32);
         mix(uint64_t(uint32_t(s.cur)) | uint64_t(uint32_t(s.reload)) << 32);
         mix(uint64_t(uint32_t(s.timer)) | uint64_t(uint32_t(s.burst)) << 32);
-        mix(uint64_t(s.quick) | uint64_t(s.bigMag) << 1 | s.shotFrame << 8);
+        mix(uint64_t(s.quick) | uint64_t(s.bigMag) << 1 | uint64_t(s.armed) << 2 | s.shotFrame << 8);
     }
     mix(pickups.size());
     for (const Pickup& k : pickups) {
@@ -670,11 +670,18 @@ void Weapons::gunInput(Runtime& rt, int p, bool& trigger, bool onScreen, bool he
     // the held fire: a held trigger on the screen fires every period frames; a pull from an input that cannot tell
     // held (pads, light guns): a burst
     const WeaponDef& d = def(s.cur);
+    // (Light Gun Edition, user 2026-11-16: "machine gun mode still just firing before the level even starts": a
+    // trigger held from the menu / the opening scene's skip went on firing (and repeating the skip request through the
+    // scene): the held fire and the burst only while the shots are on, and the held fire only after a pull made then;
+    // letting go disarms it)
+    if (!held)
+        s.armed = false;
     if (d.period > 0) {
         if (trigger && onScreen) {
             s.timer = 0;
-            s.burst = d.burst - 1;
-        } else if (onScreen && (held || s.burst > 0) && ++s.timer >= d.period) {
+            s.burst = shots ? d.burst - 1 : 0;
+            s.armed = shots && held;
+        } else if (onScreen && shots && ((held && s.armed) || s.burst > 0) && ++s.timer >= d.period) {
             trigger = true;
             s.timer = 0;
             if (!held && s.burst > 0)

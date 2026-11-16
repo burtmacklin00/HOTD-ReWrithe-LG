@@ -97,6 +97,7 @@ public:
         int cur = kPistol;
         int reload = 0;             // frames left of the reload (0: ready)
         int timer = 0, burst = 0;   // the held fire's count; a pull's burst left
+        bool armed = false;         // (Light Gun Edition: the held fire only after a pull while the shots are on)
         bool quick = false, bigMag = false;   // Survival's perks: half the reload, magazines x 1.5
         bool down = false;          // Drops: out of lives (its weapons kept for the continue: afterFrame)
         uint64_t shotFrame = 0;     // the last shot's frame (the cue's seat, the model's kick)
