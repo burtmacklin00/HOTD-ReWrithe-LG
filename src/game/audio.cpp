@@ -1211,11 +1211,11 @@ void Audio::cue(uint32_t arcadeCode)
     // a reverb): a voice line (the "Reload!" call, the dubbed lines) already started in the last 1.5 s is not started
     // again on top of itself; other sounds (shots, hits, explosions) as they come
     // (the reload lines, cue 161 "Reload!" and 162 the longer one after 2 s of pulls on an empty gun (hud_state.cpp),
-    // sent again on every pull of every player: one group, nothing new for 2 s)
+    // sent again on every pull of every player: one group, nothing new for 4 s)
     const bool reloadLine = it != cueMap_.end() && (it->second == kReloadCue || it->second == kReloadCue + 1);
     if (it != cueMap_.end() && (reloadLine || isVoiceCue(it->second))) {
         const int key = reloadLine ? kReloadCue : it->second;
-        const uint64_t gap = reloadLine ? 120 : 90;
+        const uint64_t gap = reloadLine ? 240 : 90;   // (user 2026-11-16: the shoot-outside line is a long one: 4 s)
         auto last = voiceAt_.find(key);
         if (last != voiceAt_.end() && frameNo >= last->second && frameNo - last->second < gap) {
             if (traceCues)
