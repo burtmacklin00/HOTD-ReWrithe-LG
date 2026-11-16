@@ -66,7 +66,7 @@ const std::set<std::string> kDerived = {"startlives", "maxlives", "lives", "disp
                                         "cursorspeed", "gyrocursorspeed"};
 // the lines that keep their value whatever is written: the format versions (padv, bloodv) and the derived ones
 const std::set<std::string> kFixed = {"padv", "bloodv", "lives", "fullscreen", "cursorspeed", "gyrocursorspeed",
-                                      "mixedmodels"};   // (mixmodels: a list of row names; its own test below)
+                                      "mixedmodels", "married"};   // (married: Married Mode taken out, always read as off)   // (mixmodels: a list of row names; its own test below)
 
 } // namespace
 
