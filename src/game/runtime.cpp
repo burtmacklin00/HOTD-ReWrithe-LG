@@ -1244,7 +1244,14 @@ bool Runtime::lg_part_ok(uint32_t part)
         return true;
     const uint32_t body = mem.at<port::a::BodyPart>(part).owner.a;
     const auto it = lgWeak_.find(body);
-    return it == lgWeak_.end() || it->second == part;
+    if (it == lgWeak_.end() || it->second == part)
+        return true;
+    // (user 2026-11-16: "a little easier to hit the targets": the glowing part's neighbours count too, the part it
+    // hangs from and the parts hanging from it (the chest: the neck, the shoulders, the upper arms ...))
+    const uint32_t weak = it->second;
+    if (!mem.mapped(weak))
+        return false;
+    return mem.at<port::a::BodyPart>(part).parent.a == weak || mem.at<port::a::BodyPart>(weak).parent.a == part;
 }
 
 } // namespace hotd::game
