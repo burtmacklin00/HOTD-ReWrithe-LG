@@ -111,8 +111,14 @@ void LightGuns::place(Dev& d)
                 shared = shared || (q != p && hidId_[q] == hidId_[p]);
             if (shared)
                 break;
-            for (Dev& o : devs_)
-                if (o.player == p) o.player = -1;
+            // (user 2026-11-16: player 2's gun stopped shooting: its second interface took the seat from the
+            // assigned one, and back, at every input, with a stale aim off the screen: a seat held is never taken
+            // here; only a seat no device has, i.e. the start picked an interface that does not report)
+            bool held = false;
+            for (const Dev& o : devs_)
+                held = held || o.player == p;
+            if (held)
+                break;
             d.player = p;
             SDL_Log("light guns: player %d: device %llu (LightgunHID.ini's %s)", p + 1, (unsigned long long)d.id, hidId_[p].c_str());
             return;
@@ -597,6 +603,7 @@ void LightGuns::evdevPoll(bool on)
 
 void LightGuns::reset()
 {
+    for (int& n : pullsLogged_) n = 0;
     for (const Dev& d : devs_)   // (Light Gun Edition: the seats kept for the next game, lastSeat_)
         if (d.player >= 0) lastSeat_[seatKey(d)] = d.player;
     for (Dev& d : devs_) {
@@ -642,6 +649,14 @@ void LightGuns::apply(Runtime& rt, GunState guns[], bool paused, int lw, int lh)
         if (!paused && !calibrating()) {
             if (d.eTrigger) {
                 g.trigger = true;
+                // (Light Gun Edition, user 2026-11-16: player 2's pulls did nothing: each seat's first pulls of a game
+                // in the log, with the device, its aim and the player's state)
+                if (pullsLogged_[p] < 6 && p < rt.seat_count()) {
+                    ++pullsLogged_[p];
+                    SDL_Log("light guns: player %d pull: device %llu (%s), aim %.2f, %.2f, player state %d, rounds %d", p + 1,
+                            (unsigned long long)d.id, d.absolute ? "gun" : "mouse", g.x / std::max(lw, 1), g.y / std::max(lh, 1),
+                            int(rt.mem.at<port::a::Player>(rt.player_rec(p)).state), int(rt.mem.at<port::a::Player>(rt.player_rec(p)).rounds));
+                }
                 // Light Gun Edition: the trigger is Start too for a player not in play (9 waiting, 4 out of lives:
                 // join / continue), as the other light gun games of the set; in play it only shoots
                 if (triggerStarts && p < rt.seat_count()) {

@@ -3044,6 +3044,13 @@ void outputsFrame(game::Runtime& rt, const game::LaunchConfig& cfg)
         const port::a::Player& pl = rt.mem.at<port::a::Player>(rt.player_rec(p));
         o.valid = true;
         o.state = pl.state;
+        // (Light Gun Edition, user 2026-11-16: player 2 joined but never shot: every seat's state changes in the log)
+        static int32_t lastState[4] = {-1, -1, -1, -1};
+        if (pl.state != lastState[p & 3]) {
+            SDL_Log("player %d: state %d -> %d (game mode %d, lives %d, rounds %d)", p + 1, int(lastState[p & 3]), int(pl.state),
+                    int(f.gameMode), int(pl.lives), int(pl.rounds));
+            lastState[p & 3] = pl.state;
+        }
         // a bullet left the gun since the last frame: the seat's shot count (Runtime::lg_shots: the Player's "fired"
         // flag is cleared by the shot test in the same frame); a count that went back (a new game): no shot
         static uint32_t lastShots[4] = {};

@@ -410,16 +410,18 @@ private:
     // LightgunHID.ini are taken in the order used at each game's start) each gun's seat in the last game (this run):
     // the same seat again, before the order of use
     std::map<std::string, int> lastSeat_;
+    int pullsLogged_[kInputPlayers] = {};   // (Light Gun Edition: apply's log of each seat's first pulls)
     // (Light Gun Edition, user 2026-11-16: "the gun order needs to match the order in the LightgunHID.ini file") each
     // player's ID from LightgunHID.ini (VID_xxxx&PID_xxxx): a gun's device path containing it takes that seat even
     // when its input comes through another of the gun's interfaces than the one picked at the start (several guns
     // list more than one mouse); not for an ID two players share (two identical guns: by the paths, as before)
     std::string hidId_[kInputPlayers];
     // the menus' gun: Player 1's device, or (LightgunHID.ini) any interface of Player 1's gun
-    bool isMenuGun(const Dev& d) const
+    bool isMenuGun(const Dev& d)
     {
         if (d.key == menuKey_) return true;
-        if (hidId_[0].empty() || d.key.empty()) return false;
+        // (only when Player 1's set-up device is not connected: never a second interface's stale aim)
+        if (hidId_[0].empty() || d.key.empty() || connected(menuKey_)) return false;
         for (int q = 1; q < kInputPlayers; ++q)
             if (hidId_[q] == hidId_[0]) return false;
         std::string u = d.key;
