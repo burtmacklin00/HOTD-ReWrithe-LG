@@ -67,6 +67,7 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
     }
     if (weaponHooks)   // weapons (ours, game/weapons.h): the Magician's Hand's explosion near it
         weapon_blast_hit(obj);
+    lgWeakHit_ = false;   // (Light Gun Edition: Weak Point: part_hit sets it when the glowing part takes a hit)
     uint32_t list = mem.at<BodyPart>(root).children.a;
     for (uint32_t i = 0; i < uint32_t(mem.at<BodyPart>(root).child_count); ++i, list += 4)
         part_hit(mem.u32(list));
@@ -86,6 +87,16 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
     }
     if (weaponHooks)   // weapons: each seat's weapon's damage
         weapon_damage();
+    // Light Gun Edition: Weak Point (user 2026-11-16: "double damage on the spots"): a frame whose hits took the glowing
+    // part: the damage twice over, whatever the gun (each seat's tally and the total, after the guns' own damage)
+    if (lg_roulette && lgWeakHit_ && !boss_on()) {
+        for (int s = 0; s < (coop4_on() ? 4 : 2); ++s) {
+            int16_t& t = mem.at<int16_t>(part_tally_at(s));
+            if (t > 0) t = int16_t(std::min(0x7FFF, int(t) * 2));
+        }
+        if (mem.at<int16_t>(G::hit_damage) > 0)
+            mem.at<int16_t>(G::hit_damage) = int16_t(std::min(0x7FFF, int(mem.at<int16_t>(G::hit_damage)) * 2));
+    }
     Obj& b = mem.at<Obj>(mem.u32(G::body_current));
     // Light Gun Edition: One Shot Kill (user 2026-11-16: a zombie going for a hostage took more than one shot: those
     // kinds take the damage in their own code, not enemy_check_death's): any hit's damage the whole life left, here
@@ -311,6 +322,8 @@ template <class P> void Game<P>::part_hit(uint32_t pa)
                 total = int32_t(float(int16_t(total)) * pm_table(pm_seat_char(int(p & 0xFF))).damage);
             }
             if (int32_t(uint32_t(total) << 16) > 0) {
+                if (lg_roulette && lg_part_weak(pa))   // (Light Gun Edition: Weak Point: the glowing part hit)
+                    lgWeakHit_ = true;
                 uint32_t slot = four ? part_tally_at(int(p)) : G::part_tally + (p & 0xFF) * 2;
                 mem.at<uint16_t>(slot) = uint16_t(mem.at<uint16_t>(slot) + total);
                 mem.at<uint16_t>(G::hit_damage) = uint16_t(mem.at<uint16_t>(G::hit_damage) + total);

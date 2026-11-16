@@ -74,8 +74,8 @@ plays.
   - **Hardcore:** one life, no continues, its own high scores.
   - **One Shot Kill:** one shot kills any zombie (bosses as normal), its own high scores.
   - **Hostage Crisis:** shoot a hostage or scientist and it is game over for everyone.
-  - **Weak Point Mode:** each of the larger zombies can be hurt only at its weak point, marked by a pulsing target
-    (small creatures and bosses as normal).
+  - **Weak Point Mode:** each of the larger zombies can be hurt only at its weak point, marked by a pulsing target;
+    a hit there does double damage, whatever the gun (small creatures and bosses as normal).
   - **Exploding Zombies:** about one zombie in three glows; a head shot blows up every zombie on the screen, a hit
     anywhere else blows up only it, and costs you a life.
   - **Coin-Op Survival:** a 60-second clock; each kill +10 s, each rescue +30 s; time up = game over. Its own high

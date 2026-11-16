@@ -465,6 +465,7 @@ public:
     struct LgRing { float x, y, z, r; };
     std::vector<LgRing> lgRings;
     bool lg_part_ok(uint32_t part) override;
+    bool lg_part_weak(uint32_t part) override;
     // Exploding Zombies: the bodies drawn last frame (their biggest hit part and its camera-space centre), the blasts to
     // draw (camera space, the frame they went off) and the bodies blown up already
     struct LgBody { uint32_t body, part; float x, y, z, r; int type; };

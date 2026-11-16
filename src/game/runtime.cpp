@@ -1238,6 +1238,14 @@ void Runtime::lg_roulette_frame()
     }
 }
 
+bool Runtime::lg_part_weak(uint32_t part)
+{
+    if (!mem.mapped(part))
+        return false;
+    const auto it = lgWeak_.find(mem.at<port::a::BodyPart>(part).owner.a);
+    return it != lgWeak_.end() && it->second == part;
+}
+
 bool Runtime::lg_part_ok(uint32_t part)
 {
     if (!mem.mapped(part))
