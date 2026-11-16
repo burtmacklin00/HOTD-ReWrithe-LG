@@ -87,11 +87,25 @@ void LightGuns::place(Dev& d)
 {
     if (d.player >= 0)
         return;
-    // ipolish: the seat that was given this device (Assign): its own, whatever took the seat first (that one goes on
-    // to the next free seat at its next input)
+    // Light Gun Edition (user 2026-11-16: "I don't want anything to be able to overwrite what is in the
+    // LightgunHID.ini as far as player controls for guns"): a player LightgunHID.ini names is that gun's only: only a
+    // device whose path holds that ID ever takes the seat (its set-up interface first; another interface of the same
+    // gun only while no device has the seat), and a gun the file names goes to its own player only. Nothing else
+    // (the order of use, the last game's seats, another gun or mouse, launcher.ini's gun*dev=) takes such a seat.
+    std::string u = d.key;
+    for (char& ch : u) ch = char(std::toupper(static_cast<unsigned char>(ch)));
+    auto iniOf = [&](int p) { return !hidId_[p].empty(); };
+    auto matches = [&](int p) { return iniOf(p) && !u.empty() && u.find(hidId_[p]) != std::string::npos; };
+    auto taken = [&](int p) {
+        for (const Dev& o : devs_)
+            if (o.player == p) return true;
+        return false;
+    };
+    // 1. its set-up device (the exact interface the start resolved: pin), for a player the file names only if it
+    // matches the file's ID
     if (!d.key.empty())
         for (int p = 0; p < kInputPlayers; ++p) {
-            if (pin[p] != d.key || !(want[p] || mouseWant[p]))
+            if (pin[p] != d.key || !(want[p] || mouseWant[p]) || (iniOf(p) && !matches(p)))
                 continue;
             for (Dev& o : devs_)
                 if (o.player == p) o.player = -1;
@@ -99,55 +113,33 @@ void LightGuns::place(Dev& d)
             SDL_Log("light guns: player %d: its assigned device %s (%llu)", p + 1, d.name.c_str(), (unsigned long long)d.id);
             return;
         }
-    // (Light Gun Edition) LightgunHID.ini's ID: its player's seat, whatever interface of the gun reports
-    if (!d.key.empty()) {
-        std::string u = d.key;
-        for (char& ch : u) ch = char(std::toupper(static_cast<unsigned char>(ch)));
-        for (int p = 0; p < kInputPlayers; ++p) {
-            if (hidId_[p].empty() || !(d.absolute ? want[p] : mouseWant[p]) || u.find(hidId_[p]) == std::string::npos)
-                continue;
-            bool shared = false;
-            for (int q = 0; q < kInputPlayers; ++q)
-                shared = shared || (q != p && hidId_[q] == hidId_[p]);
-            if (shared)
-                break;
-            // (user 2026-11-16: player 2's gun stopped shooting: its second interface took the seat from the
-            // assigned one, and back, at every input, with a stale aim off the screen: a seat held is never taken
-            // here; only a seat no device has, i.e. the start picked an interface that does not report)
-            bool held = false;
-            for (const Dev& o : devs_)
-                held = held || o.player == p;
-            if (held)
-                break;
-            d.player = p;
-            SDL_Log("light guns: player %d: device %llu (LightgunHID.ini's %s)", p + 1, (unsigned long long)d.id, hidId_[p].c_str());
-            return;
-        }
+    // 2. LightgunHID.ini's ID: another interface of that player's gun, only while no device has the seat (never
+    // taken from its set-up interface: user 2026-11-16, a second interface's stale aim)
+    for (int p = 0; p < kInputPlayers; ++p) {
+        if (!matches(p))
+            continue;
+        if (!(d.absolute ? want[p] : mouseWant[p]) || taken(p))
+            return;   // (a gun the file names never plays another seat)
+        d.player = p;
+        SDL_Log("light guns: player %d: device %llu (LightgunHID.ini's %s)", p + 1, (unsigned long long)d.id, hidId_[p].c_str());
+        return;
     }
-    // (Light Gun Edition) the seat this gun had in the last game, if it is wanted and free (not another's assigned one)
-    if (const auto it = lastSeat_.find(seatKey(d)); it != lastSeat_.end()) {
+    // 3. a device the file does not name: never a seat the file names
+    if (const auto it = lastSeat_.find(seatKey(d)); it != lastSeat_.end()) {   // the seat it had in the last game
         const int p = it->second;
-        bool taken = false;
-        for (const Dev& o : devs_)
-            taken = taken || o.player == p;
-        if (p >= 0 && p < kInputPlayers && (d.absolute ? want[p] : mouseWant[p]) && !taken &&
+        if (p >= 0 && p < kInputPlayers && !iniOf(p) && (d.absolute ? want[p] : mouseWant[p]) && !taken(p) &&
             (pin[p].empty() || !connected(pin[p]))) {
             d.player = p;
             SDL_Log("light guns: player %d: device %llu again (its seat in the last game)", p + 1, (unsigned long long)d.id);
             return;
         }
     }
-    for (int p = 0; p < kInputPlayers; ++p) {
-        if (!(d.absolute ? want[p] : mouseWant[p]))
+    for (int p = 0; p < kInputPlayers; ++p) {   // the order of use
+        if (iniOf(p) || !(d.absolute ? want[p] : mouseWant[p]))
             continue;
         if (!pin[p].empty() && connected(pin[p]))
             continue;   // (ipolish) kept for its own device
-        if (!hidId_[p].empty() && !pin[p].empty())
-            continue;   // (Light Gun Edition: LightgunHID.ini's player: its own gun's, through any interface)
-        bool taken = false;
-        for (const Dev& o : devs_)
-            taken = taken || o.player == p;
-        if (!taken) {
+        if (!taken(p)) {
             d.player = p;
             SDL_Log("light guns: player %d: %s device %llu", p + 1, d.absolute ? "absolute (gun)" : "relative (mouse)",
                     (unsigned long long)d.id);
