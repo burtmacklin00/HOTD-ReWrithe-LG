@@ -7033,14 +7033,6 @@ int main(int argc, char* argv[])
             // (player 3 or 4 set to CPU on this PC), the free seats of a host of up to four PCs; their input goes
             // through the lockstep (netTeamSeat). Seeded from the seats and levels, never the clock: runs repeat
             uint8_t mask = 0;
-            // Light Gun Edition (user 2026-11-16: player 2's gun did nothing, a CPU played player 2: p2bot=2): a seat
-            // LightgunHID.ini gives a connected gun is a human's, whatever Player 2-4's CPU setting says ("nothing
-            // overwrites LightgunHID.ini for the guns"); Married Mode, chosen for the game, still fills the seats
-            for (int p = 1; p < 4; ++p)
-                if (!gHidIds[p].empty() && !cfg.gunDev[p].empty() && cfg.seatBot[p] > 0 && !gNet) {
-                    SDL_Log("player %d: a human's (LightgunHID.ini's gun), not the CPU teammate set for it", p + 1);
-                    cfg.seatBot[p] = 0;
-                }
             // Light Gun Edition: Married Mode: every seat but player 1's a computer teammate (Normal) unless set to one
             for (int p = 0; p < 4; ++p)
                 gMarriedBot[p] = cfg.married && !gNet && p > 0 && !gTotd && !bossModeOpt && gSurvivalArena < 0 ? 2 : 0;
