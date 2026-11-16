@@ -679,7 +679,10 @@ void Weapons::gunInput(Runtime& rt, int p, bool& trigger, bool onScreen, bool he
     if (d.period > 0) {
         if (trigger && onScreen) {
             s.timer = 0;
-            s.burst = shots ? d.burst - 1 : 0;
+            // (user 2026-11-16: "it should never auto fire, it should only shoot when you pull the trigger": a pull from
+            // an input that reports the trigger held (light guns, the mouse) fires while it is held, never a burst
+            // after it; the burst only for inputs that cannot hold (pads))
+            s.burst = shots && !held ? d.burst - 1 : 0;
             s.armed = shots && held;
         } else if (onScreen && shots && ((held && s.armed) || s.burst > 0) && ++s.timer >= d.period) {
             trigger = true;
