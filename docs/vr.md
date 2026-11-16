@@ -125,6 +125,57 @@ setting) whatever Draw Depth says: Arcade Sort sorts each polygon by its distanc
 could sort a pair differently: one eye would see a different polygon in front (stereo rivalry). It also makes the
 depth buffer a real distance, which the aim reads.
 
+vr141 (#78 part 2, user 2026-11-12: "scenery pops in / out as you turn your head"). What decides the eyes' world:
+
+- **The game's own data limit**: the arcade's draw zones (`StageData::zoneLists`, switched by the event scripts'
+  BGTB). Each zone's list holds what its 4:3 views show; there is no list of "everything around this spot". Pieces
+  no zone near the camera lists (the current one +- 2, or 40 m away) are not drawn behind you, and a zone switch
+  still swaps the room's dressing at once (the arcade's alternate states at one place), also behind you. Real voids
+  (no geometry where the camera never looks: Chapter 1's ground ends past the road) are the data.
+- **Ours (fixed)**: a neighbouring zone's piece **across** the game camera's 4:3 edge was drawn as the widescreen
+  strips' `sideOnly` (under the zone, only where it drew nothing). In an eye that put it under the sky (outdoors the
+  sky dome covers every pixel): such pieces were not there at all, and a piece the moving game camera carried from
+  wholly outside (drawn, `around`) to across the edge vanished beside you. Now an eye draws them with the zone,
+  depth-tested, each pixel left out only inside the game camera's 4:3 frustum (`Renderer` `uGameVP`: the arcade's
+  list decides there), and every such piece counts (PC models and the far landmarks too, before: the near arcade
+  ones only). What lies outside the arcade's view is the same however the head and the game camera turn.
+  `HOTD_VR_SIDE_OLD=1`: the vr3 behavior (comparisons). No frustum culling of ours exists (the renderer draws every
+  listed piece; the GPU clips). Cost (`--quest-sim`, Chapter 1, 5000 frames): draw calls a frame p50 146 -> 147,
+  p99 227 -> 233 (budget ~300), triangles p99 24117 either way (budget ~1M).
+- Picture: `--vr preview --vr-eye right --render --autofire --lives-kept 1 --shot-at 2100` with and without
+  `HOTD_VR_SIDE_OLD=1`: the trees and the fence left of the courtyard's zombie are there now.
+
+## Fade-in
+
+vr141 (#78 part 1, user 2026-11-12: "creatures fade in quickly (about 0.25 s) when they first appear"). A creature (a
+body the game draws: its parts, skins, shadows; `DrawItem::vrBody`) seen for the first time **outside the flat
+game's 4:3 view** fades in over vr.ini `fade_in` seconds (0.25; 0 / off: none); inside that view the arcade shows it
+popping in by design and it is left alone (`fade_in_all = on`: every new one fades). The fade is a screen-door
+dissolve (`DrawItem::dissolve`, a 4 x 4 ordered dither in the fragment shader): no blending, so the depth, the
+polygon order and the aim's depth stay as they are. A body stays known while it is drawn and for 1 s after (dead
+bodies never fade again; the body record's +8 word changes as it dies, so the address alone is the key). Every mode
+(Arcade, Boss Mode, Survival, Horde); not on the cinema / screen view. Chapter 1's opening branch zombie behind you
+(about (-45, -1170), frame ~1553 in the preview test's run) is one of them. `--vr-preview-test` prints `vr fade-in
+test: 16 creatures faded in ..., 161 frames with one fading` (Chapter 1, 5000 frames); `HOTD_VR_FADE_TRACE=1` logs
+each new creature and the choice. Picture: `--vr-set fade_in=1 --vr-set fade_in_all=on --shot-at 196` (the opening's
+creatures half dissolved).
+
+## Left-handed mode
+
+vr141 (#86, user 2026-11-12): Options > Gameplay > **Gun Hand (VR)** Right (default) / Left (launcher.ini
+`vrgunhand=`, -1 not set: vr.ini `left_handed`; on the Quest the Controls page). Left mirrors everything: the gun
+(the game's gun hand mirrored, as dual pistols' left gun), its ray, laser, crosshair, the shake / flick reloads and
+the reload buttons on the left controller; the empty hand (Rogan's left hand mirrored) on the right; the weapon
+switch on the left stick; the menus' pointer from the left hand; the rumble on the gun hand. Pause moves to the
+right B (and either menu button), Start to the right A. Dual pistols: both guns as before, the left one is player 1's
+"primary" gun. How: `Scene::takeHands` swaps the two controllers' roles right after the backend's poses (`fs_.hand[1]`
+is the gun hand everywhere), the models are mirrored to the side they are on (`mirrorLocal`), the haptics go back to
+the real hand (`physHand`). OpenXR: the left Y (Index: the left B) is bound to the `secondary` action as the right B
+(was `menu`), so the scene can tell the empty hand's B / Y (Pause) from the gun hand's (reload). The preview puts its
+mouse gun in the left hand; `--vr-preview-test --vr-set left_handed=on` checks every frame that the gun is the left
+controller (`vr left-handed test: 5000 frames with the gun tracked, 5000 of them on the left controller`), the round
+trips through it as usual. Not tested on a headset yet.
+
 ## Comfort
 
 - `follow = follow` (default): the reference frame takes the game camera's full orientation (the arcade's framing:
@@ -528,6 +579,8 @@ session drops to SYNCHRONIZED). Point only the game at SteamVR (the system's act
 |---|---|---|---|---|---|
 | `khr/simple_controller` | select | (point the gun down), shake, flick up | - | menu | (the runtime's) |
 | `oculus/touch_controller` (Quest, Rift) | trigger | grip, A, B, shake, flick up | X | left menu, left Y | a thumbstick press |
+
+(Gun Hand (VR) = Left, "Left-handed mode": the same with the hands swapped: reload left X / Y, Start right A, Pause right B / a menu button.)
 | `valve/index_controller` | trigger | grip, right A, right B, shake, flick up | left A | left B | a thumbstick press |
 | `htc/vive_controller` | trigger | grip, right trackpad click, shake, flick up | left trackpad click | menu | (the runtime's) |
 | `microsoft/motion_controller` (WMR) | trigger | grip, right trackpad click, shake, flick up | left trackpad click | menu | a thumbstick press |

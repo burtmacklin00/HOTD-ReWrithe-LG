@@ -330,7 +330,8 @@ uint64_t NetGame::bootHash(game::Runtime& rt)
             h.words(r.bytes.get(), r.size & ~31u);
         }
     h.value(uint64_t(rt.pcModels) | uint64_t(rt.livesKept) << 1 | uint64_t(rt.cuts.guards) << 2 |
-            uint64_t(rt.cuts.defaultRoute) << 3 | uint64_t(rt.continueUnplayable) << 4);
+            uint64_t(rt.cuts.defaultRoute) << 3 | uint64_t(rt.continueUnplayable) << 4 |
+            (rt.mix.on ? uint64_t(1u | unsigned(rt.mix.pc) << 1 | (rt.mix.extras ? 0u : 1u << 7)) << 5 : 0u));   // (mixmodels: Mixed's rows; 0 otherwise)
     if (rt.pcmode)   // PC Mode online: the characters, Continues, Free-Play (an arcade game: as before)
         hashPm(rt, h);
     else if (bossGame(rt))   // Boss Mode online (protocol 18): the boss, the clock's step ..

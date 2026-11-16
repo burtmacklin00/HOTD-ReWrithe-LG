@@ -78,7 +78,7 @@ void Runtime::hit_screen_shake()
             if (std::getenv("HOTD_TRACE_NOTICE") && log) log("notice seat " + std::to_string(p + 1) + " kind " + std::to_string(sn.kind));
         } else if (up && frameCount + 55 == sn.until) {
             const bool odd = (frameCount & 1) != 0;
-            sound_cue(p == 2 ? (odd ? 0xA01455 : 0xA01456) : (odd ? 0xA01458 : 0xA01459));
+            sound_cue(voice_cue(p, p == 2 ? (odd ? 0xA01455 : 0xA01456) : (odd ? 0xA01458 : 0xA01459)));   // (fix141 #88)
         }
     }
     port::Game<A>::hit_screen_shake();
@@ -111,7 +111,7 @@ bool Runtime::body_hook_special(uint32_t part, uint32_t body, int32_t k, int32_t
     }
     const int32_t m = mem.at<int16_t>(body + 0xD0);
     auto in = [](int32_t v, int32_t lo, int32_t hi) { return v >= lo && v <= hi; };   // inclusive
-    if (cls != 1) {
+    if (cls != 1 || k == 24) {
         if (cls != 6)
             return false;
         const bool hand = in(m, 0x170, 0x171) || m == 0xD3 || in(m, 0xC1, 0xC5) || in(m, 0xBC, 0xBF) || m == 199 ||
@@ -119,6 +119,14 @@ bool Runtime::body_hook_special(uint32_t part, uint32_t body, int32_t k, int32_t
                           in(m, 0x173, 0x174) || in(m, 0x177, 0x17B) || in(m, 0x1CB, 0x1D2) || m == 400 ||
                           in(m, 0x29A, 0x2A0);
         if (!hand)
+            return false;
+        // fix142 (GitHub #90: PC Mode's Researcher held no gun in the cut-scenes): THOTD.EXE's part hook 0x51D014
+        // takes type 26 (the Researcher, PC Mode's character 6) into this case with Sophie (0x51D389 / 0x51D31B ->
+        // 0x51D8FD): the same motions draw the gun hand 0x631 in the hand's place, except in Chapter 1's event 14
+        // (0x51DA50: chapter 0xDA0CF4 == 0 and event 0xDA0CF3 == 14 keep the part's own hand: the captive researchers
+        // there). The arcade has type 34 only and no exception (0x9DF30); ours takes the PC's case with the seats'
+        // characters drawn (chars_on: PC Mode, Character Select picks; the caller adds k 24 only then)
+        if (chars_on() && mem.at<int8_t>(G::chapter) == 0 && mem.at<int8_t>(G::event_index) == 14)
             return false;
         geo_draw_model(0x631);
         return true;

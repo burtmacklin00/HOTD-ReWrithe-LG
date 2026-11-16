@@ -991,7 +991,7 @@ template <class P> void Game<P>::hangedman_wait_reappear(uint32_t obj)
         } else {
             b = mem.at<uint8_t>(G::solo_player_is_p2) != 0;
         }
-        sound_cue(b ? 0xA0145A : 0xA01457);
+        sound_cue(voice_cue(b ? 1 : 0, b ? 0xA0145A : 0xA01457));   // (fix141 #88: the seat's Rogan / G voice)
         next();
     }
         [[fallthrough]];

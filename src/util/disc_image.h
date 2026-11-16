@@ -31,6 +31,9 @@ bool extract(const std::string& path, const std::string& outDir, const std::func
 // it naming it), into outDir as TrackNN.wav (the CD's own numbers; 16-bit stereo 44.1 kHz; from INDEX 01, the long
 // silence at each track's end cut to 1.9 s). The count written (0: no .cue / no audio tracks); err: the last problem
 std::string cueFor(const std::string& path);
+// deckmusic (GitHub #94): a .cue's FILE name as a path in the .cue's folder, the existing file whatever the case of its
+// name or folders (Linux / macOS) and with "\" separators; none found: the name as written
+std::string cueFile(const std::string& cue, std::string name);
 int ripAudio(const std::string& path, const std::string& outDir, std::string& err);
 
 } // namespace hotd::disc

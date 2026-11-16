@@ -53,6 +53,9 @@ Tenome ............................... The Typing of the Dead EX - Modern Commun
                                        Doblaje espanol ORIGINAL", https://youtu.be/OVnjusRO1wk
                                        (no Spanish game file is included: the dub plays
                                        from the player's own Spanish copy)
+zedhqx4 .............................. Native Wii Remote support (GitHub PR #85), MIT;
+                                       protocol / calibration adapted from GitFist/hotd2-re
+                                       (MIT)
 Friends and testers .................. for playing early builds
 Everyone who reports a bug ........... you make it better
 
@@ -63,6 +66,8 @@ SDL3 (zlib licence)
 stb_vorbis by Sean Barrett (public domain)
 dr_mp3 by David Reid (public domain)
 Monocypher by Loup Vaillant and contributors (CC0)
+Native Wii Remote support by zedhqx4 (GitHub PR #85; MIT), its protocol / calibration from
+  GitFist/hotd2-re (MIT)
 STUN (online without port forwarding): written from IETF RFC 5389 (test vector: RFC 5769);
   the public STUN servers of Google (stun.l.google.com) and Cloudflare (stun.cloudflare.com)
   answer the "what is my address" question; no code of theirs is included

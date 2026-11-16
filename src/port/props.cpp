@@ -1573,7 +1573,8 @@ template <class P> void Game<P>::kind139_prop_group(uint32_t obj)
 template <class P> void Game<P>::kind147_prop_group(uint32_t obj)
 {
     // issues5 (GitHub #52): PC models in an arcade game too: the PC's world has no table there (its model 0xD0A has
-    // no PC copy), so the chairs, plates and skull floated; as PC Mode, none of the group (Chapter 1 event 6)
+    // no PC copy), so the chairs, plates and skull floated; as PC Mode, none of the group (Chapter 1 event 6).
+    // mixmodels (#49): Models: Mixed, the World row decides (models_pc)
     if (pc_path() || models_pc()) {   // THOTD.EXE's kind 147 is only `jmp task_exit`: no table props on the PC (pmrest2)
         task_exit();
         return;

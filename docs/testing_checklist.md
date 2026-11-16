@@ -256,6 +256,11 @@ whether the game froze or only something looked / sounded wrong**. Tick what wor
       Widescreen -> 16:10 -> 4:3. On your 16:9 monitor 16:10 shows thin black bars left / right; the HUD (bullets,
       torches, PRESS START) sits at the bars' inner edge, not under them; shooting into a bar reloads. On a 16:10
       screen (Steam Deck 1280 x 800, 1920 x 1200 laptops) Widescreen and 16:10 look the same and fill the screen.
+- [ ] (pcd3d 2026-11-12, GitHub #79) Options > Video > **PC Renderer** (Models: PC; grey with the arcade models):
+      Software (default, the look so far: sharp, blocky texels) / Direct3D (smooth, filtered textures on the 3D, as
+      the 1998 PC started with `d3d`; the HUD and texts stay sharp). Switch it in the pause menu too: the picture
+      changes at once. AI-checked: Software is byte-identical to before (9 frames of Chapter 1), the arcade models
+      are untouched by it (10 frames), Chapter 1 runs to its end with either (16427).
 - [ ] (team 2026-11-03) Options > Video > **Transparency** (arcade models): Smooth (as before), Smooth, Clean Edges
       (the brown / dark outline round floor stains, blood splatters and water gone), Dithered (arcade) (their edges in
       a fine screen-door stipple, as the Model 2's checker polygons). Look at the floor stains of the first courtyard and

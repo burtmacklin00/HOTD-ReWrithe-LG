@@ -38,11 +38,14 @@ struct RenderOptions {
     bool gamma = true;           // arcade: MAME's monitor curve (darker; MAME screenshots have it)
     bool cull = true;            // arcade: Model 2 back-face culling of single-sided polygons
     bool mipmap = true;          // arcade: Model 2 texture mip levels (with filtering on)
-    bool pcBilinear = false;     // PC: the driver dialog's bilinear option (off in the release's devs.cfg: point sampling)
+    bool pcBilinear = false;     // PC: Options > Video > PC Renderer: Direct3D (THOTD.EXE's Direct3D driver, bilinear; false: its software driver's point sampling; pcd3d #79)
     // team (2026-11-03): Options > Video > Transparency: 0 Smooth (the translucent texels cut at half their filtered
     // cover, as before), 1 Clean Edges (the same cut, the colour from the solid texels only: no fringe), 2 Dithered (the
     // cover stippled in a 4 x 4 screen-door pattern, the solid texels' colour)
     int transparency = 0;
+    // mixmodels (#49): Transparency Auto with Models: Mixed: per texture set, Clean Edges (1) on the PC models' pages,
+    // Dithered (2) on the arcade's (transparency is then the arcade's 2 for the passes without a set)
+    bool transpAuto = false;
     float lightDir[3] = {0.3f, 0.8f, -0.5f};
     float ambient = 0.45f;
     float clear[3] = {0.02f, 0.02f, 0.04f};
@@ -141,6 +144,9 @@ public:
     // polish3 (debugging, HOTD_ZFIGHT): +1 / -1 moves every triangle's depth by 2e-6 (clip z / w) to a pseudo-random
     // side; a pixel whose winner changes between +1 and -1 is a depth tie between two surfaces (z-fighting). 0 = off
     int debugTie = 0;
+    // mixmodels (#49): Models: Mixed: the PC stages uploaded while set get sort keys of their own (each triangle by its
+    // nearest corner, as most arcade body polygons), drawn with them for DrawItem::pcKeyed (the arcade world's order)
+    bool pcSortKeys = false;
     bool debugIds = false;                   // each item drawn in a flat colour = its index (debugNames: what it is)
     std::vector<std::string> debugNames;
     // vr (2026-11-03, docs/vr.md): an explicit eye for the next draws instead of the Camera's view and symmetric
@@ -183,7 +189,7 @@ private:
     };
     // the triangles' sort keys: the key polygon's 4 corners (model space), texel 0's w = its mode (0 = none: the
     // per-pixel depth)
-    static void sortKeysOf(const Mesh& m, size_t count, std::vector<float>& out);
+    static void sortKeysOf(const Mesh& m, size_t count, std::vector<float>& out, bool pcMin = false);
     std::map<const StageData*, GpuStage> stages_;
     std::map<const StageData*, std::pair<uint64_t, uint64_t>> gpuBytesOf_;   // questsim: textureBytes / vertexBytes' parts
     struct Resolved { const GpuStage* g = nullptr; const std::vector<Range>* ranges = nullptr; };
@@ -196,9 +202,9 @@ private:
     gl::GLuint programBand_ = 0;   // depthfix: the same shaders with KEY_BAND_FRAG (Depth Buffer's key band per pixel)
     gl::GLint uViewProj_ = -1, uOffset_ = -1, uShading_ = -1, uLighting_ = -1, uLightDir_ = -1, uAmbient_ = -1, uFilter_ = -1, uTransp_ = -1;
     gl::GLint uRot_ = -1;
-    gl::GLint uCull_ = -1, uMip_ = -1, uPcCullSign_ = -1, uClampUV_ = -1, uDepthBias_ = -1, uFloorY_ = -1, uFloorPull_ = -1, uPush_ = -1, uFade_ = -1, uSideOnly_ = -1, uSideClip_ = -1, uFlat_ = -1, uGrey_ = -1, uSepia_ = -1, uRainbow_ = -1, uRainbowPhase_ = -1, uBloodRgb_ = -1, uRainbowTable_ = -1, uRainbowGame_ = -1, uRainbowSync_ = -1, uBloodRows_ = -1, uTie_ = -1, uTieItem_ = -1, uIdMode_ = -1;
+    gl::GLint uCull_ = -1, uMip_ = -1, uPcCullSign_ = -1, uClampUV_ = -1, uDepthBias_ = -1, uFloorY_ = -1, uFloorPull_ = -1, uPush_ = -1, uFade_ = -1, uDissolve_ = -1, uSideOnly_ = -1, uSideClip_ = -1, uGameVP_ = -1, uFlat_ = -1, uGrey_ = -1, uSepia_ = -1, uRainbow_ = -1, uRainbowPhase_ = -1, uBloodRgb_ = -1, uRainbowTable_ = -1, uRainbowGame_ = -1, uRainbowSync_ = -1, uBloodRows_ = -1, uTie_ = -1, uTieItem_ = -1, uIdMode_ = -1;
     gl::GLint uCamPos_ = -1, uM2Known_ = -1, uM2Light_ = -1, uM2Diffuse_ = -1, uM2Ambient_ = -1, uM2SpecScale_ = -1, uM2SpecCtl_ = -1, uCamFwd_ = -1, uM2Gamma_ = -1, uM2Black_ = -1;
-    gl::GLint uHasRepl_ = -1, uPcFilter_ = -1, uGreyRepl_ = -1, uSort_ = -1, uSortItem_ = -1, uPrepass_ = -1, uHybrid_ = -1, uKeyless_ = -1, uProj_ = -1, uBiasScale_ = -1;
+    gl::GLint uHasRepl_ = -1, uPcFilter_ = -1, uGreyRepl_ = -1, uSort_ = -1, uSortItem_ = -1, uPrepass_ = -1, uHybrid_ = -1, uKeyless_ = -1, uPcKeys_ = -1, uProj_ = -1, uBiasScale_ = -1;
     // render5: the zone's coverage (alpha) copied after its passes, for the neighbouring zones' side-strip pieces (draw)
     gl::GLuint coverTex_ = 0;
     int coverW_ = 0, coverH_ = 0;

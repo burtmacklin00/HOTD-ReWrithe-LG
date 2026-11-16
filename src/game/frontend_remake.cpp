@@ -272,6 +272,8 @@ void Frontend::remakeBegin(int screen, const std::string& key)
     ++treeGen_;   // (the frame's widget layer: drawn again)
     remakeFirstFocus_ = key != remakeKey_;
     remakeKey_ = key;
+    if (remakeFirstFocus_ && remakeFresh_ && !handShown_)
+        px_ = py_ = 0;   // (inputfix: the pointer off the old screen's rows: the page's own first focus)
     rPlain_ = rGrid_ = false, rTabFn_ = nullptr, rPage_[2] = 0, rArt_ = -1;   // (remakepages: a page sets its own)
     rTabsRtl_ = false;
     if (key != ddKey_)
@@ -297,7 +299,8 @@ void Frontend::remakeMainMenu()
     size_t mainCount = 0;
     while (mainCount < items.size() && !items[mainCount].debug)
         ++mainCount;
-    const int pw = 290, ph = 304, px = (cw_ - pw) / 2, py = 150;
+    // (menu141, GitHub #89: the panel as tall as its items need, 304 at most: the top's five left no empty paper under Quit)
+    const int pw = 290, ph = std::min(304, 52 + 32 * std::max(1, n)), px = (cw_ - pw) / 2, py = 150;
     rPanel_[0] = px, rPanel_[1] = py, rPanel_[2] = pw, rPanel_[3] = ph;
     const int top = py + 30, bottom = py + ph - 22;
     const int step = std::min(32, (bottom - top) / std::max(1, n));
@@ -309,6 +312,7 @@ void Frontend::remakeMainMenu()
         if (!it.heading)
             sw = std::max(sw, int(std::ceil(rTextWidth(it.name(), std::min(15.0f, float(sh) * 0.6f)))) + 34);
     sw = std::min(sw, pw - 24);
+    const std::string groupName = !items.empty() && items[0].heading ? items[0].name() : std::string();
     for (int k = 0; k < n; ++k) {
         const MainItem& it = items[size_t(k)];
         Widget* w = widgetNew();
@@ -322,9 +326,11 @@ void Frontend::remakeMainMenu()
         w->flags |= 0x100;
         w->user = it.heading ? 2 : it.act ? 0 : 1;
         if (it.act) {
-            setHandlers(w, [this, act = it.act](Widget&) {
+            setHandlers(w, [this, act = it.act, groupName](Widget&) {
                 walking_ = false;   // 0x42792C before a new screen
+                remakeFresh_ = true, remakeBackTo_ = groupName;   // (inputfix: the next screen's first focus)
                 act();
+                remakeFresh_ = false, remakeBackTo_.clear();
             }, &Frontend::hitRect);
             w->nav = true;
         }
@@ -333,8 +339,17 @@ void Frontend::remakeMainMenu()
     }
     remakePrompts(root_, false, [this]() { escapeKey(); });
     addVersionTag();
-    if (remakeFirstFocus_ && !handShown_)
-        remakeFocus(0);
+    if (remakeFirstFocus_ && !handShown_) {
+        // inputfix: back from a group (its Back / Escape): on the item that opened it (its name is the group's heading)
+        const Widget* from = nullptr;
+        for (const Widget* w = remakeFresh_ && !remakeBackTo_.empty() ? root_->child : nullptr; w && !from; w = w->next)
+            if (w->nav && w->text == remakeBackTo_)
+                from = w;
+        if (from)
+            px_ = from->x + from->w / 2, py_ = from->y + from->h / 2;
+        else
+            remakeFocus(0);
+    }
 }
 
 // Quit's question (the Classic's screen 21: "Are you sure?", Yes / No with the tags 2 / 1)

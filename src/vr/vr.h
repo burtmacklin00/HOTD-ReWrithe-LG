@@ -115,6 +115,11 @@ struct Settings {
     // vr3 (user 2026-11-09, docs/vr.md "All around you"): the world in every direction: the neighbouring draw zones'
     // pieces outside the game camera's view (GameView::vrAround). Off: only what the arcade's zone list draws
     bool around = true;
+    // vr141 (#78, user 2026-11-12: "creatures fade in quickly when they first appear"; docs/vr.md "Fade-in"): a creature
+    // seen for the first time fades in over fade_in seconds (0: off), those first seen outside the flat game's 4:3 view
+    // only (inside it the arcade shows them popping in by design); fadeInAll: every one
+    float fadeIn = 0.25f;
+    bool fadeInAll = false;
     // vr3 (user 2026-11-09, docs/vr.md "Cut-scenes"): 0 world (you stand where the game's camera is and look around
     // freely, the default), 1 cinema (the flat picture, bars and captions as the arcade shows them, on a big screen
     // in front of you while a cut-scene plays: for comfort when the camera cuts fast); cinemaDistance / cinemaWidth:
@@ -132,7 +137,10 @@ struct Settings {
     // picture from the game camera with the HUD and player 1's sight: for watching / streaming). The preview's own
     // picture stays --vr-eye's (spectator works there too)
     int desktopView = 0;
-    bool leftHand = true;           // draw the left hand (when tracked)
+    bool leftHand = true;           // draw the left hand (when tracked; left-handed: the empty right hand)
+    // vr141 (#86, user 2026-11-12): vr.ini left_handed: the gun in the left hand (Scene::leftHanded); Options >
+    // Gameplay > Gun Hand (VR) over it (launcher.ini vrgunhand=)
+    bool gunLeft = false;
     // dual pistols (player request 2026-11-04; docs/vr.md "Dual pistols"): a gun in each hand, each controller aims and
     // fires for itself (its own laser, crosshair, trigger, rumble), one magazine for the pair; the left gun is the
     // game's gun hand 0x719 mirrored. Off (the default): one gun, the left hand empty. Survival's Double Pistols
@@ -255,6 +263,9 @@ public:
     virtual void scriptHead(const float[3], const float[3]) {}
     // dual pistols: the left hand holds a gun too (the preview points it at the cursor's point as the right one)
     virtual void setDual(bool) {}
+    // vr141 (#86, user 2026-11-12): left-handed (Gameplay > Gun Hand (VR) = Left): the preview's mouse gun in the left
+    // hand, the idle hand on the right (a headset reports its own hands; the scene swaps their roles)
+    virtual void setLeftHanded(bool) {}
     // tests: hand `hand`'s trigger held at `value` (0..1) until changed (the preview; a headset reads its own)
     virtual void scriptTrigger(int, float) {}
     // questsim: the Quest 3's eye buffers (Meta's default 1680 x 1760, x scale) and its field of view instead of the

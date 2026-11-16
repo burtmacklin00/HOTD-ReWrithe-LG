@@ -117,8 +117,9 @@ public:
     // units: 4:3 .. 2.5:1); a change rebuilds it
     void setViewAspect(float aspect);
     int canvasWidth() const { return cw_; }            // the screen in menu units (the PC's 640 x 480)
-    int canvasPixelsW() const { return sc_ > 1 ? rpw() : cw_ * sc_; }   // render()'s picture (a Remake screen: ps_ pixels a unit)
-    int canvasPixelsH() const { return sc_ > 1 ? rph() : kHeight * sc_; }
+    // render()'s picture (a Remake screen: ps_ pixels a unit; menu141: a player's splash picture: the window's shape)
+    int canvasPixelsW() const { return splashCustomNow() ? int(std::lround(float(wideW_) * ps_)) : sc_ > 1 ? rpw() : cw_ * sc_; }
+    int canvasPixelsH() const { return splashCustomNow() ? int(std::lround(float(kHeight) * ps_)) : sc_ > 1 ? rph() : kHeight * sc_; }
     bool remakeScreen() const { return sc_ > 1; }
     // blood2 (the GPU menu): the window's height in pixels: a Remake screen's widgets / splatter are drawn at
     // min(it, 1440) lines (2.0 .. 3.0 pixels a unit, in quarters; at least the old 960)
@@ -255,7 +256,10 @@ public:
     void pickPlayers(int n, bool toStart = false);     // the count chosen (1-4; the screen rebuilt; toStart: the hand / focus onto Start)
     void pickSeat(int p);                              // seat p (1-3) Human <-> CPU
     void pickStart();                                  // Start: the choice kept (playersSet), then `go`
-    void mainMenuGroup(int g) { mainGroup_ = g; }   // menu2: the main menu's group shown next (0 top, 1 More Modes, 2 Extras)
+    // menu2: the main menu's group shown next (kGroup*: 0 top, 1 More Modes, 2 Extras, 3 The Typing of the Dead 0;
+    // menu141, GitHub #89: 4 Story Mode, 5 Survival, 6 Horde)
+    enum : int { kGroupTop, kGroupMore, kGroupExtras, kGroupTotd, kGroupStory, kGroupSurvival, kGroupHorde, kGroups };
+    void mainMenuGroup(int g) { mainGroup_ = g; }
     int mainMenuGroupNow() const { return mainGroup_; }   // (bugs3: the HOTD_KEYS screenshots' log, GitHub #44's check)
     std::string mainMenuHead();                            // (the same: the main menu's first item as shown)
     std::function<void(int item)> onMainMenu;   // 0 Arcade, 1 PC Mode, 2 Boss Mode, 3 Ranking, 4 Options, 5 Quit
@@ -279,6 +283,10 @@ public:
     std::function<std::string()> survivalArenaValue;
     std::function<void()> onSurvivalArena;
     std::function<void()> startSurvival;
+    // menu141 (GitHub #89): More Modes > Survival is a group listing the arenas (survivalArenas()); one picked: this
+    // arena (its index) for the next Survival game, then the players asked and startSurvival. Null: the arena shown
+    // (survivalArenaValue) is reached by onSurvivalArena's steps
+    std::function<void(int arena)> onSurvivalArenaPick;
 #if HOTD_HORDE
     // Horde Mode (game/horde.h; More Modes): "Horde" asks the players and starts the arcade game from Chapter 1 with
     // the extra creatures (startHorde; user 2026-11-03: "the normal arcade game with more enemies, not a chapter
@@ -286,6 +294,9 @@ public:
     std::function<void()> startHorde;
     std::function<std::string()> hordeSizeValue;
     std::function<void()> onHordeSize;
+    // menu141 (GitHub #89): More Modes > Horde is a group listing the sizes (1 Low, 2 Normal, 3 High); one picked: that
+    // size, then the players asked and startHorde. Null: reached by onHordeSize's steps
+    std::function<void(int size)> onHordeSizePick;
 #endif
 
     // screen 17 (ours): the Gallery (game/gallery.h; the main menu's "Gallery", grey while openGallery is unset): the
@@ -579,6 +590,12 @@ public:
     // logoOnly (liveattract: the Remake style's boot): the SEGA logo only, then the attract
     void splashStart(uint32_t nowMs, bool skipLogo = false, bool logoOnly = false);
     bool splashActive() const { return splash_ >= 0; }
+    // menu141 (GitHub #83, docs/modding.md "Splash screens"): a player's own picture (RGBA, any size up to the readers'
+    // limits) for a splash stage (0 the SEGA logo's, 1 the title art's; empty rgba: the PC's own again), drawn fitted to
+    // the window (aspect kept, black bars) at the window's resolution in either menu style. With a title picture the
+    // Remake style's boot (the logo only) shows it after the logo too
+    void setCustomSplash(int stage, std::vector<uint8_t> rgba, int w, int h);
+    bool customSplash(int stage) const { return stage >= 0 && stage < 2 && !customSplash_[stage].rgba.empty(); }
     int splashStage() const { return splash_; }   // (testing: 0 the SEGA logo, 1 the title art, -1 none)
     // the draw (0x420904): widgets, then the cursor, into a kWidth x kHeight RGBA canvas
     void render(std::vector<uint8_t>& canvas);
@@ -962,6 +979,11 @@ private:
     void remakeCue() { ++remakeCues; if (onCue) onCue(28); }   // remakefix: the menu's sound (the PC's click, GAMESNDS 13) for a move / tab / back
     void remakeFocus(int dir);         // the next / previous nav widget under the pointer
     bool remakeFirstFocus_ = false;    // a new screen: the first nav widget focused (keyboard / pad)
+    // inputfix (after menu141's regroup): a Remake main menu item activated by the keyboard / a pad (remakeFresh_): the
+    // screen it opens starts on its first nav widget, not on whatever sat under the main menu's focus (Options opened on
+    // its Sound Effects row, Extras on Jukebox); a group's Back / Escape: the focus on the item that opened it (remakeBackTo_)
+    bool remakeFresh_ = false;
+    std::string remakeBackTo_;
     std::string remakeKey_;            // the screen last built (a rebuild of the same one keeps the pointer)
     int remakeScroll_ = 0;             // a settings page's first row shown
     int remakeTabs_ = 0;               // the strip's tabs (Game + the categories)
@@ -1251,6 +1273,14 @@ private:
     std::map<int, std::vector<uint8_t>> splashImage_;
     void splashRemake(std::vector<uint8_t>& canvas);
     void splashTick(const FrontendInput& in, uint32_t nowMs);   // message 0xD (0x41A140)
+    // menu141 (GitHub #83): the players' splash pictures (setCustomSplash) and each one fitted to the last canvas size
+    struct CustomSplash {
+        std::vector<uint8_t> rgba, fit;
+        int w = 0, h = 0, fitW = 0, fitH = 0;
+    };
+    CustomSplash customSplash_[2];
+    bool splashCustomNow() const { return splash_ >= 0 && splash_ < 2 && !customSplash_[splash_].rgba.empty(); }
+    void splashCustomDraw(std::vector<uint8_t>& canvas);
     void clickFrames(uint32_t nowMs);             // 0x42095C
     void escapeKey();                             // frontend_input 0x41DA18: Escape -> the widget tagged 1
     std::string extrasPageTitle_;
@@ -1269,7 +1299,7 @@ private:
     void helpRow(Widget* w, const std::string& h) { w->help = h; }
     int spacing_ = 32;                    // 0x5CE8D8 (THOTD.EXE data: 32)
     bool debugItems_ = false;             // 0x5CD374 (the debug menu's Cheat / Edit Char Stats / Creature Test)
-    int mainGroup_ = 0;                   // ours (menu2): the main menu shown: 0 the top, 1 More Modes, 2 Extras
+    int mainGroup_ = 0;                   // ours (menu2): the main menu shown (kGroup*: 0 the top, 1 More Modes ...)
     bool creatureItem_ = false;           // 0x5CE898 (Creature Test)
     char codeBuf_[9] = "00000000";        // 0x5CE89C (reset from 0x5A1198 while Ctrl is up)
     int cheatStage_ = 0, cheatScene_ = 0; // 0xD5B350 / 0xD5B354
@@ -1336,5 +1366,9 @@ struct LangPage {
 };
 int langTour(const std::string& pcInstall, const std::string& pngDir, const std::vector<LangPage>& extra, bool check,
              const std::function<void(Frontend&, const std::string&)>& each);
+// menu141 (GitHub #83, docs/modding.md "Splash screens"): a splash screen mod's folder (mod.ini type = splash) into
+// fe's start-up splash: splash.png / .jpg / .jpeg the title art's place, logo.png / .jpg / .jpeg the SEGA logo's (either
+// may be missing). Returns how many pictures were taken; log: what was read or why not (one line each)
+int loadSplashFolder(Frontend& fe, const std::string& dir, std::string& log);
 
 } // namespace hotd::game

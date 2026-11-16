@@ -65,7 +65,8 @@ bool isInt(const std::string& s)
 const std::set<std::string> kDerived = {"startlives", "maxlives", "lives", "displaymode", "fullscreen", "exclusive",
                                         "cursorspeed", "gyrocursorspeed"};
 // the lines that keep their value whatever is written: the format versions (padv, bloodv) and the derived ones
-const std::set<std::string> kFixed = {"padv", "bloodv", "lives", "fullscreen", "cursorspeed", "gyrocursorspeed"};
+const std::set<std::string> kFixed = {"padv", "bloodv", "lives", "fullscreen", "cursorspeed", "gyrocursorspeed",
+                                      "mixedmodels"};   // (mixmodels: a list of row names; its own test below)
 
 } // namespace
 
@@ -120,7 +121,7 @@ TEST(launcher, every_setting_round_trips)
             for (char& ch : w) if (ch >= '0' && ch <= '8') ch = char(ch + 1);
             cand.push_back(w);
         } else {
-            for (const char* c : {"1", "test", "0.80", "60", "gl", "unlimited", "auto", "640x480", "frenzy", "FF0000", "tv"})
+            for (const char* c : {"1", "test", "0.80", "60", "gl", "unlimited", "auto", "640x480", "frenzy", "FF0000", "tv", "d3d"})
                 cand.push_back(c);
         }
         bool any = false;
@@ -159,6 +160,27 @@ TEST(launcher, every_setting_round_trips)
     }
     if (verbose) std::printf("  launcher: %d settings round trip a changed value; %d keep theirs:%s\n", covered, fixedOnes, notCovered.c_str());
     CHECK(covered > 150);
+}
+
+TEST(launcher, mixed_models_round_trip)
+{
+    // mixmodels (GitHub #49): models=2 (Mixed) and mixedmodels= (the rows on PC, game/model_mix.h) come back; an
+    // unknown name is left out
+    LaunchConfig::readOnly = false;
+    const std::string dir = test::tempDir("launcher_mixed");
+    const std::string a = dir + "/a.ini";
+    LaunchConfig c;
+    c.models = 2;
+    c.mixedPc = (1 << game::kMixWorld) | (1 << game::kMixEffects);
+    c.save(a);
+    CHECK(asMap(readIni(a)).at("mixedmodels") == "world,effects");
+    LaunchConfig l;
+    CHECK(l.load(a));
+    CHECK_EQ(l.models, 2);
+    CHECK_EQ(l.mixedPc, c.mixedPc);
+    CHECK_EQ(game::mixedModelsParse("humans,nothing,bosses"), (1 << game::kMixHumans) | (1 << game::kMixBosses));
+    CHECK_EQ(game::mixedModelsParse("all"), int(game::kMixAll));
+    CHECK_EQ(game::mixedModelsKey(0), std::string("none"));
 }
 
 TEST(launcher, paths_relative_to_package)

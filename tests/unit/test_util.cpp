@@ -2,6 +2,7 @@
 #include "check.h"
 
 #include "util/cab_unpack.h"
+#include "util/disc_image.h"
 #include "util/png.h"
 #include "util/png_read.h"
 #include "util/recolour.h"
@@ -263,4 +264,25 @@ TEST(util, cab_arrange_layout)
     touch(cd / "THOTD.EXE");
     CHECK(cab::gameCabinet(cd.string()).empty());
     CHECK(cab::gameCabinet((root / "nothing").string()).empty());
+}
+
+// deckmusic (GitHub #94, Steam Deck: no menu music): a cue sheet's FILE names found whatever their case (Linux / macOS
+// names are case-sensitive; cue sheets made on Windows say "HOTD.BIN" for hotd.bin), "\" separators, a trailing CR
+static bool same(const std::string& a, const fs::path& b)
+{
+    std::error_code ec;
+    return fs::equivalent(a, b, ec) && !ec;
+}
+
+TEST(util, cue_file_any_case)
+{
+    const fs::path root = test::tempDir("cuecase");
+    touch(root / "hotd (track 02).bin", "audio");
+    touch(root / "Sub" / "data.bin", "data");
+    const std::string cue = (root / "HOTD.CUE").string();
+    CHECK_MSG(same(disc::cueFile(cue, "HOTD (Track 02).BIN"), root / "hotd (track 02).bin"), disc::cueFile(cue, "HOTD (Track 02).BIN"));
+    CHECK_MSG(same(disc::cueFile(cue, "hotd (track 02).bin\r"), root / "hotd (track 02).bin"), disc::cueFile(cue, "hotd (track 02).bin\r"));
+    CHECK_MSG(same(disc::cueFile(cue, "SUB\\DATA.BIN"), root / "Sub" / "data.bin"), disc::cueFile(cue, "SUB\\DATA.BIN"));
+    // no such file: the name as written (the error then names it)
+    CHECK_EQ(fs::path(disc::cueFile(cue, "missing.bin")).filename().string(), std::string("missing.bin"));
 }

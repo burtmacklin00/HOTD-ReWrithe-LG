@@ -224,7 +224,7 @@ bool decodeSettings(const uint8_t* p, size_t n, Settings& s)
     t.hashEvery = get16(p + 16);
     t.joinFrame = get32(p + 18);
     t.logBytes = get32(p + 22);
-    if (t.chapter > 3 || t.players < 1 || t.players > 4 || t.models > 1 || t.difficulty > 4 || !game::livesCodeValid(t.lives) || t.blood > 5 ||
+    if (t.chapter > 3 || t.players < 1 || t.players > 4 || (t.models > 1 && (t.models & 0x80) == 0) || t.difficulty > 4 || !game::livesCodeValid(t.lives) || t.blood > 5 ||
         t.sound > 2 || t.livesKept > 1 || t.cuts > 1 || t.defaultRoute > 1 || t.continueChapters > 1 || t.chapterStart > 1 ||
         t.delay < 1 || t.delay > 15 || t.hashEvery < 1 || t.hashEvery > 600 || t.joinFrame > kMaxJoinFrames ||
         t.logBytes > kMaxLog || (t.joinFrame > 0) != (t.logBytes > 0))

@@ -40,6 +40,34 @@ struct Image {
     }
 };
 
+}  // namespace
+
+// deckmusic (GitHub #94, Steam Deck): a .cue's FILE name in the .cue's folder whatever its case (a cue sheet written on
+// Windows says "HOTD.BIN" for hotd.bin: Linux / macOS file names are case-sensitive) and with Windows separators
+std::string cueFile(const std::string& cue, std::string name)
+{
+    if (!name.empty() && name.back() == '\r') name.pop_back();
+    std::replace(name.begin(), name.end(), '\\', '/');
+    const fs::path dir = fs::path(cue).parent_path();
+    const fs::path exact = dir / name;
+    std::error_code ec;
+    if (name.empty() || fs::exists(exact, ec))
+        return exact.string();
+    fs::path p = dir;
+    for (const fs::path& part : fs::path(name)) {
+        fs::path next = p / part;
+        if (!fs::exists(next, ec)) {
+            const std::string want = lower(part.string());
+            for (const auto& e : fs::directory_iterator(p, ec))
+                if (lower(e.path().filename().string()) == want) { next = e.path(); break; }
+        }
+        p = next;
+    }
+    return fs::exists(p, ec) ? p.string() : exact.string();
+}
+
+namespace {
+
 // a .cue's first FILE "<name>" (relative to the .cue's folder)
 std::string cueData(const std::string& cue)
 {
@@ -55,8 +83,9 @@ std::string cueData(const std::string& cue)
             rest.erase(0, rest.find_first_not_of(" \t"));
             name = rest.substr(0, rest.find_first_of(" \t"));
         }
+        if (!name.empty() && name.back() == '\r') name.pop_back();   // (a Windows cue sheet read on Linux)
         if (name.empty()) return {};
-        return (fs::path(cue).parent_path() / name).string();
+        return cueFile(cue, name);
     }
     return {};
 }
@@ -225,7 +254,7 @@ int ripAudio(const std::string& path, const std::string& outDir, std::string& er
                     rest.erase(0, std::min(rest.size(), rest.find_first_not_of(" \t")));
                     name = rest.substr(0, rest.find_first_of(" \t"));
                 }
-                file = (fs::path(cue).parent_path() / name).string();
+                file = cueFile(cue, name);
             } else if (t.rfind("TRACK", 0) == 0) {
                 Track tr;
                 tr.file = file;

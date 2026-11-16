@@ -15,7 +15,11 @@
 #include "game/player_colours.h"
 #include "game/scene_view.h"
 #include "game/survival.h"
+#if HOTD_HORDE
+#include "game/horde.h"   // (menu141: Horde's sizes, More Modes > Horde)
+#endif
 #include "game/pm_portraits.h"
+#include "util/jpeg_read.h"
 #include "util/png.h"
 #include "util/utf8.h"
 
@@ -904,33 +908,70 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
     using Item = MainItem;
     std::vector<Item> items;
     auto pick = [this](int k) { return std::function<void()>([this, k]() { if (onMainMenu) onMainMenu(k); }); };
-    // menu2 (user 2026-10-21: "getting cluttered"): the top keeps the PC's own items in the PC's order (Arcade, PC Mode,
-    // Boss Mode, High Scores = Ranking, Options, Quit) plus two groups, More Modes (Chapter Select, Co-op, Sonic Mode)
-    // and Extras (Gallery, Jukebox); a group is the same list with its name (yellow) first and Back last (Escape).
-    // The pages opened from a group come back to it (screenMainMenu shows mainGroup_; start() resets it)
+    // menu2 (user 2026-10-21: "getting cluttered"): the main menu as groups; a group is the same list with its name
+    // (yellow) first and Back last (Escape). The pages opened from a group come back to it (screenMainMenu shows
+    // mainGroup_; start() resets it).
+    // menu141 (GitHub #89, user 2026-11-12: "fewer top-level items, faster into the action"): the top is Story Mode,
+    // More Modes, Extras, Options, Quit (the PC's Options / Quit labels); Story Mode = Arcade, PC Mode, Chapter Select,
+    // Co-op (2 / 4 players, online); More Modes = Survival (its arenas: a group, one picked plays it; was Survival plus a
+    // Survival Arena row), Horde (its sizes, the same), Boss Mode, The Typing of the Dead 0, Sonic Mode; Extras =
+    // Gallery, Jukebox, High Scores
     auto group = [this](int g) {
         return std::function<void()>([this, g]() {
             mainGroup_ = g;
             screenMainMenu();
         });
     };
+    // playerpick: Arcade, PC Mode, Survival and Horde ask the players first (screen 22; Back: the group they were in)
+    auto ask = [this](const std::string& name, std::function<void()> go) {
+        return go ? std::function<void()>([this, name, go]() {
+            std::string m = name;
+            if (name == "Arcade" && sonicValue && sonicValue() != "Off")
+                m += " - Sonic Mode " + sonicValue();
+            askPlayers(m, go, [this]() { screenMainMenu(); });
+        }) : nullptr;
+    };
+    auto heading = [&items](const std::string& name) {
+        items.push_back({-1, name, "", nullptr});
+        items.back().heading = true;
+    };
     // GitHub #44: the groups open with SKIDMARX on too (was: forced to the top, so More Modes / Extras did nothing)
     const int grp = mainGroup_;
-    if (grp == 1) {
-        items.push_back({-1, "More Modes", "", nullptr});
-        items.back().heading = true;
+    if (grp == kGroupStory) {
+        heading("Story Mode");
+        items.push_back({1, "", "The whole game from Chapter 1, as the arcade", ask("Arcade", pick(0))});
+        // PC Mode: its worker's startPcMode (grey while unset, or onMainMenu(1) when mainMenuEnabled says so)
+        const auto pcStart = startPcMode ? std::function<void()>([this]() { const auto f = startPcMode; f(); })
+                             : mainMenuEnabled[1] ? pick(1) : nullptr;
+        const auto pc = ask("PC Mode", pcStart);
+        items.push_back({2, "", pc ? "The PC version's own mode" : "PC Mode: coming (not ported yet)", pc});
         items.push_back({-1, "Chapter Select", "Start at any chapter", [this]() { screenChapters(); }});
         // (fix140a, user 2026-11-10: VR is single player only: no 2 / 4 players, no online; greyed as TotD 0)
         // (questui, user 2026-11-10: on the standalone Quest left out, not greyed: menu_pages.h menuQuest)
         if (!menuQuest)
             items.push_back({-1, "Co-op", coopNoVr ? "Not available in VR" : "2 players, 4 players or online",
                              onCoop && !coopNoVr ? std::function<void()>([this]() { const auto f = onCoop; f(); }) : nullptr});
-        if (sonicValue)
-            items.push_back({-1, "Sonic Mode: " + sonicValue(), "Faster play, own high scores (click: next preset)",
-                             [this]() {
-                                 if (onSonic) onSonic();
-                                 screenMainMenu();
-                             }});
+        items.push_back({-1, "Back", "Back to the main menu (Escape)", group(kGroupTop)});
+    } else if (grp == kGroupMore) {
+        heading("More Modes");
+        if (startSurvival && survivalArenaValue)   // Survival Mode (game/survival.h): its arenas' group (menu141)
+            // (polish, user 2026-11-03: in the release; survfix3, user 2026-11-05: "remove very experimental / proof of
+            // concept from survival": no tag line, help line or start notice any more)
+            items.push_back({-1, "Survival", "Endless rounds, points to spend between them, cut creatures; own high scores",
+                             group(kGroupSurvival)});
+#if HOTD_HORDE
+        if (hordeSizeValue) {   // Horde Mode (game/horde.h): the arcade game from Chapter 1, more creatures at once
+            // (hordepub, user 2026-11-09: in the release, labelled "Experimental / Proof of Concept" as The Typing of the
+            // Dead 0 is: the item's tag line, its help line, a notice when it starts: main.cpp / Hud::drawTotdNote)
+            items.push_back({-1, "Horde", "Experimental / Proof of Concept: the arcade game with many more zombies at once; own high scores",
+                             group(kGroupHorde)});
+            items.back().tag = "Experimental / Proof of Concept";
+        }
+#endif
+        // Boss Mode: its worker's startBossMode (grey while unset, or onMainMenu(2) when mainMenuEnabled says so)
+        const auto boss = startBossMode ? std::function<void()>([this]() { const auto f = startBossMode; f(); })
+                          : mainMenuEnabled[2] ? pick(2) : nullptr;
+        items.push_back({0x42, "", boss ? "Fight the bosses one by one" : "Boss Mode: coming (not ported yet)", boss});
         if (startTotd && !menuQuest) {   // The Typing of the Dead 0 (game/typing.h): the game played by typing (questui: not on the Quest)
             // (rel130, user 2026-11-05: in the release, labelled "Experimental / Proof of Concept": the item's tag line,
             // its help line, a notice when it starts: main.cpp / Hud::drawTotdNote)
@@ -939,85 +980,74 @@ std::vector<Frontend::MainItem> Frontend::mainMenuItems()
                              totdNoVr ? "Not available in VR"
                                       : "Experimental / Proof of Concept: type the words over the enemies to shoot them (keyboard)",
                              totdNoVr ? std::function<void()>()
-                             : startTotdPractice ? group(3)   // (totdpacks: its own group: Play, Practice)
+                             : startTotdPractice ? group(kGroupTotd)   // (totdpacks: its own group: Play, Practice)
                                                  : std::function<void()>([this]() { const auto f = startTotd; f(); })});
             items.back().tag = "Experimental / Proof of Concept";
         }
-        if (startSurvival && survivalArenaValue) {   // Survival Mode (game/survival.h): the game (players asked first), its arena
-            // (polish, user 2026-11-03: in the release; survfix3, user 2026-11-05: "remove very experimental / proof of
-            // concept from survival": no tag line, help line or start notice any more)
-            items.push_back({-1, "Survival", "Endless rounds, points to spend between them, cut creatures; own high scores", [this]() {
-                                 askPlayers("Survival - " + survivalArenaValue(), [this]() { const auto f = startSurvival; f(); },
-                                            [this]() { screenMainMenu(); });
-                             }});
-            items.push_back({-1, "Survival Arena: " + survivalArenaValue(), "Where the waves come (click: next arena)", [this]() {
-                                 if (onSurvivalArena) onSurvivalArena();
-                                 screenMainMenu();
-                             }});
-        }
-#if HOTD_HORDE
-        if (hordeSizeValue) {   // Horde Mode (game/horde.h): the arcade game from Chapter 1, more creatures at once
-            // (hordepub, user 2026-11-09: in the release, labelled "Experimental / Proof of Concept" as The Typing of the
-            // Dead 0 is: the item's tag line, its help line, a notice when it starts: main.cpp / Hud::drawTotdNote)
-            items.push_back({-1, "Horde", "Experimental / Proof of Concept: the arcade game with many more zombies at once; own high scores", [this]() {
-                                 askPlayers("Horde - " + hordeSizeValue(), [this]() { if (startHorde) { const auto f = startHorde; f(); } },
-                                            [this]() { screenMainMenu(); });
-                             }});
-            items.back().tag = "Experimental / Proof of Concept";
-            items.push_back({-1, "Horde Size: " + hordeSizeValue(), "How many more creatures: Low 2x, Normal 3x, High 4x (click: next)",
+        if (sonicValue)
+            items.push_back({-1, "Sonic Mode: " + sonicValue(), "Faster play, own high scores (click: next preset)",
                              [this]() {
-                                 if (onHordeSize) onHordeSize();
+                                 if (onSonic) onSonic();
                                  screenMainMenu();
                              }});
+        items.push_back({-1, "Back", "Back to the main menu (Escape)", group(kGroupTop)});
+    } else if (grp == kGroupSurvival) {   // menu141: Survival's arenas, one picked plays it (the players asked first)
+        heading("Survival");
+        const std::vector<SurvivalArena>& arenas = survivalArenas();
+        for (size_t i = 0; i < arenas.size() && i < 8; ++i) {
+            const std::string name = arenas[i].name;
+            items.push_back({-1, name, "Endless rounds, points to spend between them, cut creatures; own high scores",
+                             startSurvival ? std::function<void()>([this, i, name]() {
+                                 if (onSurvivalArenaPick)
+                                     onSurvivalArenaPick(int(i));
+                                 else if (survivalArenaValue && onSurvivalArena)   // (no pick hook: stepped there)
+                                     for (size_t k = 0; k < 16 && survivalArenaValue() != name; ++k)
+                                         onSurvivalArena();
+                                 askPlayers("Survival - " + name, [this]() { const auto f = startSurvival; if (f) f(); },
+                                            [this]() { screenMainMenu(); });
+                             }) : nullptr});
         }
+        items.push_back({-1, "Back", "Back to More Modes (Escape)", group(kGroupMore)});
+#if HOTD_HORDE
+    } else if (grp == kGroupHorde) {   // menu141: Horde's sizes, one picked plays it (the players asked first)
+        heading("Horde");
+        for (int size = 1; size <= 3; ++size) {
+            const std::string name = HordeMode::sizeName(size);
+            items.push_back({-1, name, "How many more creatures: Low 2x, Normal 3x, High 4x",
+                             startHorde ? std::function<void()>([this, size, name]() {
+                                 if (onHordeSizePick)
+                                     onHordeSizePick(size);
+                                 else if (hordeSizeValue && onHordeSize)
+                                     for (int k = 0; k < 4 && hordeSizeValue() != name; ++k)
+                                         onHordeSize();
+                                 askPlayers("Horde - " + name, [this]() { const auto f = startHorde; if (f) f(); },
+                                            [this]() { screenMainMenu(); });
+                             }) : nullptr});
+        }
+        items.push_back({-1, "Back", "Back to More Modes (Escape)", group(kGroupMore)});
 #endif
-        items.push_back({-1, "Back", "Back to the main menu (Escape)", group(0)});
-    } else if (grp == 3) {   // totdpacks: The Typing of the Dead 0's group (More Modes' item): the game, its Practice
-        items.push_back({-1, "The Typing of the Dead 0", "", nullptr});
-        items.back().heading = true;
+    } else if (grp == kGroupTotd) {   // totdpacks: The Typing of the Dead 0's group (More Modes' item): the game, its Practice
+        heading("The Typing of the Dead 0");
         items.push_back({-1, "Play", "Experimental / Proof of Concept: type the words over the enemies to shoot them (keyboard)",
                          startTotd ? std::function<void()>([this]() { const auto f = startTotd; f(); }) : nullptr});
         items.push_back({-1, "Practice: Word Packs", "Words float across the screen, no attacks: the word packs you chose (Options)",
                          [this]() { const auto f = startTotdPractice; if (f) f(false); }});
         items.push_back({-1, "Practice: Your Misses", "The same with the words you missed most (your statistics)",
                          [this]() { const auto f = startTotdPractice; if (f) f(true); }});
-        items.push_back({-1, "Back", "Back to More Modes (Escape)", group(1)});
-    } else if (grp == 2) {
-        items.push_back({-1, "Extras", "", nullptr});
-        items.back().heading = true;
+        items.push_back({-1, "Back", "Back to More Modes (Escape)", group(kGroupMore)});
+    } else if (grp == kGroupExtras) {
+        heading("Extras");
         items.push_back({-1, "Gallery", openGallery ? "The characters and creatures in 3D" : "Gallery: needs the arcade files",
                          openGallery ? std::function<void()>([this]() { const auto f = openGallery; f(); }) : nullptr});
         items.push_back({-1, "Jukebox", openJukebox ? "The music, sound effects and voices" : "Jukebox: no sound files or sound device",
                          openJukebox ? std::function<void()>([this]() { const auto f = openJukebox; f(); }) : nullptr});
-        items.push_back({-1, "Back", "Back to the main menu (Escape)", group(0)});
-    } else {
-        // playerpick: Arcade and PC Mode ask the players first (screen 22; Back: the main menu)
-        auto ask = [this](const char* name, std::function<void()> go) {
-            return go ? std::function<void()>([this, name, go]() {
-                std::string m = name;
-                if (std::string(name) == "Arcade" && sonicValue && sonicValue() != "Off")
-                    m += " - Sonic Mode " + sonicValue();
-                askPlayers(m, go, [this]() { screenMainMenu(); });
-            }) : nullptr;
-        };
-        items.push_back({1, "", "The whole game from Chapter 1, as the arcade", ask("Arcade", pick(0))});
-        // Boss Mode / PC Mode: their workers' startBossMode / startPcMode (grey while unset, or onMainMenu(2 / 1) when
-        // mainMenuEnabled says so)
-        auto mode = [&](const std::function<void()>& start, int k) {
-            return start ? std::function<void()>([start]() { const auto f = start; f(); }) : mainMenuEnabled[k] ? pick(k) : nullptr;
-        };
-        const auto boss = mode(startBossMode, 2), pc = ask("PC Mode", mode(startPcMode, 1));
-        items.push_back({2, "", pc ? "The PC version's own mode" : "PC Mode: coming (not ported yet)", pc});
-        items.push_back({0x42, "", boss ? "Fight the bosses one by one" : "Boss Mode: coming (not ported yet)", boss});
-        // (Survival named only when its items are there: main.cpp)
-#if HOTD_HORDE
-        items.push_back({-1, "More Modes", std::string("Chapter Select, Co-op, Sonic Mode") + (startSurvival ? ", Survival" : "") +
-                                               (hordeSizeValue ? ", Horde" : ""), group(1)});
-#else
-        items.push_back({-1, "More Modes", std::string("Chapter Select, Co-op, Sonic Mode") + (startSurvival ? ", Survival" : ""), group(1)});
-#endif
-        items.push_back({-1, "Extras", "Gallery, Jukebox", group(2)});
+        // (menu141: High Scores left the top for Extras)
         items.push_back({0x43, "", "The top 10 tables", mainMenuEnabled[3] ? std::function<void()>([this]() { screenRanking(); }) : nullptr});
+        items.push_back({-1, "Back", "Back to the main menu (Escape)", group(kGroupTop)});
+    } else {
+        items.push_back({-1, "Story Mode", "Arcade, PC Mode, Chapter Select, Co-op", group(kGroupStory)});
+        items.push_back({-1, "More Modes", "Survival, Horde, Boss Mode and more", group(kGroupMore)});
+        items.push_back({-1, "Extras", "Gallery, Jukebox, High Scores", group(kGroupExtras)});
         items.push_back({6, "", "Difficulty, lives, volumes and all settings",
                          mainMenuEnabled[4] ? std::function<void()>([this]() { screenOptions(); }) : nullptr});
         // uxpolish: Quit (and Escape / a pad's B) asks first, with the PC's own "Are you sure?" / Yes / No labels
@@ -1076,7 +1106,12 @@ void Frontend::screenMainMenu()
     // Creature Test fit under Quit (pc_cheats.md)
     // polish (the sweep: More Modes' ten items ran Back into the help line at 448): more than eight, closer together
     const bool dbg = mainCount < items.size();   // (#44: the debug items are on the top only)
-    const int step = dbg ? 19 : mainCount > 8 ? 24 : 28;
+    // menu141 (GitHub #89): six items or fewer (the top's five, Story Mode's six) as the PC lays its six out: from 0xD0,
+    // 32 apart (the debug items still fit under Quit: 0xD0 + 4 x 32 + 0x23 + 2 x 0x19 < 448)
+    const bool pcLayout = mainCount <= 6;
+    if (pcLayout)
+        setRect(list, 0, 0xD0, 0, 0x110);
+    const int step = pcLayout ? 32 : dbg ? 19 : mainCount > 8 ? 24 : 28;
     int y = 0;
     for (size_t k = 0; k < mainCount; ++k) {
         Item& it = items[k];
@@ -3497,6 +3532,101 @@ void Frontend::splashRemake(std::vector<uint8_t>& canvas)
     }
 }
 
+// menu141 (GitHub #83, docs/modding.md "Splash screens"): a player's own splash picture
+void Frontend::setCustomSplash(int stage, std::vector<uint8_t> rgba, int w, int h)
+{
+    if (stage < 0 || stage > 1)
+        return;
+    CustomSplash& c = customSplash_[stage];
+    c = CustomSplash();
+    if (w > 0 && h > 0 && rgba.size() >= size_t(w) * size_t(h) * 4)
+        c.rgba = std::move(rgba), c.w = w, c.h = h;
+}
+
+// the picture fitted into the canvas (canvasPixelsW x H: the window's shape), its aspect kept, black around it: an
+// average of the pixels each canvas pixel covers when it is made smaller, bilinear when larger; kept until the size
+// changes
+void Frontend::splashCustomDraw(std::vector<uint8_t>& canvas)
+{
+    CustomSplash& c = customSplash_[splash_];
+    const int W = canvasPixelsW(), H = canvasPixelsH();
+    if (W <= 0 || H <= 0 || canvas.size() < size_t(W) * size_t(H) * 4)
+        return;
+    if (c.fitW != W || c.fitH != H || c.fit.size() != size_t(W) * size_t(H) * 4) {
+        c.fit.assign(size_t(W) * size_t(H) * 4, 0);
+        for (size_t i = 3; i < c.fit.size(); i += 4)
+            c.fit[i] = 255;
+        const double s = std::min(double(W) / double(c.w), double(H) / double(c.h));
+        const int dw = std::clamp(int(std::lround(double(c.w) * s)), 1, W), dh = std::clamp(int(std::lround(double(c.h) * s)), 1, H);
+        const int ox = (W - dw) / 2, oy = (H - dh) / 2;
+        const double inv = 1.0 / s;
+        for (int y = 0; y < dh; ++y)
+            for (int x = 0; x < dw; ++x) {
+                uint8_t* d = &c.fit[(size_t(y + oy) * size_t(W) + size_t(x + ox)) * 4];
+                if (s < 1.0) {   // (smaller: the box of source pixels under this one)
+                    const int x0 = int(double(x) * inv), x1 = std::max(x0 + 1, std::min(c.w, int(double(x + 1) * inv)));
+                    const int y0 = int(double(y) * inv), y1 = std::max(y0 + 1, std::min(c.h, int(double(y + 1) * inv)));
+                    uint32_t sum[3] = {0, 0, 0}, n = 0;
+                    for (int sy = y0; sy < y1 && sy < c.h; ++sy)
+                        for (int sx = x0; sx < x1 && sx < c.w; ++sx) {
+                            const uint8_t* p = &c.rgba[(size_t(sy) * size_t(c.w) + size_t(sx)) * 4];
+                            const uint32_t a = p[3];   // (over black: a transparent part is black)
+                            sum[0] += p[0] * a / 255, sum[1] += p[1] * a / 255, sum[2] += p[2] * a / 255, ++n;
+                        }
+                    for (int ch = 0; ch < 3; ++ch)
+                        d[ch] = uint8_t(n ? sum[ch] / n : 0);
+                } else {   // (larger: bilinear)
+                    const double sx = std::clamp((double(x) + 0.5) * inv - 0.5, 0.0, double(c.w - 1));
+                    const double sy = std::clamp((double(y) + 0.5) * inv - 0.5, 0.0, double(c.h - 1));
+                    const int ix = std::min(int(sx), std::max(0, c.w - 2)), iy = std::min(int(sy), std::max(0, c.h - 2));
+                    const double fx = c.w > 1 ? sx - ix : 0, fy = c.h > 1 ? sy - iy : 0;
+                    const int ix1 = std::min(ix + 1, c.w - 1), iy1 = std::min(iy + 1, c.h - 1);
+                    auto px = [&](int xx, int yy, int ch) {
+                        const uint8_t* p = &c.rgba[(size_t(yy) * size_t(c.w) + size_t(xx)) * 4];
+                        return double(p[ch]) * double(p[3]) / 255.0;
+                    };
+                    for (int ch = 0; ch < 3; ++ch) {
+                        const double a = px(ix, iy, ch) + (px(ix1, iy, ch) - px(ix, iy, ch)) * fx;
+                        const double b = px(ix, iy1, ch) + (px(ix1, iy1, ch) - px(ix, iy1, ch)) * fx;
+                        d[ch] = uint8_t(std::clamp(int(std::lround(a + (b - a) * fy)), 0, 255));
+                    }
+                }
+            }
+        c.fitW = W, c.fitH = H;
+    }
+    std::memcpy(canvas.data(), c.fit.data(), c.fit.size());
+}
+
+int loadSplashFolder(Frontend& fe, const std::string& dir, std::string& log)
+{
+    int n = 0;
+    log.clear();
+    static const char* const kNames[2] = {"logo", "splash"};
+    for (int stage = 0; stage < 2; ++stage) {
+        fe.setCustomSplash(stage, {}, 0, 0);
+        for (const char* ext : {".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG"}) {
+            const std::string path = dir + "/" + kNames[stage] + ext;
+            if (FILE* f = std::fopen(path.c_str(), "rb"))
+                std::fclose(f);
+            else
+                continue;
+            int w = 0, h = 0;
+            std::vector<uint8_t> rgba;
+            std::string err;
+            if (readImageRgba(path, w, h, rgba, err)) {
+                fe.setCustomSplash(stage, std::move(rgba), w, h);
+                log += std::string(log.empty() ? "" : "; ") + kNames[stage] + ext + " " + std::to_string(w) + " x " + std::to_string(h);
+                ++n;
+            } else
+                log += std::string(log.empty() ? "" : "; ") + err;
+            break;
+        }
+    }
+    if (log.empty())
+        log = "no splash.png / splash.jpg or logo.png / logo.jpg in " + dir;
+    return n;
+}
+
 void Frontend::splashTick(const FrontendInput& in, uint32_t nowMs)
 {
     const bool input = in.anyKey;
@@ -3504,7 +3634,9 @@ void Frontend::splashTick(const FrontendInput& in, uint32_t nowMs)
         splashSprite_ = 0xA1;
         if (input || int(nowMs - splashTime_) > 0xBB8) {
             splashTime_ = nowMs;
-            splash_ = splashLogoOnly_ ? -1 : 1;   // (liveattract: the Remake style's boot: the logo, then the attract)
+            // (liveattract: the Remake style's boot: the logo, then the attract; menu141: a player's title picture after
+            // the logo there too)
+            splash_ = splashLogoOnly_ && !customSplash(1) ? -1 : 1;
         }
     } else if (splash_ == 1) {
         splashSprite_ = 0xAA;
@@ -3702,7 +3834,9 @@ void Frontend::render(std::vector<uint8_t>& canvas)
         canvas[i] = opaque;
     canvas_ = &canvas;
     if (splash_ >= 0) {   // 0x419F18
-        if (sc_ == 1)
+        if (splashCustomNow())
+            splashCustomDraw(canvas);   // (menu141: a player's own picture, GitHub #83)
+        else if (sc_ == 1)
             splashSpr_.draw(canvas, splashSprite_, (cw_ - kWidth) / 2, 0, 0, 0, cw_, kHeight, cw_);
         else
             splashRemake(canvas);   // (feat29: was black)
@@ -3765,7 +3899,11 @@ int langTour(const std::string& pcInstall, const std::string& pngDir, const std:
 {
     struct Shot { int screen, page; const char* name; };
     std::vector<Shot> shots = {
-        {1, 0, "main"}, {1, 1, "main_more_modes"}, {1, 2, "main_extras"}, {21, 0, "quit"}, {2, 0, "options"},
+        {1, 0, "main"}, {1, 1, "main_more_modes"}, {1, 2, "main_extras"}, {1, 4, "main_story_mode"}, {1, 5, "main_survival"},
+#if HOTD_HORDE
+        {1, 6, "main_horde"},
+#endif
+        {21, 0, "quit"}, {2, 0, "options"},
         {117, 0, "advanced"}, {118, 0, "mod_settings"}, {16, 0, "coop"}, {18, 0, "keys"}, {18, 1, "keys_pad"}, {4, 0, "controller"},
         {4, 1, "controller_2"}, {109, 0, "pcmode_scores"}, {9, 0, "chapters"}, {7, 0, "bossmode"}, {19, 0, "cutscenes"},
         {20, 0, "jukebox"}, {17, 0, "gallery"}, {116, 0, "pcmode"}, {15, 0, "name_entry"}, {119, 0, "firing_range"}, {121, 0, "language"}};
@@ -3871,6 +4009,7 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         hooks.vrDualDefault = []() { return false; };
         hooks.vrLaserDefault = []() { return true; };
         hooks.vrCrosshairDefault = []() { return true; };
+        hooks.vrGunLeftDefault = []() { return false; };   // (vr141)
     }
     for (int k = 0; k < menuTabCount(); ++k)
         fe.tabs.push_back(menuCategoryName(menuTabCategory(k)));
@@ -3898,6 +4037,7 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         {   // (hordepub: Horde in the release builds too, wherever it is built in: HOTD_HORDE)
             fe.hordeSizeValue = []() { return std::string("Normal"); };
             fe.onHordeSize = []() {};
+            fe.startHorde = []() {};   // (menu141: the Horde group's sizes white)
         }
 #endif
     }
@@ -4053,6 +4193,13 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         fe.extrasTitle = "Advanced";
         fe.extrasTab = -1;
         fe.screenExtras();
+    } else if (screen == 125) {   // mixmodels (#49): Video > Mixed Models' page (HOTD_FE_MIXED=<rows>: launcher.ini's form)
+        cfg.models = 2;
+        if (const char* m = std::getenv("HOTD_FE_MIXED")) cfg.mixedPc = mixedModelsParse(m);
+        fe.extras = menuMixedRows(cfg, hooks);
+        fe.extrasTitle = "Mixed Models";
+        fe.extrasTab = -1;
+        fe.screenExtras();
     } else if (screen == 3 || screen == 115|| (screen >= 10 && screen < 10 + kMenuCategories)) {   // a category's page
         const int cat = screen == 3 ? 0 : screen == 115 ? kCatSystem : screen - 10;   // (3: Video; 115: System)
         fe.extras = menuCategoryRows(cat, cfg, hooks);
@@ -4094,6 +4241,11 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
         fe.onJukebox = [](int) {};
         fe.screenJukebox();
     } else if (screen == 123 || screen == 124) {   // feat29: the start-up splash: 123 the SEGA logo, 124 the title art
+        if (const char* sp = std::getenv("HOTD_FE_SPLASH")) {   // (menu141: a splash screen mod's folder, GitHub #83)
+            std::string log;
+            loadSplashFolder(fe, sp, log);
+            std::printf("front end: splash mod: %s\n", log.c_str());
+        }
         fe.splashStart(0, screen == 124);
     } else if (screen == 17) {   // the Gallery (no model: the page only; lang: setup gives an entry's texts)
         if (setup) setup(fe);
@@ -4178,7 +4330,12 @@ int frontendShot(const std::string& pcInstall, const std::string& png, int cx, i
             if (ready & (1 << p)) fe.pcReady[p] = fe.pcChars[p] != 0;
         fe.screenPcMode();
     } else {
-        if (pg >= 1 && pg <= 2) fe.mainMenuGroup(pg);   // menu2: HOTD_FE_PAGE 1 More Modes, 2 Extras
+        // menu2: HOTD_FE_PAGE 1 More Modes, 2 Extras (menu141: 3 The Typing of the Dead 0, 4 Story Mode, 5 Survival,
+        // 6 Horde: Frontend::kGroup*)
+        if (pg >= 1 && pg < Frontend::kGroups) {
+            fe.mainMenuGroup(pg);
+            if (pg == Frontend::kGroupTotd && !fe.startTotdPractice) fe.startTotdPractice = [](bool) {};
+        }
 #if HOTD_HORDE
         if (std::getenv("HOTD_FE_HORDE")) {   // (HOTD_FE_HORDE=1: More Modes with Horde's items, as HOTD_EXPERIMENTAL_MODES builds have)
             fe.hordeSizeValue = []() { return std::string("Normal"); };

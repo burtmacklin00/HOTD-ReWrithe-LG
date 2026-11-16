@@ -93,6 +93,7 @@
 #include "game/preview_art.h"
 #include "game/pause.h"
 #include "game/pads.h"
+#include "game/wiimote.h"
 #include "game/pads_test.h"
 #include "game/keybinds_test.h"
 #include "game/menu_cursor.h"
@@ -181,7 +182,12 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #define _pclose pclose
 #endif
 
+#ifdef HOTD_HAVE_ARCADE_SOUND
 void hotd_scsp_set_chip(int chip);   // sound2: Audio > Sound Chip (src/audio/sound_board.cpp)
+#else
+// The Sound Chip option has no effect when the optional arcade sound board is not built.
+static void hotd_scsp_set_chip(int) {}
+#endif
 
 // leftovers: an environment variable the C runtime's std::getenv sees (SDL_setenv_unsafe sets the process
 // environment on Windows, which the CRT's copy that frontendShot / langTool read does not follow)
@@ -612,8 +618,12 @@ static int gAutofireEvery = 15;   // --autofire-every N (T1): frames between aut
 static int gBossNamesOpt = -1;    // --boss-names full|codenames (spanish3): Gameplay > Boss Names for this run
 static int gClearMarksOpt = -1;   // --hit-marks dots|smooth (old: dithered|see-through) (bugs1 #35): Video > Hit Marks for this run
 static int gShowCrossOpt = -1;   // gunfb: --no-crosshair (0) / --show-crosshair (1): Video > Show Crosshairs for this run
+static int gCutCrossOpt = -1;   // vr141: --cut-crosshairs hide|subtle|show (or 0|1|2): Gameplay > Cut-scene Crosshairs for this run
 static int gFlashSizeOpt = -1;   // gunfb: --shot-flash-size small|arcade|large (or 0|1|2): Video > Shot Flash Size for this run
 static int gTranspOpt = -1;      // fxux: --transparency auto|dots|smooth|dark (or 3|2|1|0): Video > Transparency for this run
+static int gMixedPcOpt = -1;     // mixmodels (#49): --mixed-pc humans,creatures,bosses,world,effects|all|none: Mixed's PC rows for this run
+static int gMixExtrasOpt = -1;  // mixmodels (user 2026-11-13): --mix-extras on|off: Mixed Models > Arcade Extras for this run
+static int gPcRendererOpt = -1;   // pcd3d (#79): --pc-renderer software|d3d: Video > PC Renderer for this run
 static int gSubsModeOpt = -1;   // subs: --subtitles off|original|custom (Gameplay > Subtitles for this run)
 static int gSubsSizeOpt = 0;    // subs: --subtitle-size <percent>
 // fxux (user 2026-11-03: "Settings in the pause menu: the full Options pages over the paused game"): the menus' Options
@@ -630,6 +640,9 @@ static int gVrLaserCfg = -1, gVrCrossCfg = -1;
 // questfb (user 2026-11-10): Gameplay > Hands in Menus (VR) (launcher.ini vrmenuhands=: -1 not set = on, 0 off, 1 on),
 // and the game view whose models the big screen's hands are drawn with (the live attract's, else the game's; null: none)
 static int gVrMenuHandsCfg = -1;
+// vr141 (#86, user 2026-11-12): Gameplay > Gun Hand (VR) (launcher.ini vrgunhand=: -1 not set, vr.ini left_handed
+// decides; 0 right, 1 left): vrComfortApply gives the scene its value each frame (Scene::leftHanded)
+static int gVrGunHandCfg = -1;
 static game::GameView* gVrPanelView = nullptr;
 static std::unique_ptr<vr::Scene> gVr;   // (defined below: "vr (2026-11-03 ...")
 // vrcomfort (user 2026-11-10): Gameplay > View / Screen Distance / Screen Size / Cut-scenes / Comfort Vignette (VR)
@@ -657,6 +670,7 @@ static void vrComfortApply()
     s.view = c.view >= 0 ? c.view : ini.view;
     s.cutscenes = c.cutscenes >= 0 ? c.cutscenes : ini.cutscenes;
     s.vignette = c.vignette >= 0 ? c.vignette != 0 : ini.vignette;
+    gVr->leftHanded = gVrGunHandCfg >= 0 ? gVrGunHandCfg != 0 : ini.gunLeft;   // vr141: Gun Hand (VR)
     s.cinemaDistance = c.dist > 0 ? float(c.dist) : ini.cinemaDistance;
     s.menuDistance = c.dist > 0 ? float(c.dist) : ini.menuDistance;
     if (c.size >= 0) {
@@ -693,7 +707,7 @@ static void liveSettings(game::LaunchConfig& g, const game::LaunchConfig& m, boo
     g.bossCodenames = m.bossCodenames;   // (spanish3: a picture setting, this PC's own)
     g.subtitles = m.subtitles, g.subtitleSize = m.subtitleSize;   // (subs: draw-only)
     g.shotFlashSize = m.shotFlashSize, g.showCrosshairs = m.showCrosshairs;   // (gunfb)
-    g.transparency = m.transparency, g.smooth = m.smooth, g.frameRate = m.frameRate, g.vsync = m.vsync, g.menuFps = m.menuFps;
+    g.transparency = m.transparency, g.pcRenderer = m.pcRenderer, g.smooth = m.smooth, g.frameRate = m.frameRate, g.vsync = m.vsync, g.menuFps = m.menuFps;
     g.gamma = m.gamma, g.blackLevel = m.blackLevel, g.vrr = m.vrr, g.crt = m.crt, g.teamFlash = m.teamFlash, g.holdSkip = m.holdSkip, g.scoreDisplay = m.scoreDisplay;
     std::copy(m.sights, m.sights + 4, g.sights);
     g.music = m.music, g.musicVolume = m.musicVolume, g.sfxVolume = m.sfxVolume, g.musicNumbering = m.musicNumbering;
@@ -714,6 +728,9 @@ static void liveSettings(game::LaunchConfig& g, const game::LaunchConfig& m, boo
     g.vrLaser = m.vrLaser, g.vrCrosshair = m.vrCrosshair;   // vrsight
     gVrLaserCfg = g.vrLaser, gVrCrossCfg = g.vrCrosshair;
     gVrMenuHandsCfg = g.vrMenuHands;   // questfb
+    g.vrGunHand = m.vrGunHand;   // vr141: Gun Hand (VR) (VR is local)
+    gVrGunHandCfg = g.vrGunHand;
+    g.cutCross = m.cutCross;   // vr141: Cut-scene Crosshairs (draw-only)
     g.vrView = m.vrView, g.vrScreenDist = m.vrScreenDist, g.vrScreenSize = m.vrScreenSize, g.vrCutscenes = m.vrCutscenes;
     g.vrVignette = m.vrVignette;   // vrcomfort (VR is local)
     vrComfortTake(g);
@@ -1389,6 +1406,20 @@ static constexpr bool kHordeMode = HOTD_HORDE != 0;
 // Survival's arenas a build offers (user 2026-11-05: "don't make chapter 2, 3, 4 [maps] playable to the public until I
 // say so"); survpub (user 2026-11-10: Chapter 3's platform and Chapter 4's Magician's roof playable in the public builds
 // too, from v1.4.0): every build, public or dev, has all of them
+// menu141 (GitHub #83): the On splash screen mod's folder ("": none; applyMods), its pictures for the boot's splash
+static std::string gSplashModDir;
+static bool splashModLoad(game::Frontend& fe)
+{
+    fe.setCustomSplash(0, {}, 0, 0);
+    fe.setCustomSplash(1, {}, 0, 0);
+    if (gSplashModDir.empty())
+        return false;
+    std::string log;
+    const int n = game::loadSplashFolder(fe, gSplashModDir, log);
+    SDL_Log("[mods] splash screen: %s", log.c_str());
+    return n > 0;
+}
+
 static int survivalArenaCount()
 {
     return int(game::survivalArenas().size());
@@ -1920,14 +1951,14 @@ static std::function<void(int)> gChapterChanged;
 struct ViewPrefetch {
     std::string key;
     std::future<std::unique_ptr<hotd::game::GameView::Prepared>> job;
-    static std::string keyOf(int chapter, const std::string& pcDir, int blood)
+    static std::string keyOf(int chapter, const std::string& pcDir, int blood, hotd::game::ModelMix mix = {})
     {
-        return std::to_string(chapter) + "|" + pcDir + "|" + std::to_string(blood);
+        return std::to_string(chapter) + "|" + pcDir + "|" + std::to_string(blood) + (mix.on && !pcDir.empty() ? "|mix" + std::to_string(mix.pc) + (mix.extras ? "" : "x") : "");
     }
     void start(const std::string& regions, const std::string& dumps, const std::string& texsets, int chapter,
-               const std::string& pcDir, int blood)
+               const std::string& pcDir, int blood, hotd::game::ModelMix mix = {})
     {
-        const std::string k = keyOf(chapter, pcDir, blood);
+        const std::string k = keyOf(chapter, pcDir, blood, mix);
         if (k == key || chapter < 0 || chapter > 3 || std::getenv("HOTD_NO_VIEW_PREFETCH"))
             return;
         if (job.valid() && job.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
@@ -1936,15 +1967,15 @@ struct ViewPrefetch {
             job.get();   // (another chapter or setting: dropped)
         key = k;
         job = std::async(std::launch::async, [=] {
-            return hotd::game::GameView::prepare(regions, dumps, texsets, chapter, pcDir, blood, true);
+            return hotd::game::GameView::prepare(regions, dumps, texsets, chapter, pcDir, blood, true, mix);
         });
         SDL_Log("view: chapter %d's world: preparing ahead", chapter + 1);
     }
-    std::unique_ptr<hotd::game::GameView::Prepared> take(int chapter, const std::string& pcDir, int blood)
+    std::unique_ptr<hotd::game::GameView::Prepared> take(int chapter, const std::string& pcDir, int blood, hotd::game::ModelMix mix = {})
     {
         if (!job.valid())
             return nullptr;
-        const bool same = key == keyOf(chapter, pcDir, blood);
+        const bool same = key == keyOf(chapter, pcDir, blood, mix);
         key.clear();
         std::unique_ptr<hotd::game::GameView::Prepared> p = job.get();
         return same ? std::move(p) : nullptr;   // (another chapter or setting: dropped, its memory freed)
@@ -1963,6 +1994,38 @@ struct ViewPrefetch {
     }
 };
 static ViewPrefetch gViewPrefetch;
+// mixmodels (GitHub #49): the view's model source for a config: the PC files for Models: PC or Mixed (pcOk: they are
+// there), and Mixed's rows (off for Arcade / PC: the view as before). The Quest has no Mixed (both sets' memory at
+// once; the menu hides it): a launcher.ini's Mixed is the arcade's there
+static int modelsOf(const hotd::game::LaunchConfig& c)
+{
+    return c.models == 2 && hotd::game::menuQuest ? 0 : c.models;
+}
+static std::string viewPcDirOf(const hotd::game::LaunchConfig& c, bool pcOk = true)
+{
+    return (modelsOf(c) == 1 || modelsOf(c) == 2) && pcOk ? c.pc : std::string();
+}
+static hotd::game::ModelMix viewMixOf(const hotd::game::LaunchConfig& c)
+{
+    hotd::game::ModelMix m;
+    m.on = modelsOf(c) == 2;
+    m.pc = uint8_t(c.mixedPc & hotd::game::kMixAll);
+    m.extras = c.mixExtras;   // (Arcade Extras)
+    return m;
+}
+// the PC look (the PC's 640 x 480 picture for the CRT filter ...): Models: PC, or Mixed with the World row on PC
+static bool pcLookOf(const hotd::game::LaunchConfig& c)
+{
+    return modelsOf(c) == 1 || (modelsOf(c) == 2 && ((c.mixedPc >> hotd::game::kMixWorld) & 1));
+}
+// the runtime's model flags (synced online with the Models setting: the settings hash): pcModels = the PC look (Models: PC,
+// or Mixed's World row: the world, the 2D screens, the HUD, the PC-world logic gates), mix = Mixed's rows
+static void runtimeModels(hotd::game::Runtime& r, const hotd::game::LaunchConfig& c, bool pcOk)
+{
+    r.mix = viewMixOf(c);
+    r.mix.on = r.mix.on && pcOk;
+    r.pcModels = (modelsOf(c) == 1 || (r.mix.on && r.mix.pcFor(hotd::game::kMixWorld))) && pcOk;
+}
 // fix5: main's first local: its destructor runs on every return from main, before the statics' destruction
 struct ExitJoin {
     ~ExitJoin() { gViewPrefetch.finish(); }
@@ -4503,6 +4566,8 @@ static int hidApply(game::LaunchConfig& c, const std::string (&keys)[4], const s
     return n;
 }
 static std::function<bool(const SDL_Event&)> gunAssignEvent;
+// Native Wii Remote setup: refresh the live status shown by the Controls pages.
+static std::function<void()> wiimoteMenuRefresh;
 
 // perf (testing, docs/performance.md): HOTD_STARTUP_TIME=1: the window hidden, the launcher's and the menu's first
 // frames logged in ms since the process started ("startup: ..."), then the run ends (with a launcher.ini the launcher
@@ -4688,7 +4753,9 @@ static int langTool(const game::LaunchConfig& cfg, const std::string& exportCode
                           // gallery blood / gallery dismemberment: a part's damage step, the custom colour's label
                           "Damage {n}",
                           // survpub: Survival's arena in More Modes' row, the players' page title, the online Game Mode
-                          "Survival Arena: {arena}", "Survival - {arena}", "Survival: {arena}"})
+                          "Survival Arena: {arena}", "Survival - {arena}", "Survival: {arena}",
+                          // menu141: Horde's players page title (More Modes > Horde > a size)
+                          "Horde - {size}"})
         lang::addPattern(p);
     for (const game::SceneView::Actor& ac : game::SceneView::actors())   // actors2: every actor's name (the page shows four)
         lang::tr(ac.name);
@@ -4849,7 +4916,33 @@ static int langTool(const game::LaunchConfig& cfg, const std::string& exportCode
         "FREE CAM  WASD QE move  right-drag look  wheel zoom  Shift / Ctrl speed  C slow cam  F off  Space pause  M slow  R replay  Esc back",
         "Free", "Hard", "Move Up", "Move this mod up the load order: the first texture pack's pictures win",
         "Player {n} - Extra", "R-Drag", "Researcher (1)", "Researcher (5)", "Researcher (6)", "Sample", "Space", "Strong",
-        "Tab", "Very Easy", "Very Hard", "Wheel"};
+        "Tab", "Very Easy", "Very Hard", "Wheel",
+        // Wii Remotes (GitHub PR #85; review 2026-11-12): the host-filled setup pages and the calibration's lines
+        "Wii Remotes", "Configure", "Connect native Bluetooth Wii Remotes, check IR tracking and calibrate each player's aim",
+        "Support", "Enable or disable the native Bluetooth / HID Wii Remote backend.", "Rumble",
+        "Basic vibration on damage, hits and reloads. Turn it off to reduce Wii Remote battery use.", "Scan for Remotes",
+        "Searching...", "Scan", "Search for nearby Wii Remotes. Pair first in the operating system on Linux and macOS.",
+        "Player {n} (4P)", "Connection, infrared tracking, aim calibration and smoothing for this player.", "Support Off",
+        "Connected", "Connected / unassigned", "Disconnected / reserved", "No permission (udev rule)", "Not connected",
+        "Wii Remote: Player {n}", "Connection", "This player's assigned Wii Remote. A disconnected slot remains reserved.",
+        "IR Tracking", "No remote", "{n} dots / Tracking", "{n} dots / No lock",
+        "The infrared sensor bar should be visible to the Wii Remote.", "Battery", "Unknown",
+        "Battery level reported by the Wii Remote.", "Fire Button", "Reload Button", "Confirm Button", "Start / Pause Button",
+        "Choose the Wii Remote button that fires this player's weapon.",
+        "Choose the Wii Remote button that reloads this player's weapon.",
+        "Choose the additional button that confirms menu and pause-menu selections; A always accepts in the pause menu.",
+        "Choose the button that exits the boot attract, joins / continues while waiting, and opens or closes the in-game pause menu.",
+        "Connect this player's Wii Remote first", "Aim Calibration", "Set",
+        "The four-point homography saved for this player's IR aim.", "Calibrate Aim",
+        "Aim at the four targets in order and press A while both IR dots are visible.",
+        "Connect this player's Wii Remote first (Wii Remotes > Scan for Remotes)", "Reset Calibration",
+        "Restore this player's default IR mapping.", "This player has no saved aim calibration", "Aim Smoothing",
+        "Reduce small IR tracking jitter independently for each player.", "Press a button...", "Already used by Fire",
+        "Already used by Reload", "Already used by Confirm", "Already used by Start / Pause", "Button unavailable",
+        "Remote disconnected", "WII REMOTE CALIBRATION", "Player {n}: point at the top left target",
+        "Player {n}: point at the top right target", "Player {n}: point at the bottom right target",
+        "Player {n}: point at the bottom left target", "Press A when both IR dots are visible", "B or Esc: cancel",
+        "Calibration geometry invalid; repeat the four points"};
     int rc = 0;
     if (!exportCode.empty()) {
         std::string err;
@@ -4881,7 +4974,7 @@ static int langTool(const game::LaunchConfig& cfg, const std::string& exportCode
         for (const char* k : kNotes) add(k);
         // survpub: Survival's arenas (the tour's row shows the first) and the texts built with one
         for (const game::SurvivalArena& ar : game::survivalArenas()) add(ar.name);
-        for (const char* k : {"Survival Arena: {arena}", "Survival - {arena}", "Survival: {arena}", "Survival Arena",
+        for (const char* k : {"Survival Arena: {arena}", "Survival - {arena}", "Survival: {arena}", "Survival Arena", "Horde - {size}",
                               "Where everyone fights the rounds"})   // (the online Host page's row)
             add(k);
         const auto subs = subtitleTable(regions);
@@ -5257,6 +5350,11 @@ int main(int argc, char* argv[])
             return bad ? 1 : 0;
         }
         if (a == "--no-crosshair" || a == "--show-crosshair") { gShowCrossOpt = a == "--show-crosshair" ? 1 : 0; continue; }   // (gunfb)
+        if (a == "--cut-crosshairs") {   // vr141 (#80)
+            const std::string v = next();
+            gCutCrossOpt = v == "hide" ? 0 : v == "subtle" ? 1 : v == "show" ? 2 : std::clamp(std::atoi(v.c_str()), 0, 2);
+            continue;
+        }
         if (a == "--shot-flash-size") {   // gunfb: Video > Shot Flash Size
             const std::string v = next();
             gFlashSizeOpt = v == "small" || v == "0" ? 0 : v == "large" || v == "2" ? 2 : 1;
@@ -5266,6 +5364,20 @@ int main(int argc, char* argv[])
         if (a == "--hit-marks") {   // bugs1 (#35): Video > Hit Marks (fxux: the menu's words too)
             const std::string v = next();
             gClearMarksOpt = v == "see-through" || v == "smooth" ? 1 : 0;
+            continue;
+        }
+        if (a == "--pc-renderer") {   // pcd3d (#79): Video > PC Renderer
+            const std::string v = next();
+            gPcRendererOpt = v == "d3d" || v == "direct3d" ? 1 : 0;
+            continue;
+        }
+        if (a == "--mix-extras") {   // (user 2026-11-13: Mixed Models > Arcade Extras)
+            const std::string v = next();
+            gMixExtrasOpt = v == "off" || v == "0" ? 0 : 1;
+            continue;
+        }
+        if (a == "--mixed-pc") {   // mixmodels (#49): Models: Mixed's rows on PC (with --models mixed)
+            gMixedPcOpt = game::mixedModelsParse(next());
             continue;
         }
         if (a == "--transparency") {   // fxux: Video > Transparency (the scripted runs had only launcher.ini for it)
@@ -5458,7 +5570,7 @@ int main(int argc, char* argv[])
         else if (a == "--remove-from-steam") steamAction = 2;
         else if (a == "--steam-test-vdf") steamTestVdf = next();
         else if (a == "--steam-grid-out") steamGridOut = next();
-        else if (a == "--models") models = next() == "pc" ? 1 : 0;
+        else if (a == "--models") { const std::string m = next(); models = m == "pc" ? 1 : m == "mixed" ? 2 : 0; }   // (mixmodels: mixed)
         else if (a == "--sound") { const std::string s = next(); soundOpt = s == "arcade" ? 1 : s == "pc" ? 2 : 0; }
         else if (a == "--difficulty") difficulty = std::clamp(std::atoi(next().c_str()), 0, 4);
         else if (a == "--lives") lives = std::clamp(std::atoi(next().c_str()), 0, 11);
@@ -5993,6 +6105,14 @@ int main(int argc, char* argv[])
         std::map<std::string, std::string> hermitHeadValues;   // (the Hermit Fly Head Mod, user 2026-11-09)
         game::hermitHeadConfigure(codeMod("hermithead", hermitHeadValues), hermitHeadValues);
         game::magicianAfterimageConfigure(rainbowOn, rainbowValues);   // (GitHub #54: the Magician's afterimages, Rainbow Blood's)
+        // menu141 (GitHub #83, docs/modding.md "Splash screens"): the highest On splash screen mod's folder (the boot's
+        // splash takes its pictures: gSplashModDir)
+        gSplashModDir.clear();
+        for (const ModPack& p : act)
+            if (p.type == "splash" && !p.dir.empty()) {
+                gSplashModDir = p.dir;
+                break;
+            }
         act.erase(std::remove_if(act.begin(), act.end(), [](const ModPack& p) { return p.type != "textures"; }), act.end());
         texturePacks().setActive(std::move(act));
     };
@@ -6098,6 +6218,7 @@ int main(int argc, char* argv[])
     gVrDualCfg = cfg.vrDual;   // vr4: Gameplay > Dual Pistols (VR) (--vr-dual over it)
     gVrLaserCfg = cfg.vrLaser, gVrCrossCfg = cfg.vrCrosshair;   // vrsight: Laser (VR) / Crosshair (VR)
     gVrMenuHandsCfg = cfg.vrMenuHands;   // questfb: Hands in Menus (VR)
+    gVrGunHandCfg = cfg.vrGunHand;   // vr141: Gun Hand (VR)
     vrComfortTake(cfg);   // vrcomfort: View / Screen Distance / Screen Size / Cut-scenes / Comfort Vignette (VR)
     if (scoreDisplayOpt) cfg.scoreDisplay = true;
     if (gSubsModeOpt >= 0) cfg.subtitles = gSubsModeOpt;   // (subs)
@@ -6107,8 +6228,12 @@ int main(int argc, char* argv[])
     if (gClearMarksOpt >= 0) cfg.clearMarks = gClearMarksOpt != 0;
     if (gBossNamesOpt >= 0) cfg.bossCodenames = gBossNamesOpt != 0;
     if (gShowCrossOpt >= 0) cfg.showCrosshairs = gShowCrossOpt != 0;   // (gunfb)
+    if (gCutCrossOpt >= 0) cfg.cutCross = gCutCrossOpt;   // (vr141)
     if (gFlashSizeOpt >= 0) cfg.shotFlashSize = gFlashSizeOpt;
     if (gTranspOpt >= 0) cfg.transparency = gTranspOpt;
+    if (gMixedPcOpt >= 0) cfg.mixedPc = gMixedPcOpt;   // (mixmodels)
+    if (gMixExtrasOpt >= 0) cfg.mixExtras = gMixExtrasOpt != 0;
+    if (gPcRendererOpt >= 0) cfg.pcRenderer = gPcRendererOpt;
     if (gameTextOpt >= 0) cfg.gameText = gameTextOpt;
     if (gameSpeedOpt >= 0) cfg.gameSpeed = gameSpeedOpt == 2 ? -1 : gameSpeedOpt;
     if (frameRateOpt >= -1) cfg.frameRate = frameRateOpt;
@@ -6399,7 +6524,9 @@ int main(int argc, char* argv[])
         ns.event = uint8_t(std::clamp(event, 0, 255));
         ns.seats = uint8_t(c.players >= 3 ? 4 : 2);   // the 4P mode online: two PCs, two seats each (docs/coop4.md phase 7)
         ns.players = uint8_t(std::clamp(c.players, 1, int(ns.seats)));
-        ns.models = uint8_t(c.models == 1 ? 1 : 0);
+        // mixmodels (#49): Mixed: 0x80 + its PC rows (the host's, as its Models: every PC draws the host's choice and the
+        // rows that steer the logic (the #52 / #81 gates, the cut creatures) match; a build without Mixed refuses the code)
+        ns.models = uint8_t(modelsOf(c) == 2 ? 0x80 | (c.mixedPc & game::kMixAll) | (c.mixExtras ? 0 : 0x40) : c.models == 1 ? 1 : 0);   // (0x40: Arcade Extras off)
         ns.difficulty = uint8_t(std::clamp(c.difficulty, 0, 4));
         ns.lives = uint8_t(game::livesCodeValid(c.lives) ? c.lives : 9);   // (#30: a pair's code too)
         ns.blood = uint8_t(std::clamp(c.blood, 0, 5));
@@ -6465,7 +6592,9 @@ int main(int argc, char* argv[])
         }
         chapterOpt = ns.chapter;
         event = ns.event;
-        c.players = ns.players, c.models = ns.models, c.difficulty = ns.difficulty, c.lives = ns.lives;
+        c.players = ns.players, c.difficulty = ns.difficulty, c.lives = ns.lives;
+        c.models = (ns.models & 0x80) ? 2 : ns.models;   // (mixmodels: Mixed, its rows)
+        if (ns.models & 0x80) c.mixedPc = ns.models & game::kMixAll, c.mixExtras = (ns.models & 0x40) == 0;
         c.blood = ns.blood, c.sound = ns.sound, c.cuts = ns.cuts != 0, c.gameSpeed = ns.gameSpeed, c.sonic = ns.sonic;
         c.autoReload = ns.autoReload != 0;
         c.gameText = ns.gameText;
@@ -6546,7 +6675,7 @@ int main(int argc, char* argv[])
         if (!hosting) {   // the host's game
             netApply(ns, cfg);
             std::printf("[net] the host's game: chapter %d event %d, %d player(s), %s models, difficulty %d, Sonic Mode %s, game speed %s, 4P boss +%d %% / enemy +%d %%\n",
-                        ns.chapter + 1, ns.event, ns.players, ns.models ? "PC" : "arcade", ns.difficulty, game::sonicKey(ns.sonic),
+                        ns.chapter + 1, ns.event, ns.players, (ns.models & 0x80) ? "Mixed" : ns.models ? "PC" : "arcade", ns.difficulty, game::sonicKey(ns.sonic),
                         ns.gameSpeed ? "60 Hz" : "arcade", int(ns.boss4p), int(ns.enemy4p));
         }
         if (!hosting && gNet->gameSettings().bossMode)   // (the host logged it at its start)
@@ -6838,7 +6967,7 @@ int main(int argc, char* argv[])
             }
         }
         r.routeForce = routeForce;
-        r.pcModels = cfg.models == 1 && pcFilesOk;
+        runtimeModels(r, cfg, pcFilesOk);   // (mixmodels: pcModels and Mixed's rows)
         r.fbiScreen = cfg.fbi || fbiOpt;
         r.log = [](const std::string& s) { SDL_Log("[runtime] %s", s.c_str()); };
         if (frames >= 0)
@@ -6858,7 +6987,7 @@ int main(int argc, char* argv[])
         r.jaText = (gNet ? gNet->gameSettings().gameText : cfg.gameText) == 1;
         r.teammateFlash = cfg.teamFlash;   // Teammate Flashes (draws only; each PC its own)
         r.hideMarks = gTrailer;   // (--trailer)
-        r.hideSparks = !cfg.hitSparks, r.shotFlashScale = game::shotFlashScaleOf(cfg.shotFlashSize), r.hideMuzzle = !cfg.muzzleFlash; r.hideBlood = !cfg.bloodParticles; r.transparency = cfg.transparency;
+        r.hideSparks = !cfg.hitSparks, r.shotFlashScale = game::shotFlashScaleOf(cfg.shotFlashSize), r.hideMuzzle = !cfg.muzzleFlash; r.hideBlood = !cfg.bloodParticles; r.transparency = cfg.transparency; r.pcD3d = cfg.pcRenderer == 1;
         if (gTotd && !gNet)   // (totd5: TotD 0's shots: a small flash, no muzzle; as the loop's below)
             r.shotFlashScale = std::min(r.shotFlashScale, 0.25f), r.hideMuzzle = true;
         r.scene4p = cfg.scene4p;   // players 3 / 4's cut-scene variations (draws only; each PC its own)
@@ -7162,10 +7291,10 @@ int main(int argc, char* argv[])
             gl::FramebufferRenderbuffer(gl::FRAMEBUFFER, gl::DEPTH_ATTACHMENT, gl::RENDERBUFFER, rr.depth);
             if (gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE) { std::fprintf(stderr, "render: framebuffer incomplete\n"); return 1; }
             rr.view = std::make_unique<game::GameView>();
-            const std::string pcDir = cfg.models == 1 ? cfg.pc : std::string();
+            const std::string pcDir = viewPcDirOf(cfg);   // (mixmodels: PC or Mixed)
             const auto v0 = std::chrono::steady_clock::now();
             const int vc = int(host.mem().at<uint8_t>(game::A::G::chapter));   // slots past Chapter 4: 6 = Chapter 4's world
-            if (!rr.view->init(regions, dumps, texsets, vc >= 4 ? (vc == 6 ? 3 : 0) : vc, err, pcDir, viewBlood())) {
+            if (!rr.view->init(regions, dumps, texsets, vc >= 4 ? (vc == 6 ? 3 : 0) : vc, err, pcDir, viewBlood(), viewMixOf(cfg))) {
                 std::fprintf(stderr, "render: %s\n", err.c_str());
                 return 1;
             }
@@ -7177,6 +7306,7 @@ int main(int argc, char* argv[])
             rr.hud.maxAspect = cfg.aspect == 2 ? 1.6f : 0.0f;
             std::copy(cfg.sights, cfg.sights + 4, rr.hud.sights);
             rr.hud.showSights = cfg.showCrosshairs;   // (gunfb)
+            rr.hud.cutSights = cfg.cutCross;   // (vr141: Cut-scene Crosshairs)
             rr.hud.customDirs = xhairDirs;
             rr.hud.widescreen = cfg.aspect != 1;
             rr.hud.widen2D = cfg.widen2d == 0;   // wide2d
@@ -7194,7 +7324,7 @@ int main(int argc, char* argv[])
             for (gl::GLenum e = gl::GetError(); e != 0; e = gl::GetError())
                 std::printf("render: GL error 0x%X after the set-up\n", e);
             // crt: the filter over the offscreen picture (--crt / launcher.ini crt=); the arcade's 384 lines, the PC's 480
-            const int crtLines = cfg.models == 1 ? 480 : 384, crtAcross = cfg.models == 1 ? 640 : 496;
+            const int crtLines = pcLookOf(cfg) ? 480 : 384, crtAcross = pcLookOf(cfg) ? 640 : 496;
             const CrtSettings crtSet = cfg.crt;
             gCrt.configure(crtSet, crtLines, crtAcross);
             if (crtSet.preset != 0)
@@ -7682,7 +7812,7 @@ int main(int argc, char* argv[])
             // perf: the chapter clear prepares the next chapter's view on a worker (ViewPrefetch), as the window does
             gViewTick = [&](game::Runtime& rt) {
                 if (const int c = rt.mem.at<int8_t>(game::A::G::chapter); rr.view && rt.clear.active && c >= 0 && c < 3)
-                    gViewPrefetch.start(regions, dumps, texsets, c + 1, cfg.models == 1 ? cfg.pc : std::string(), viewBlood());
+                    gViewPrefetch.start(regions, dumps, texsets, c + 1, viewPcDirOf(cfg), viewBlood(), viewMixOf(cfg));
             };
         }
         gChapterChanged = [&](int c) {
@@ -7691,11 +7821,11 @@ int main(int argc, char* argv[])
                 const auto l0 = std::chrono::steady_clock::now();
                 rr.view->shutdown();   // perf: the old world's GL buffers and textures (were left behind: +250 MB a chapter)
                 rr.view = std::make_unique<game::GameView>();
-                const std::string pcDir = cfg.models == 1 ? cfg.pc : std::string();
-                std::unique_ptr<game::GameView::Prepared> ready = gViewPrefetch.take(c, pcDir, viewBlood());
+                const std::string pcDir = viewPcDirOf(cfg);   // (mixmodels: PC or Mixed)
+                std::unique_ptr<game::GameView::Prepared> ready = gViewPrefetch.take(c, pcDir, viewBlood(), viewMixOf(cfg));
                 if (ready)
                     std::printf("render: chapter %d's view was prepared ahead\n", c + 1);
-                if (!(ready ? rr.view->finish(std::move(ready), err) : rr.view->init(regions, dumps, texsets, c, err, pcDir, viewBlood()))) {
+                if (!(ready ? rr.view->finish(std::move(ready), err) : rr.view->init(regions, dumps, texsets, c, err, pcDir, viewBlood(), viewMixOf(cfg)))) {
                     std::printf("render: chapter %d: %s (drawing stops)\n", c + 1, err.c_str());
                     gRenderFrame = nullptr;
                 }
@@ -7945,6 +8075,14 @@ int main(int argc, char* argv[])
             std::printf("vr menu hands test: %d big-screen frames, %d with the hands drawn (Hands in Menus %s)\n", t.panelFrames,
                         t.panelHandFrames, gVrMenuHandsCfg != 0 ? "on" : "off");   // (questfb)
             ok = ok && t.handsShownOutside == 0 && t.handsHiddenInControl == 0;
+            std::printf("vr fade-in test: %d creatures faded in (first seen outside the flat view; fade_in %.2f s%s), %d frames "
+                        "with one fading\n", t.fadeIns, double(gVr->settings.fadeIn), gVr->settings.fadeInAll ? ", all" : "",
+                        t.fadeInFrames);   // (vr141 #78)
+            if (gVr->leftHanded) {   // vr141 (#86): Gun Hand (VR) = Left: the gun on the left controller (the round trips above through it)
+                std::printf("vr left-handed test: %d frames with the gun tracked, %d of them on the left controller (left of the head)\n",
+                            t.leftyFrames, t.leftyGunLeft);
+                ok = ok && t.leftyFrames > 0 && t.leftyGunLeft == t.leftyFrames;
+            }
             if (gVr->settings.vignette)   // bugs7: the comfort vignette ignores camera cuts (vr.ini vignette = on)
                 std::printf("vr vignette test: %d camera cuts ignored; the vignette over half %d frames\n", t.vignetteCuts,
                             t.vignetteOnFrames);
@@ -8693,7 +8831,24 @@ int main(int argc, char* argv[])
     Gun guns[game::kInputPlayers];   // players 3 / 4: the 4P mode (docs/coop4.md)
     // pads (game/pads.h): gamepads (stick / gyro aim) and light guns (absolute pointer devices) per player
     game::Pads pads;
+    // Keep the Wii Remote adapter beside Pads/LightGuns: it feeds the same GunState and pause structures,
+    // but its native HID backend owns discovery and device I/O. Support stays opt-in through wiimotes.ini;
+    // the environment switch is a development/test shortcut, not a new default.
+    game::Wiimotes wiimotes;
     pads.virtualOnly = !inputTestFile.empty() || std::getenv("HOTD_GALLERY_SHOT") || std::getenv("HOTD_JUKEBOX_SHOT") || std::getenv("HOTD_CURSOR_TEST");   // the input test: its own virtual pads only (a real pad plugged in changes nothing)
+    // review 2026-11-12: the tests and picture runs leave the Wii Remotes out entirely (no backend, no scans, no
+    // input): a remote switched on near the test PC changes nothing
+    wiimotes.disabled = pads.virtualOnly || !shotAt.empty() || std::getenv("HOTD_MENU_SHOT") || std::getenv("HOTD_MENU_TYPE") ||
+                        std::getenv("HOTD_SCENE_TEST") || std::getenv("HOTD_PREVIEW_TEST");
+    // native Bluetooth Wii Remotes; off unless opted in in this file. Launch: already-paired remotes only (review
+    // 2026-11-12: the Bluetooth search / pairing only from Options > Controls > Wii Remotes > Scan for Remotes)
+    wiimotes.Load(cache + "wiimotes.ini");
+    if (const char* wii = std::getenv("HOTD_WII_REMOTES"); wii && std::string(wii) == "1" && !wiimotes.disabled) {
+        wiimotes.settings.enabled = true;
+        wiimotes.Reconnect();
+    }
+    if (wiimotes.settings.enabled && !wiimotes.disabled)
+        SDL_Log("wiimotes: support on: reconnecting paired remotes (the Bluetooth search only from Scan for Remotes)");
     game::LightGuns lightGuns;
     gLightGuns = &lightGuns;
     lightGuns.setHidIds(gHidIds);
@@ -8919,8 +9074,9 @@ int main(int argc, char* argv[])
     struct StillImg { int w = 0, h = 0; std::vector<uint8_t> rgba; };
     std::future<StillImg> stillJob;
     std::future<void> stillWrite;
+    std::string liveMixTag;   // mixmodels: Models: Mixed, its rows (each mix's stills kept apart; "": Arcade / PC)
     auto stillFile = [&](const std::string& pcDir, int blood) {
-        return cache + "menu_backdrop_" + (pcDir.empty() ? "arcade" : "pc") + "_" + std::to_string(blood) + ".png";
+        return cache + "menu_backdrop_" + (pcDir.empty() ? "arcade" : "pc") + liveMixTag + "_" + std::to_string(blood) + ".png";
     };
     // menufb (user 2026-10-26: "with the live background turned off ... show the other scenes but just freeze frame
     // them like a screensaver"): the attract's scenes as stills, saved once per models / blood colour (slide 0 the
@@ -8933,10 +9089,10 @@ int main(int argc, char* argv[])
     constexpr Uint64 kSlideNs = 8000000000ull, kSlideFadeNs = 1200000000ull;
     auto slideFile = [&](const std::string& pcDir, int blood, int k) {
         return k == 0 ? stillFile(pcDir, blood)
-                      : cache + "menu_backdrop_" + (pcDir.empty() ? "arcade" : "pc") + "_" + std::to_string(blood) + "_s" + std::to_string(k) + ".png";
+                      : cache + "menu_backdrop_" + (pcDir.empty() ? "arcade" : "pc") + liveMixTag + "_" + std::to_string(blood) + "_s" + std::to_string(k) + ".png";
     };
     auto slidesDoneFile = [&](const std::string& pcDir, int blood) {
-        return cache + "menu_backdrop_" + (pcDir.empty() ? "arcade" : "pc") + "_" + std::to_string(blood) + "_slides.done";
+        return cache + "menu_backdrop_" + (pcDir.empty() ? "arcade" : "pc") + liveMixTag + "_" + std::to_string(blood) + "_slides.done";
     };
     std::string slideKey;              // the models / blood the slides below are for
     bool slideHave[kSlides] = {};      // its file is there (or being written)
@@ -8989,7 +9145,10 @@ int main(int argc, char* argv[])
             fe.liveHold = false;
             return;
         }
-        const std::string pcDir = menu.cfg.models == 1 && menu.pcOk ? menu.cfg.pc : std::string();
+        const std::string pcDir = viewPcDirOf(menu.cfg, menu.pcOk);   // (mixmodels: PC or Mixed)
+        game::ModelMix liveMix = viewMixOf(menu.cfg);
+        liveMix.on = liveMix.on && !pcDir.empty();
+        liveMixTag = liveMix.on ? "_mix" + std::to_string(liveMix.pc) + (liveMix.extras ? "" : "x") : std::string();
         // menus3 (user 2026-10-28: Blood Color Custom "is super laggy on my 5080"): each step of a dragged colour bar was
         // another custom colour, so another key: the live attract loaded again (a runtime and a view) every step. Now the
         // arcade models take a new custom colour at once (GameView::setBloodCustom: their palette entry 1023), one load
@@ -9006,7 +9165,7 @@ int main(int argc, char* argv[])
         const int blood = !bloodCustom ? bloodNow : pcDir.empty() ? PcConfig::kBloodCustom : bloodPc;
         if (liveView && pcDir.empty())
             liveView->setBloodCustom(bloodCustom ? (bloodNow & 0xFFFFFF) : -1);
-        const std::string key = pcDir + "|" + std::to_string(blood);
+        const std::string key = pcDir + "|" + std::to_string(blood) + liveMixTag;
         // the still for these models / blood colour: read on a worker, shown until the live picture comes
         if (key != stillKey && key != stillJobKey && key != liveFailedKey && !stillJob.valid()) {
             stillJobKey = key;
@@ -9177,14 +9336,14 @@ int main(int argc, char* argv[])
             }
             liveJobKey = key;
             const std::string rg = regions, dm = dumps, ts = texsets;
-            liveJob = std::async(std::launch::async, [rg, dm, ts, pcDir, blood] {
+            liveJob = std::async(std::launch::async, [rg, dm, ts, pcDir, blood, liveMix] {
                 LivePrep p;
                 p.host = std::make_unique<game::Host>();
                 if (!p.host->load(rg, std::string(), std::string(), p.err)) {
                     p.host.reset();
                     return p;
                 }
-                p.view = game::GameView::prepare(rg, dm, ts, 0, pcDir, blood, true);
+                p.view = game::GameView::prepare(rg, dm, ts, 0, pcDir, blood, true, liveMix);
                 return p;
             });
             SDL_Log("live attract: loading (%s models)", pcDir.empty() ? "arcade" : "PC");
@@ -9210,7 +9369,7 @@ int main(int argc, char* argv[])
                 r.settings.difficulty = menu.cfg.difficulty;
                 r.settings.lives = menu.cfg.lives;
                 r.settings.bloodColor = menu.cfg.blood == 5 ? 0 : menu.cfg.blood == 4 ? (menu.cfg.models == 1 ? 1 : 0) : menu.cfg.blood;
-                r.pcModels = !pcDir.empty();
+                runtimeModels(r, menu.cfg, !pcDir.empty());   // (mixmodels: pcModels and Mixed's rows)
                 r.fbiScreen = false;   // (a 2D-only screen)
                 r.jaText = menu.cfg.gameText == 1;   // (Game Text: the tutorial's texts)
                 r.apply_settings();
@@ -9262,7 +9421,7 @@ int main(int argc, char* argv[])
         }
         game::Runtime& r = liveHost->runtime();
         // fxux: the menu's draw-only Video settings on the live background too (Transparency stayed at its default)
-        r.transparency = menu.cfg.transparency;
+        r.transparency = menu.cfg.transparency, r.pcD3d = menu.cfg.pcRenderer == 1;
         r.hideSparks = !menu.cfg.hitSparks, r.hideBlood = !menu.cfg.bloodParticles;
         // a frame the backdrop may show: the 3D's modes (game mode 1, the warning screen, is 2D only), not a part's first
         // frames (a part may start on another part's world), the story (mode 9) from its desk / telephone shot (its
@@ -9825,11 +9984,11 @@ int main(int argc, char* argv[])
         if (viewChapter >= 4)   // the slots past Chapter 4 use a chapter's world (0xC0BB0: 4 / 5 Chapter 1's, 6 the ending Chapter 4's)
             viewChapter = viewChapter == 6 ? 3 : 0;
         // perf: the view the menu prepared ahead (ViewPrefetch: Chapter 1 with the menu's settings), else loaded here
-        const std::string viewPc = cfg.models == 1 && pcOk ? cfg.pc : std::string();
-        std::unique_ptr<game::GameView::Prepared> ready = gViewPrefetch.take(viewChapter, viewPc, viewBlood());
+        const std::string viewPc = viewPcDirOf(cfg, pcOk);   // (mixmodels: PC or Mixed)
+        std::unique_ptr<game::GameView::Prepared> ready = gViewPrefetch.take(viewChapter, viewPc, viewBlood(), viewMixOf(cfg));
         if (ready)
             SDL_Log("start: the view was prepared ahead");
-        if (!(ready ? view->finish(std::move(ready), err) : view->init(regions, dumps, texsets, viewChapter, err, viewPc, viewBlood()))) {
+        if (!(ready ? view->finish(std::move(ready), err) : view->init(regions, dumps, texsets, viewChapter, err, viewPc, viewBlood(), viewMixOf(cfg)))) {
             SDL_Log("%s", err.c_str());
             menu.status.push_back("Cannot start: " + err);
             view.reset();
@@ -10348,7 +10507,9 @@ int main(int argc, char* argv[])
                     // (key: pressed instead of the click / Escape; check: keybind's extra check after the step)
                     struct Step { int x, y; int screen; const char* title; const char* what; SDL_Scancode key = SDL_SCANCODE_UNKNOWN; int check = 0; };
                     static const Step kWalk[] = {
-                        {320, 380, 2, nullptr, "main menu > Options: the Options screen"},   // (menu2: the grouped menu, 28 apart from 0xC8)
+                        // (menu141, GitHub #89: the top's five items and Story Mode's / Extras' lists as the PC's six:
+                        // from 0xD0, 32 apart, centres 220 + 32 k; Story Mode, More Modes, Extras, Options, Quit)
+                        {320, 316, 2, nullptr, "main menu > Options: the Options screen"},
                         {48, 396, 100, "Video", "Options > the Video tab: the Video page"},
                         {140, 70, 100, "Audio", "Video > the Audio tab: the Audio page"},
                         // keybind: Controls > Keys & Buttons, Key: Fire clicked, G pressed, Reset Keys, Escape
@@ -10360,28 +10521,28 @@ int main(int argc, char* argv[])
                         {-1, -1, 100, "Controls", "Escape on Keys & Buttons: the Controls page"},
                         {-1, -1, 2, nullptr, "Escape on a category page: Options"},
                         {-1, -1, 1, nullptr, "Escape on Options: the main menu"},
-                        {320, 296, 1, nullptr, "main menu > More Modes: its list"},
-                        {320, 240, 9, nullptr, "More Modes > Chapter Select: its page"},
-                        {-1, -1, 1, nullptr, "Escape on Chapter Select: More Modes"},
-                        {320, 268, 100, "Co-op", "More Modes > Co-op: the Co-op page"},
-                        {-1, -1, 1, nullptr, "Escape on Co-op: More Modes"},
-                        {-1, -1, 1, nullptr, "Escape on More Modes (Back): the main menu"},
-                        {320, 324, 1, nullptr, "main menu > Extras: its list"},
-                        {320, 240, 17, nullptr, "Extras > Gallery: its page"},
+                        {320, 220, 1, nullptr, "main menu > Story Mode: its list"},
+                        {320, 316, 9, nullptr, "Story Mode > Chapter Select: its page"},
+                        {-1, -1, 1, nullptr, "Escape on Chapter Select: Story Mode"},
+                        {320, 348, 100, "Co-op", "Story Mode > Co-op: the Co-op page"},
+                        {-1, -1, 1, nullptr, "Escape on Co-op: Story Mode"},
+                        {-1, -1, 1, nullptr, "Escape on Story Mode (Back): the main menu"},
+                        {320, 284, 1, nullptr, "main menu > Extras: its list"},
+                        {320, 252, 17, nullptr, "Extras > Gallery: its page"},
                         // liveattract: the Gallery's Cut-scenes page (C), its Attract Demo clicked: the attract, a click
                         // back to the page; Escape there: Extras
                         {-1, -1, 19, nullptr, "C on the Gallery: its Cut-scenes page", SDL_SCANCODE_C},
                         {-1, -1, 19, nullptr, "Cut-scenes > Attract Demo, a click: back on the Cut-scenes page", SDL_SCANCODE_UNKNOWN, 6},
                         {-1, -1, 1, nullptr, "Escape on the Cut-scenes page: Extras"},
-                        {320, 268, 20, nullptr, "Extras > Jukebox: its page", SDL_SCANCODE_UNKNOWN, 4},
+                        {320, 284, 20, nullptr, "Extras > Jukebox: its page", SDL_SCANCODE_UNKNOWN, 4},
                         {-1, -1, 1, nullptr, "Escape on the Jukebox: Extras", SDL_SCANCODE_UNKNOWN, 5},
-                        {320, 296, 1, nullptr, "Extras > Back: the main menu"},
-                        {320, 352, 8, nullptr, "main menu > High Scores: the tables"},
-                        {-1, -1, 1, nullptr, "Escape on High Scores: the main menu"},
+                        {320, 316, 8, nullptr, "Extras > High Scores: the tables"},
+                        {-1, -1, 1, nullptr, "Escape on High Scores: Extras"},
+                        {320, 348, 1, nullptr, "Extras > Back: the main menu"},
                         // uxpolish: Quit / Escape on the main menu ask first (Are you sure?); Escape there is No
                         {-1, -1, 21, nullptr, "Escape on the main menu: Quit's question"},
                         {-1, -1, 1, nullptr, "Escape on Quit's question (No): the main menu"},
-                        {320, 408, 21, nullptr, "main menu > Quit: the question"},
+                        {320, 348, 21, nullptr, "main menu > Quit: the question"},
                         {320, 0x148, 1, nullptr, "Quit's question > No: the main menu"},
                     };
                     constexpr int kSteps = int(sizeof kWalk / sizeof kWalk[0]);
@@ -10450,12 +10611,10 @@ int main(int argc, char* argv[])
                     };
                     static const RStep kRemake[] = {
                         {SDLK_UNKNOWN, nullptr, 1, 1, "", nullptr, -1, "Menu Style Remake: the Remake main menu, as wide as the window"},
-                        {SDLK_DOWN, nullptr, 0, 1, "Arcade", nullptr, -1, "Down: the focus on Arcade"},
-                        {SDLK_DOWN, nullptr, 0, 1, "PC Mode", nullptr, -1, "Down: PC Mode"},
-                        {SDLK_DOWN, nullptr, 0, 1, "Boss Mode", nullptr, -1, "Down: Boss Mode"},
+                        // (menu141, GitHub #89: the top is Story Mode, More Modes, Extras, Options, Quit)
+                        {SDLK_DOWN, nullptr, 0, 1, "Story Mode", nullptr, -1, "Down: the focus on Story Mode"},
                         {SDLK_DOWN, nullptr, 0, 1, "More Modes", nullptr, -1, "Down: More Modes"},
                         {SDLK_DOWN, nullptr, 0, 1, "Extras", nullptr, -1, "Down: Extras"},
-                        {SDLK_DOWN, nullptr, 0, 1, "High Scores", nullptr, -1, "Down: High Scores"},
                         {SDLK_DOWN, nullptr, 0, 1, "Options", nullptr, -1, "Down: Options"},
                         {SDLK_UNKNOWN, nullptr, 3, 1, "Options", nullptr, -1, "the live attract behind the menu: running, drawn, none of the menu's keys reached it"},
                         // rescrash (a player's crash: resolution changes while the live attract loaded again): Models
@@ -10489,8 +10648,8 @@ int main(int argc, char* argv[])
                         {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on Options: the main menu"},
                         {SDLK_ESCAPE, nullptr, 9, 21, "No", nullptr, -1, "Escape on the main menu: Quit's question, the focus on No, the main menu's tint"},
                         {SDLK_RETURN, nullptr, 0, 1, "", nullptr, -1, "Enter on No: the main menu"},
-                        {SDLK_UNKNOWN, "More Modes", 0, 1, "", nullptr, -1, "a click on More Modes: its list"},
-                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on More Modes (Back): the main menu"},
+                        {SDLK_UNKNOWN, "Story Mode", 0, 1, "", nullptr, -1, "a click on Story Mode: its list"},
+                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on Story Mode (Back): the main menu"},
                         // liveattract: the Gallery's Attract Demo in the Remake style (Escape back), then the Remake boot
                         {SDLK_UNKNOWN, "Extras", 0, 1, "", nullptr, -1, "a click on Extras: its list"},
                         {SDLK_UNKNOWN, "Gallery", 0, 17, "", nullptr, -1, "a click on Gallery: its page"},
@@ -10501,7 +10660,7 @@ int main(int argc, char* argv[])
                         // remakepages: the other pages in the Remake style: wide, the live attract behind them, the focus
                         // by the arrows (16: a wide Remake page, 17: the hand away first, 18: High Scores' next table,
                         // 19: the Jukebox's next list, 20: the Gallery over the Remake backdrop)
-                        {SDLK_UNKNOWN, "More Modes", 0, 1, "", nullptr, -1, "a click on More Modes: its list"},
+                        {SDLK_UNKNOWN, "Story Mode", 0, 1, "", nullptr, -1, "a click on Story Mode: its list"},
                         {SDLK_UNKNOWN, "Chapter Select", 16, 9, "", nullptr, -1, "a click on Chapter Select: its Remake page, as wide as the window"},
                         {SDLK_RIGHT, nullptr, 17, 9, "Chapter 1", nullptr, -1, "Chapter Select, the hand away, Right: the focus on Chapter 1"},
                         {SDLK_RIGHT, nullptr, 0, 9, "Chapter 2", nullptr, -1, "Right: Chapter 2"},
@@ -10509,17 +10668,22 @@ int main(int argc, char* argv[])
                         {SDLK_RETURN, nullptr, 0, 22, "Start", nullptr, -1, "Enter on Chapter 2: the players' choice, the focus on Start"},
                         {SDLK_ESCAPE, nullptr, 0, 9, "Chapter 2", nullptr, -1, "Escape on the players' choice: Chapter Select again, on Chapter 2"},
                         {SDLK_DOWN, nullptr, 0, 9, "Exit", nullptr, -1, "Down: Exit"},
-                        {SDLK_RETURN, nullptr, 0, 1, "", nullptr, -1, "Enter on Exit: More Modes"},
-                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on More Modes (Back): the main menu"},
+                        {SDLK_RETURN, nullptr, 0, 1, "", nullptr, -1, "Enter on Exit: Story Mode"},
+                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on Story Mode (Back): the main menu"},
+                        {SDLK_UNKNOWN, "More Modes", 0, 1, "", nullptr, -1, "a click on More Modes: its list"},
                         {SDLK_UNKNOWN, "Boss Mode", 16, 7, "", nullptr, -1, "a click on Boss Mode: its Remake page"},
                         {SDLK_RIGHT, nullptr, 17, 7, "Chariot Boss", nullptr, -1, "Boss Mode, the hand away, Right: the Chariot"},
                         {SDLK_RIGHT, nullptr, 0, 7, "Hangedman Boss", nullptr, -1, "Right: the Hanged Man"},
                         {SDLK_RETURN, nullptr, 0, 22, "Start", nullptr, -1, "Enter on the Hanged Man: the players' choice"},
                         {SDLK_ESCAPE, nullptr, 0, 7, "Hangedman Boss", nullptr, -1, "Escape on the players' choice: Boss Mode again, on the Hanged Man"},
-                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on Boss Mode: the main menu"},
+                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on Boss Mode: More Modes"},
+                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on More Modes (Back): the main menu"},
+                        {SDLK_UNKNOWN, "Extras", 0, 1, "", nullptr, -1, "a click on Extras: its list"},
                         {SDLK_UNKNOWN, "High Scores", 16, 8, "", nullptr, -1, "a click on High Scores: its Remake page"},
                         {SDLK_E, nullptr, 18, 8, "", nullptr, -1, "E on High Scores: the next table"},
-                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on High Scores: the main menu"},
+                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on High Scores: Extras"},
+                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on Extras (Back): the main menu"},
+                        {SDLK_UNKNOWN, "Story Mode", 0, 1, "", nullptr, -1, "a click on Story Mode: its list"},
                         // playerpick: PC Mode asks the players first: the last choice (2, player 2 a person) with the
                         // focus / hand on Start; the arrows, Enter on a seat / a number, the 3 key, Q, Escape (nothing
                         // kept); again: Enter at once starts with the choice
@@ -10530,13 +10694,14 @@ int main(int argc, char* argv[])
                         {SDLK_RETURN, nullptr, 34, 22, "1", nullptr, -1, "Enter on 1: 1 player"},
                         {SDLK_3, nullptr, 37, 22, "Start", nullptr, -1, "the 3 key: 3 players, the focus on Start"},
                         {SDLK_Q, nullptr, 32, 22, "Start", nullptr, -1, "Q: one less, 2 players"},
-                        {SDLK_ESCAPE, nullptr, 36, 1, "", nullptr, -1, "Escape: the main menu, nothing kept"},
+                        {SDLK_ESCAPE, nullptr, 36, 1, "", nullptr, -1, "Escape: Story Mode, nothing kept"},
                         {SDLK_UNKNOWN, "PC Mode", 32, 22, "Start", nullptr, -1, "a click on PC Mode again: 2 players, on Start"},
                         {SDLK_RETURN, nullptr, 35, 16, "", nullptr, -1, "Enter (one press): PC Mode's Remake page, the 2 players kept"},
                         {SDLK_DOWN, nullptr, 17, 16, "Start", nullptr, -1, "PC Mode, the hand away, Down: the focus on Start"},
                         {SDLK_DOWN, nullptr, 0, 16, "Exit", nullptr, -1, "Down: Exit"},
                         {SDLK_UP, nullptr, 0, 16, "Start", nullptr, -1, "Up: Start"},
-                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on PC Mode: the main menu"},
+                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on PC Mode: Story Mode"},
+                        {SDLK_ESCAPE, nullptr, 0, 1, "", nullptr, -1, "Escape on Story Mode (Back): the main menu"},
                         {SDLK_UNKNOWN, "Extras", 0, 1, "", nullptr, -1, "a click on Extras: its list"},
                         {SDLK_UNKNOWN, "Jukebox", 16, 20, "", nullptr, -1, "a click on Jukebox: its Remake page"},
                         {SDLK_E, nullptr, 19, 20, "", nullptr, -1, "E on the Jukebox: the next list"},
@@ -10627,8 +10792,8 @@ int main(int argc, char* argv[])
                                 menu.cfg.models ^= 1;
                                 std::string e2;
                                 if (!regions.empty() || arcadeRegions(e2))
-                                    gViewPrefetch.start(regions, dumps, texsets, 0, menu.cfg.models == 1 ? menu.cfg.pc : std::string(),
-                                                        bloodOf(menu.cfg));
+                                    gViewPrefetch.start(regions, dumps, texsets, 0, viewPcDirOf(menu.cfg),
+                                                        bloodOf(menu.cfg), viewMixOf(menu.cfg));
                             }
                             static const int kSizes[][2] = {{640, 480}, {1366, 768}, {801, 601}, {1024, 768}, {1280, 720}, {700, 500}};
                             if (at >= 1 && at <= 26 && gDisplayModeSet) {
@@ -10793,8 +10958,11 @@ int main(int argc, char* argv[])
                             }
                             if (st.act == 26)
                                 ok = ok && fe.galleryRemake() && !fe.galleryRE();
-                            if (st.click && std::string(st.click) == "More Modes")
+                            // (menu141: Chapter Select in Story Mode, Boss Mode in More Modes)
+                            if (st.click && std::string(st.click) == "Story Mode")
                                 ok = ok && fe.widgetCentre("Chapter Select", cx, cy);
+                            if (st.click && std::string(st.click) == "More Modes")
+                                ok = ok && fe.widgetCentre("Boss Mode", cx, cy);
                             if (st.act == 3) {   // liveattract: the live attract runs, draws, gets no input
                                 bool live = liveHost && liveView && fe.liveTex != 0;
                                 if (live) {
@@ -11083,9 +11251,10 @@ int main(int argc, char* argv[])
                     expect(bossModeOpt == 0, "Boss Mode left: no boss kept for the next game (boss mode " + std::to_string(bossModeOpt) + ")");
                     float sc, x0, y0;
                     game::Hud::pictureRect(640, 480, float(lw), float(lh), sc, x0, y0);
-                    // menuart: the mouse onto "Arcade" (640 x 480 (320, 215), the picture fitted to the height) and a
-                    // click: the bony hand's click frames, then the activation (THOTD.EXE 0x420A60 / 0x42095C)
-                    motion(0, float(lw) / 2.0f, y0 + 215.0f * sc, 0, 0);
+                    // menuart: the mouse onto "Story Mode" (640 x 480 (320, 220), the picture fitted to the height; menu141:
+                    // Arcade is in its list, (320, 252)) and a click: the bony hand's click frames, then the activation
+                    // (THOTD.EXE 0x420A60 / 0x42095C)
+                    motion(0, float(lw) / 2.0f, y0 + 220.0f * sc, 0, 0);
                     s.stage = 1;
                     s.wait = 0;
                     return;
@@ -11425,23 +11594,33 @@ int main(int argc, char* argv[])
                     return;
                 }
                 if (s.stage == 1 && ++s.wait < 600) {
-                    if (s.wait == 5 || s.wait == 70)   // the click a few frames after the motion (0x420A60 moves the pointer only while no click runs)
+                    // the click a few frames after the motion (0x420A60 moves the pointer only while no click runs);
+                    // menu141: Story Mode first (5), then Arcade in its list (45)
+                    if (s.wait == 5 || s.wait == 45 || s.wait == 110)
                         click(0, SDL_BUTTON_LEFT);
-                    // playerpick: Arcade asks the players first (the hand on Start); Escape: the main menu; Arcade again,
-                    // then one click (the mouse not moved) starts with the last choice
                     if (s.wait == 40) {
+                        expect(fe.screen() == 1 && fe.mainMenuGroupNow() == game::Frontend::kGroupStory,
+                               "Classic: Story Mode: its list (screen " + std::to_string(fe.screen()) + ")");
+                        float sc, x0, y0;
+                        game::Hud::pictureRect(640, 480, float(lw), float(lh), sc, x0, y0);
+                        motion(0, float(lw) / 2.0f, y0 + 252.0f * sc, 0, 0);
+                    }
+                    // playerpick: Arcade asks the players first (the hand on Start); Escape: Story Mode; Arcade again,
+                    // then one click (the mouse not moved) starts with the last choice
+                    if (s.wait == 80) {
                         expect(fe.screen() == 22 && fe.pickedPlayers() == std::max(1, menu.cfg.players),
                                "Classic: Arcade: the players' choice (screen " + std::to_string(fe.screen()) + ", players " +
                                    std::to_string(fe.pickedPlayers()) + ")");
                         press(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE);
                     }
-                    if (s.wait == 60) {
-                        expect(fe.screen() == 1, "Classic: Escape on the players' choice: the main menu (screen " + std::to_string(fe.screen()) + ")");
+                    if (s.wait == 100) {
+                        expect(fe.screen() == 1 && fe.mainMenuGroupNow() == game::Frontend::kGroupStory,
+                               "Classic: Escape on the players' choice: Story Mode (screen " + std::to_string(fe.screen()) + ")");
                         float sc, x0, y0;
                         game::Hud::pictureRect(640, 480, float(lw), float(lh), sc, x0, y0);
-                        motion(0, float(lw) / 2.0f, y0 + 215.0f * sc, 0, 0);
+                        motion(0, float(lw) / 2.0f, y0 + 252.0f * sc, 0, 0);
                     }
-                    if (s.wait == 100) {
+                    if (s.wait == 140) {
                         expect(fe.screen() == 22, "Classic: Arcade again: the players' choice (screen " + std::to_string(fe.screen()) + ")");
                         click(0, SDL_BUTTON_LEFT);   // (on Start: the hand went there)
                     }
@@ -12191,6 +12370,30 @@ int main(int argc, char* argv[])
                     menuBoardPlay(0xA01000u + uint32_t(c - game::kArcadeSongCue));
                     return;
                 }
+                // deckmusic (GitHub #94, Steam Deck: no menu music, no log to tell why): a menu song cue (launcher.h
+                // menuSongs) always says what became of it in hotd.log, and every way it cannot play from a CD file ends
+                // on the arcade's own song
+                bool menuSong = false;
+                {
+                    int n = 0;
+                    const game::MenuSong* k = game::menuSongs(n);
+                    for (int i = 0; i < n; ++i)
+                        menuSong |= k[i].cue == c;
+                }
+                if (menuSong && !audioOn) {
+                    static bool said = false;
+                    if (!said) SDL_Log("menu music: no sound at all (the \"no sound:\" line above says why)");
+                    said = true;
+                    return;
+                }
+                // a THOTD.EXE whose cue table does not have the song there (another version / a patch: the cue table is
+                // read at the 1998 release's address): the arcade's song
+                if (menuSong && audio.cueType(c) != 3) {
+                    SDL_Log("menu music: THOTD.EXE's cue %d is not a song (type %d, another version of THOTD.EXE?): the arcade's song %#x",
+                            c, audio.cueType(c), 0xA01000u + unsigned(c - 8));
+                    menuBoardPlay(0xA01000u + uint32_t(c - 8));
+                    return;
+                }
                 // no CD file for a menu song (a PC copy without its music, user 2026-10-31): the arcade's own song on the
                 // sound board (the sound test's order: PC cues 8..22 = 0xA01000..0xA0100E)
                 if (audio.cueType(c) == 3 && c >= 8 && c <= 22 && !audio.hasMusicTrack(audio.cueValue(c))) {
@@ -12201,6 +12404,12 @@ int main(int argc, char* argv[])
                 if (audio.cueType(c) == 3 || audio.cueType(c) == 5)   // (another song, or the music / everything off)
                     menuBoardStop();
                 audio.pcCue(c);
+                // deckmusic: the CD file is there but did not open (unreadable, a format the build cannot decode; the
+                // "[sound] music: cannot ..." line above says which): the arcade's song
+                if (menuSong && audio.cueValue(c) != -1 && !audio.musicPlaying()) {
+                    SDL_Log("menu music: the CD file for track %d did not play: the arcade's song %#x", audio.cueValue(c), 0xA01000u + unsigned(c - 8));
+                    menuBoardPlay(0xA01000u + uint32_t(c - 8));
+                }
             };
             fe.onMainMenu = [&](int item) { feAction = item; };
             // PC Mode (docs/pcmode.md): the main menu's item opens screen 16, the character select; its Start -> feAction 16
@@ -13043,6 +13252,7 @@ int main(int argc, char* argv[])
                 gVrDualCfg = menu.cfg.vrDual;   // (vr4: Dual Pistols (VR) at once, the paused game's too)
                 gVrLaserCfg = menu.cfg.vrLaser, gVrCrossCfg = menu.cfg.vrCrosshair;   // (vrsight: the same)
                 gVrMenuHandsCfg = menu.cfg.vrMenuHands;   // (questfb)
+                gVrGunHandCfg = menu.cfg.vrGunHand;   // (vr141: Gun Hand (VR) at once)
                 vrComfortTake(menu.cfg);   // (vrcomfort)
             };
             // vr4: Gameplay > Dual Pistols (VR) only in a VR run (its default: vr.ini dual_pistols)
@@ -13051,6 +13261,7 @@ int main(int argc, char* argv[])
                 // vrsight: Laser (VR) / Crosshair (VR) the same way (their defaults: vr.ini laser / crosshair)
                 hooks.vrLaserDefault = []() { return gVr ? gVr->settings.laser : true; };
                 hooks.vrCrosshairDefault = []() { return gVr ? gVr->settings.crosshair : true; };
+                hooks.vrGunLeftDefault = []() { return gVr ? gVr->ini.gunLeft : false; };   // vr141: Gun Hand (VR) (vr.ini left_handed)
                 hooks.vrComfortDefault = vrComfortDefault;   // vrcomfort: View / Screen ... (VR): vr.ini's values
             }
             hooks.padsChanged = [&]() { pads.configure(menu.cfg); };   // (padfix: Controls > Aim Sensitivity)
@@ -13101,6 +13312,164 @@ int main(int argc, char* argv[])
             hooks.gunWaiting = [&]() { return lightGuns.assigning(); };
             hooks.gunWaitLeft = [&]() { return std::max(0, 10 - int((SDL_GetTicks() - gunWaitAt) / 1000)); };
             hooks.gunConnected = [&](const std::string& key) { return lightGuns.connected(key); };
+
+            // Wii Remotes: the setup menu follows hotd2-re's LightgunMenu pattern. Calibration is a menu
+            // interaction with four on-screen targets; it does not launch or require a game session.
+            static std::function<void(int)> wiimotePlayerPage;
+            static std::function<void()> wiimotePage;
+            auto saveWiimotes = [&]() {
+                if (!wiimotes.Save(cache + "wiimotes.ini"))
+                    SDL_Log("wiimotes: could not save wiimotes.ini");
+            };
+            auto wiimoteStatus = [&wiimotes](int p) {
+                const auto& remote = wiimotes.Status().player[p];
+                if (!wiimotes.settings.enabled) return std::string("Support Off");
+                if (remote.connected) return remote.reserved ? std::string("Connected") : std::string("Connected / unassigned");
+                if (remote.reserved) return std::string("Disconnected / reserved");
+                if (wiimotes.Status().noPermission)   // (Linux: hidraw not readable: docs/wiimotes.md "Linux permissions")
+                    return std::string("No permission (udev rule)");
+                return wiimotes.Status().scanning ? std::string("Searching...") : std::string("Not connected");
+            };
+            // Build the per-player page from live snapshots. Capture p/action by value in row callbacks so
+            // a delayed menu click cannot accidentally act on the loop's later player/action index.
+            wiimotePlayerPage = [&, saveWiimotes, wiimoteStatus](int p) {
+                using X2 = game::Frontend::Extra;
+                std::vector<X2> rows;
+                rows.push_back({"Connection", [&, p]() { return wiimoteStatus(p); }, nullptr,
+                                "This player's assigned Wii Remote. A disconnected slot remains reserved."});
+                rows.push_back({"IR Tracking", [&, p]() {
+                                    const auto& remote = wiimotes.Status().player[p];
+                                    if (!remote.connected) return std::string("No remote");
+                                    return remote.tracking ? std::to_string(remote.dots) + " dots / Tracking" :
+                                                             std::to_string(remote.dots) + " dots / No lock";
+                                }, nullptr, "The infrared sensor bar should be visible to the Wii Remote."});
+                rows.push_back({"Battery", [&, p]() {
+                                    const int battery = wiimotes.Status().player[p].battery;
+                                    return battery < 0 ? std::string("Unknown") : std::to_string(battery) + "%";
+                                }, nullptr, "Battery level reported by the Wii Remote."});
+                static const char* const wiimoteActions[] = {"Fire Button", "Reload Button", "Confirm Button", "Start / Pause Button"};
+                static const char* const wiimoteActionHelp[] = {
+                    "Choose the Wii Remote button that fires this player's weapon.",
+                    "Choose the Wii Remote button that reloads this player's weapon.",
+                    "Choose the additional button that confirms menu and pause-menu selections; A always accepts in the pause menu.",
+                    "Choose the button that exits the boot attract, joins / continues while waiting, and opens or closes the in-game pause menu."
+                };
+                for (int action = 0; action < 4; ++action) {
+                    rows.push_back({wiimoteActions[action], [&, p, action]() {
+                                        return wiimotes.BindingText(p, action);
+                                    }, [&, p, action]() {
+                                        if (!wiimotes.BeginBinding(p, action))
+                                            SDL_Log("wiimotes: Player %d is not connected; cannot remap %s", p + 1,
+                                                    wiimoteActions[action]);
+                                        fe.screenExtras();
+                                    }, wiimoteActionHelp[action]});
+                    rows.back().off = [&, p]() {
+                        const auto& remote = wiimotes.Status().player[p];
+                        return remote.connected && remote.reserved ? std::string() :
+                               std::string("Connect this player's Wii Remote first");
+                    };
+                }
+                rows.push_back({"Aim Calibration", [&, p]() {
+                                    return wiimotes.settings.player[p].calibration.calibrated ? std::string("Set") :
+                                                                                                 std::string("Default");
+                                }, nullptr, "The four-point homography saved for this player's IR aim."});
+                rows.push_back({"Calibrate Aim", []() { return std::string("Start >"); }, [&, p]() {
+                                    if (!wiimotes.StartCalibration(p))
+                                        SDL_Log("wiimotes: Player %d is not connected; calibration not started", p + 1);
+                                    else
+                                        fe.screenExtras();
+                                }, "Aim at the four targets in order and press A while both IR dots are visible."});
+                rows.back().off = [&, p]() {
+                    const auto& remote = wiimotes.Status().player[p];
+                    return remote.connected && remote.reserved ? std::string() :
+                           std::string("Connect this player's Wii Remote first (Wii Remotes > Scan for Remotes)");
+                };
+                rows.push_back({"Reset Calibration", []() { return std::string("Reset"); }, [&, p, saveWiimotes]() {
+                                    wiimotes.settings.player[p].calibration = {};
+                                    saveWiimotes();
+                                    fe.screenExtras();
+                                }, "Restore this player's default IR mapping."});
+                rows.back().off = [&, p]() {
+                    return wiimotes.settings.player[p].calibration.calibrated ? std::string() :
+                           std::string("This player has no saved aim calibration");
+                };
+                rows.push_back({"Aim Smoothing", [&, p]() {
+                                    static const char* const names[] = {"Off", "Light", "Strong"};
+                                    return std::string(names[std::clamp(wiimotes.settings.player[p].smoothing, 0, 2)]);
+                                }, [&, p, saveWiimotes]() {
+                                    auto& smoothing = wiimotes.settings.player[p].smoothing;
+                                    smoothing = (smoothing + 1) % 3;
+                                    saveWiimotes();
+                                }, "Reduce small IR tracking jitter independently for each player."});
+                rows.back().choices = {"Off", "Light", "Strong"};
+                rows.back().choiceNow = [&, p]() { return std::clamp(wiimotes.settings.player[p].smoothing, 0, 2); };
+                rows.back().pickAt = [&, p, saveWiimotes](int k) {
+                    wiimotes.settings.player[p].smoothing = std::clamp(k, 0, 2);
+                    saveWiimotes();
+                };
+                fe.extras = std::move(rows);
+                fe.extrasTitle = "Wii Remote: Player " + std::to_string(p + 1);
+                fe.extrasTab = -1;
+                fe.extrasExit = [&]() {
+                    wiimotes.CancelBinding();
+                    wiimotePage();
+                };
+                fe.screenExtras();
+            };
+            // Global controls (support, rumble, scan) lead to one independent profile page per player.
+            // Settings changes are written immediately so a menu exit or crash does not lose remaps/calibration.
+            wiimotePage = [&, saveWiimotes, wiimoteStatus]() {
+                using X2 = game::Frontend::Extra;
+                std::vector<X2> rows;
+                rows.push_back({"Support", [&]() { return wiimotes.settings.enabled ? std::string("On") : std::string("Off"); },
+                                [&, saveWiimotes]() {
+                                    wiimotes.settings.enabled = !wiimotes.settings.enabled;
+                                    wiimotes.Configure();
+                                    saveWiimotes();
+                                    fe.screenExtras();
+                                }, "Enable or disable the native Bluetooth / HID Wii Remote backend."});
+                rows.push_back({"Rumble", [&]() {
+                                    return wiimotes.settings.rumble ? std::string("On") : std::string("Off");
+                                }, [&, saveWiimotes]() {
+                                    wiimotes.settings.rumble = !wiimotes.settings.rumble;
+                                    saveWiimotes();
+                                    fe.screenExtras();
+                                }, "Basic vibration on damage, hits and reloads. Turn it off to reduce Wii Remote battery use."});
+                rows.push_back({"Scan for Remotes", [&]() {
+                                    return wiimotes.Status().scanning ? std::string("Searching...") : std::string("Scan");
+                                }, [&, saveWiimotes]() {
+                                    wiimotes.Scan();
+                                    saveWiimotes();
+                                    fe.screenExtras();
+                                }, "Search for nearby Wii Remotes. Pair first in the operating system on Linux and macOS."});
+                for (int p = 0; p < game::kWiimotePlayers; ++p) {
+                    rows.push_back({"Player " + std::to_string(p + 1) + (p >= 2 ? " (4P)" : ""),
+                                    [&, p]() { return wiimoteStatus(p); },
+                                    [&, p]() { wiimotePlayerPage(p); },
+                                    "Connection, infrared tracking, aim calibration and smoothing for this player."});
+                    if (p >= 2) rows.back().experimental = []() { return true; };
+                }
+                fe.extras = std::move(rows);
+                fe.extrasTitle = "Wii Remotes";
+                fe.extrasTab = -1;
+                fe.extrasExit = [&]() { openCategory(game::kCatControls); };
+                fe.screenExtras();
+            };
+            hooks.wiimotePage = [&]() { wiimotePage(); };
+            // Device polling continues every game-loop iteration, but rebuilding this menu at 60+ Hz is wasteful.
+            // Refresh connection/calibration text at 4 Hz while leaving gameplay input unthrottled.
+            wiimoteMenuRefresh = [&]() {
+                static Uint64 at = 0;
+                if (fe.screen() != 100 ||
+                    (fe.extrasTitle != "Wii Remotes" && fe.extrasTitle.rfind("Wii Remote: Player ", 0) != 0))
+                    return;
+                const Uint64 now = SDL_GetTicks();
+                if (now - at >= 250) {
+                    at = now;
+                    fe.screenExtras();
+                }
+            };
+
             hooks.gunNote = [&]() { return lightGuns.evdevNote(); };   // (linuxmice: Linux without access to the mice)
             // linuxmice (GitHub #67, "pressing Escape there crashes", Linux): gunPageShown is this block's own lambda,
             // and gunAssignEvent outlives the block: by reference ([&]) it pointed at the block's freed stack (MSVC's
@@ -13337,6 +13706,7 @@ int main(int argc, char* argv[])
             hooks.resetPage = [&, saveCfg](int page) {
                 auto back = [&, page]() {
                     if (page == game::kResetAdvanced) hooks.advancedPage();
+                    else if (page == game::kResetMixed) hooks.mixedPage();   // (mixmodels)
                     else if (page == game::kResetRange) hooks.rangePage();
                     else openCategory(page);
                 };
@@ -13385,6 +13755,13 @@ int main(int argc, char* argv[])
                 const assets::PcSprites* pc = game::sightStyleKept(q.style) <= 2 && hooks.sightSprites ? hooks.sightSprites() : nullptr;
                 game::seatSightArt(q, menu.cfg.models == 1, pc, game::findCustomSights(xhairDirs), seat & 3, wh, out);
                 return out.w > 0;
+            };
+            hooks.mixedPage = [&]() {   // mixmodels (#49): Video > Mixed Models (Esc / Back: Video)
+                fe.extras = game::menuMixedRows(menu.cfg, hooks);
+                fe.extrasTitle = "Mixed Models";
+                fe.extrasTab = -1;
+                fe.extrasExit = [&]() { openCategory(game::kCatVideo); };
+                fe.screenExtras();
             };
             hooks.advancedPage = [&]() {   // advopt: Gameplay's Advanced page (Esc / Back: Gameplay)
                 fe.extras = game::menuAdvancedRows(menu.cfg, hooks);
@@ -13716,6 +14093,8 @@ int main(int argc, char* argv[])
             if (kSurvivalMode) {   // (polish: Survival in the release builds too)
                 fe.survivalArenaValue = []() { return std::string(game::survivalArenas()[size_t(survivalMenuArena)].name); };
                 fe.onSurvivalArena = []() { survivalMenuArena = (survivalMenuArena + 1) % survivalArenaCount(); };
+                // (menu141, GitHub #89: More Modes > Survival lists the arenas; the one picked is played)
+                fe.onSurvivalArenaPick = [](int a) { survivalMenuArena = std::clamp(a, 0, survivalArenaCount() - 1); };
                 fe.startSurvival = [&]() { feSurvival = survivalMenuArena + 1; };
             }
 #if HOTD_HORDE
@@ -13725,6 +14104,7 @@ int main(int argc, char* argv[])
                 fe.startHorde = [&]() { feHorde = true; feAction = 0; };
                 fe.hordeSizeValue = []() { return std::string(game::HordeMode::sizeName(gHordeMenuSize)); };
                 fe.onHordeSize = []() { gHordeMenuSize = gHordeMenuSize % 3 + 1; };
+                fe.onHordeSizePick = [](int s) { gHordeMenuSize = std::clamp(s, 1, 3); };   // (menu141: More Modes > Horde's sizes)
             }
 #endif
             for (int k = 0; k < 4; ++k)
@@ -13962,12 +14342,12 @@ int main(int argc, char* argv[])
     bool netStart2 = false;  // the 4-seat game online: this PC's second seat's start (input slot 1)
     // pads: a pad's / gun's start button as the keys' (netplay: this PC's start through the lockstep; a lost pad: the
     // message only, no pause)
-    pads.onJoin = lightGuns.onJoin = [&](int p) {
+    pads.onJoin = lightGuns.onJoin = wiimotes.onJoin = [&](int p) {
         if (gNet && host.runtime().coop4_on() && p == 1) netStart2 = true;   // (p: the input slot)
         else if (gNet) netStart = true;
         else host.runtime().player_join(p);
     };
-    pads.lostPause = !gNet;
+    pads.lostPause = wiimotes.lostPause = !gNet;
     if (screen == Screen::Launcher && arrow)
         SDL_SetCursor(arrow);
     // setup (user 2026-10-31: "a small fixed-size window about the size of the reference", the 1998 CD's Auto Run
@@ -14104,12 +14484,128 @@ int main(int argc, char* argv[])
             padsPending = false;
         }
         pads.refresh();   // pads: hot-plug on every screen
+        // Snapshot asynchronous HID input before menu/game routing. Calibration and remap capture run on every
+        // screen; their completion flags are persisted here, outside the backend worker thread.
+        wiimotes.Refresh();   // Wiimotes: four independent native HID connections on the platform backend
+        wiimotes.CaptureCalibration();   // menu and game alike: A captures; B cancels the selected player's IR target
+        wiimotes.CaptureBinding();       // the selected player/action captures the next supported Wii Remote button
+        if (wiimotes.bindingChanged) {
+            wiimotes.bindingChanged = false;
+            if (!wiimotes.Save(cache + "wiimotes.ini"))
+                SDL_Log("wiimotes: could not save Wii Remote button bindings");
+            else
+                SDL_Log("wiimotes: button bindings saved");
+        }
+        if (wiimotes.calibrated) {
+            wiimotes.calibrated = false;
+            if (!wiimotes.Save(cache + "wiimotes.ini"))
+                SDL_Log("wiimotes: could not save calibration to wiimotes.ini");
+            else
+                SDL_Log("wiimotes: calibration saved");
+        }
+        float wiimoteMenuX = 0.5f, wiimoteMenuY = 0.5f;
+        int wiimoteMenuPointerPlayer = -1;
+        // Use normalized IR coordinates for the front-end hand cursor. Clicks are translated to front-end input,
+        // not SDL mouse motion/button events; the operating-system cursor is never moved or captured.
+        const bool wiimoteMenuPointer = screen == Screen::Menu &&
+            wiimotes.MenuPointer(wiimoteMenuX, wiimoteMenuY, &wiimoteMenuPointerPlayer);
+        bool wiimoteMenuClick = false;
+        if (screen == Screen::Game && feAttract && !wiimotes.MenuInputSuppressed()) {
+            bool startPressed = false;
+            for (int p = 0; p < game::kWiimotePlayers; ++p) {
+                const auto& remote = wiimotes.Status().player[p];
+                if (!remote.connected || !remote.reserved) continue;
+                const uint16_t startButton = wiimotes.settings.player[p].buttons[3];
+                if (remote.pressed & startButton) {
+                    startPressed = true;
+                    break;
+                }
+            }
+            // The boot-attract page already handles SDL Return/gamepad Start. Inject that same event instead
+            // of creating a second attract-state transition specific to Wii Remotes.
+            if (startPressed) {
+                SDL_Event start{};
+                start.type = SDL_EVENT_KEY_DOWN;
+                start.key.windowID = SDL_GetWindowID(window);
+                start.key.scancode = SDL_SCANCODE_RETURN;
+                start.key.key = SDLK_RETURN;
+                start.key.down = true;
+                SDL_PushEvent(&start); // same "Press Start" / leave-attract path as a gamepad Start
+                start.type = SDL_EVENT_KEY_UP;   // (review 2026-11-12: and its release: no Return left held)
+                start.key.down = false;
+                SDL_PushEvent(&start);
+                wiimotes.ClearEdges();
+            }
+        }
+        // review 2026-11-12: a menu key still held from the Wii Remote when the menu gives way to the game is released
+        // there (its KEY_UP, once) instead of staying down
+        static uint16_t previousWiiMenu = 0;
+        if (screen != Screen::Game || previousWiiMenu != 0) {
+            // Translate each remote's own profile to frontend navigation. The IR pointer below is injected as
+            // FrontendInput coordinates, never as SDL mouse motion or an operating-system cursor.
+            // Front-end navigation has a fixed Wii Remote layout, separate from the remappable gameplay actions.
+            // Menu controls intentionally use a fixed layout (D-pad / A / B), not remappable gameplay actions.
+            // This keeps setup navigation usable even before Fire/Reload bindings have been configured.
+            // These are private accumulator bits, not physical report masks. They let A and B be folded into
+            // the same held-state table as D-pad directions before mapping the result to Enter/Escape.
+            static constexpr uint16_t kWiiMenuConfirm = 0x2000, kWiiMenuBack = 0x8000;
+            uint16_t currentWiiMenu = 0;
+            if (screen != Screen::Game && !wiimotes.MenuInputSuppressed()) {
+                for (int p = 0; p < game::kWiimotePlayers; ++p) {
+                    const auto& remote = wiimotes.Status().player[p];
+                    if (!remote.connected || !remote.reserved) continue;
+                    currentWiiMenu |= remote.buttons & uint16_t(game::wii::Up | game::wii::Down |
+                                                                 game::wii::Left | game::wii::Right);
+                    // A accepts. With IR tracking, the same press clicks the item under this remote's cursor.
+                    if (remote.buttons & game::wii::A) {
+                        if (wiimoteMenuPointer && p == wiimoteMenuPointerPlayer)
+                            wiimoteMenuClick = (remote.pressed & game::wii::A) != 0;
+                        else
+                            currentWiiMenu |= kWiiMenuConfirm;
+                    }
+                    // B backs out. HOME, +, and the profile's gameplay action bindings do not drive menu navigation.
+                    if (remote.buttons & game::wii::B)
+                        currentWiiMenu |= kWiiMenuBack;
+                }
+            }
+            struct WiiMenuKey { uint16_t button; SDL_Scancode scan; SDL_Keycode key; };
+            static constexpr WiiMenuKey menuKeys[] = {
+                {game::wii::Up, SDL_SCANCODE_UP, SDLK_UP},
+                {game::wii::Down, SDL_SCANCODE_DOWN, SDLK_DOWN},
+                {game::wii::Left, SDL_SCANCODE_LEFT, SDLK_LEFT},
+                {game::wii::Right, SDL_SCANCODE_RIGHT, SDLK_RIGHT},
+                {kWiiMenuConfirm, SDL_SCANCODE_RETURN, SDLK_RETURN},
+                {kWiiMenuBack, SDL_SCANCODE_ESCAPE, SDLK_ESCAPE}
+            };
+            // Convert the combined held mask into SDL key transitions. The previous mask prevents a held
+            // direction/confirm button from emitting another key-down every frame.
+            // Several buttons share Enter; combine their state before emitting transitions.
+            for (const auto& k : menuKeys) {
+                const bool down = (currentWiiMenu & k.button) != 0;
+                const bool was = (previousWiiMenu & k.button) != 0;
+                if (down == was) continue;
+                SDL_Event key{};
+                key.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+                key.key.windowID = SDL_GetWindowID(window);
+                key.key.scancode = k.scan;
+                key.key.key = k.key;
+                key.key.down = down;
+                SDL_PushEvent(&key);
+            }
+            previousWiiMenu = currentWiiMenu;
+            if (screen != Screen::Game)
+                wiimotes.ClearEdges();   // menu presses are consumed; none leak into the next game
+        }
         // netplay (an online game may start from the menu): no pause on a lost pad; this PC's input slot 0 plays the
-        // game's player 1 (host) or 2 (client)
-        pads.lostPause = !gNet;
+        // game's player 1 (host) or 2 (client); review 2026-11-12: a lost Wii Remote the same (before: set once at
+        // start-up, so a remote dropping in an online game paused it)
+        pads.lostPause = wiimotes.lostPause = !gNet;
         pads.gamePlayer[0] = gNet ? gNet->localPlayer() : 0;
         pads.gamePlayer[1] = gNet ? (gNet->multi() ? (gNet->secondSeat() > 0 ? gNet->secondSeat() : gNet->localPlayer())
                                      : host.runtime().coop4_on() ? gNet->localPlayer() + 2 : 1 - gNet->localPlayer()) : 1;
+        // Reuse the pad subsystem's local-seat mapping, including online host/client swaps and 4P seats,
+        // so a remote controls the same game player as the corresponding input slot.
+        for (int p = 0; p < game::kInputPlayers; ++p) wiimotes.gamePlayer[p] = pads.gamePlayer[p];
         if (menuAudioHeld && screen != Screen::Menu) {   // left the menu while inactive (the idle -> attract)
             audio.pause(false);
             menuAudioHeld = false;
@@ -14214,7 +14710,9 @@ int main(int argc, char* argv[])
                     // off too; PC Start-up Screens On (Gameplay, default on since pmpick): the PC's SEGA logo and title art in
                     // either style, the attract after them only with Title / Attract on
                     const bool remakeBoot = menu.cfg.menuStyle == 1, pcScreens = menu.cfg.pcSplash;
-                    if (!booted && attractFirst && (cfg.title || remakeBoot || pcScreens)) {   // THOTD's boot: the start-up splash, the attract
+                    // (menu141, GitHub #83: a splash screen mod On: its pictures, shown whatever Title / Attract says)
+                    const bool modSplash = !booted && attractFirst && splashModLoad(fe);
+                    if (!booted && attractFirst && (cfg.title || remakeBoot || pcScreens || modSplash)) {   // THOTD's boot: the start-up splash, the attract
                         auto boot = [&, remakeBoot, pcScreens]() {
                             audio.silence();                           // (the menu's cue 22 waits for the menu)
                             menuBoardStop();                           // (and the arcade menu song: no CD files, user 2026-10-31)
@@ -14510,6 +15008,22 @@ int main(int argc, char* argv[])
                     continue;
                 if (hidSetupEvent && hidSetupEvent(e))   // Light Gun Edition: LightgunHID.ini's set-up
                     continue;
+                // During IR calibration the chosen remote's B is data, not Escape / a menu command. Keyboard
+                // Escape or a regular gamepad's Back cancels without leaving the setup page.
+                if (wiimotes.Calibrating()) {
+                    const bool cancel = (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) ||
+                                        (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_EAST);
+                    if (cancel) {
+                        wiimotes.CancelCalibration();
+                        fe.screenExtras();
+                        continue;
+                    }
+                    if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP ||
+                        e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
+                        e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP ||
+                        e.type == SDL_EVENT_MOUSE_WHEEL)
+                        continue;
+                }
                 // padpass: a pad's button: the prompts show that pad's buttons (Xbox / PlayStation / Nintendo names),
                 // whatever the button goes on to do (the Jukebox's, PC Mode's seats ...)
                 if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
@@ -15069,6 +15583,15 @@ int main(int argc, char* argv[])
                 }
             }
             fe.gunPrompts = p1Menu || (menu.cfg.p1Input == 3 && !menu.cfg.gunDev[0].empty());   // (the prompts name the gun)
+            // Wiimote IR is an absolute pointer. Feed the frontend's own cursor directly; do not send SDL mouse events.
+            if (wiimoteMenuPointer) {
+                in.mouseMoved = true, in.pad = true, in.keyboard = false;
+                in.mouseX = int(std::lround(wiimoteMenuX * float(fe.canvasWidth() - 1)));
+                in.mouseY = int(std::lround(wiimoteMenuY * float(game::Frontend::kHeight - 1)));
+                fe.hideHand = false;
+                fe.handAlpha = 1.0f;
+                if (wiimoteMenuClick) in.press = in.anyKey = in.click = true;
+            }
             in.ctrl = in.ctrl || (SDL_GetModState() & SDL_KMOD_CTRL) != 0;   // (DIK 0x1D / 0x9D held)
             {   // HOTD_MENU_TYPE="N:TEXT[;M:X,Y]" (developer, pc_cheats): at the menu's N-th frame TEXT typed with Ctrl held;
                 // at frame M a click at (X, Y) (640 x 480): for HOTD_MENU_SHOT pictures of the secret screens
@@ -15254,7 +15777,9 @@ int main(int argc, char* argv[])
                     }});
                 };
                 page("Main menu", [&]() { fe.mainMenuGroup(0); fe.screenMainMenu(); });
+                page("Story Mode", [&]() { fe.mainMenuGroup(game::Frontend::kGroupStory); fe.screenMainMenu(); });   // (menu141)
                 page("More Modes", [&]() { fe.mainMenuGroup(1); fe.screenMainMenu(); });
+                page("Survival", [&]() { fe.mainMenuGroup(game::Frontend::kGroupSurvival); fe.screenMainMenu(); });
                 page("Extras", [&]() { fe.mainMenuGroup(2); fe.screenMainMenu(); });
                 page("Options: Game", [&]() { fe.mainMenuGroup(0); fe.screenOptions(); });
                 for (int k = 0; k < int(fe.tabs.size()); ++k)
@@ -15411,6 +15936,7 @@ int main(int argc, char* argv[])
                 running = false;
             }
             if (aimTestRefresh) aimTestRefresh();   // padfeel: the Aim Test page's readout
+            if (wiimoteMenuRefresh) wiimoteMenuRefresh();   // native Wii Remote setup: live status / calibration row
             if (bindRefresh) bindRefresh();       // keybind: the Keys & Buttons page's countdown
             if (gunAssignRefresh) gunAssignRefresh();   // ipolish: the Light Guns page's wait / its result
             if (hidSetupRefresh) hidSetupRefresh();     // Light Gun Edition: LightgunHID.ini's set-up
@@ -15663,6 +16189,17 @@ int main(int argc, char* argv[])
                 static game::TypingHud drillHud;
                 drillHud.drawDrill(*gTyping, ww, wh);
             }
+            // Native Wii Remote calibration mirrors hotd2-re's LightgunMenu: target and instructions are drawn over
+            // the current Options page, so setup never needs to start a game.
+            {
+                float tu = 0.0f, tv = 0.0f;
+                if (wiimotes.CalibrationTarget(tu, tv)) {
+                    padTarget.setText({"\\ | /", "- + -", "/ | \\"}, wh >= 720 ? 4 : 3);
+                    padTarget.drawAt(ww, wh, tu * ww, tv * wh);
+                    padNote.setText(wiimotes.CalibrationLines(), wh >= 720 ? 3 : 2);
+                    padNote.drawAt(ww, wh, ww * 0.5f, wh * 0.5f);
+                }
+            }
             // HOTD_GALLERY_SHOT's picture: the page over the model (regallery: the Cut-scenes page too, reached with
             // HOTD_GALLERY_KEYS=C), the window as it is now
             static int scenesFrames = 0;
@@ -15792,8 +16329,8 @@ int main(int argc, char* argv[])
                 std::string e2;
                 if (!regions.empty() || (!regionsTried && (regionsTried = true) && arcadeRegions(e2))) {
                     fe.setArcadeRegions(regions);   // (remake2: a first start's checked ROMs: the arcade's blood from now)
-                    gViewPrefetch.start(regions, dumps, texsets, 0, menu.cfg.models == 1 ? menu.cfg.pc : std::string(),
-                                        bloodOf(menu.cfg));
+                    gViewPrefetch.start(regions, dumps, texsets, 0, viewPcDirOf(menu.cfg),
+                                        bloodOf(menu.cfg), viewMixOf(menu.cfg));
                 }
             }
             if (menuShot)
@@ -16287,7 +16824,8 @@ int main(int argc, char* argv[])
                     csAction = -1;
                     std::copy(csKeepPc, csKeepPc + 4, fe.pcChars);   // (PC Mode's own picks as they were)
                 } else if ((action == 0 || action == 6) && menu.cfg.charSelect && inputTestFile.empty() &&
-                           !gTotd && !gNet) {   // (--input-test: its menu walks start the game directly)
+                           !gTotd && !gNet && !gPcMode) {   // (--input-test: its menu walks start the game directly;
+                    // user 2026-11-13: never after PC Mode, which has its own character screen)
                     csAction = action;
                     std::copy(fe.pcChars, fe.pcChars + 4, csKeepPc);
                     for (int k = 0; k < 4; ++k)
@@ -17088,7 +17626,9 @@ int main(int argc, char* argv[])
                     pauseKey = pauseKey || cfg.keys[p].has(game::kActPause, sc);
                 // the PC's pause (0x41ADF0): Escape / P open and close it in play; while paused the arrows / keypad 8 2
                 // pick the item, Enter / keypad Enter / Space activate it (the players' keys are not read meanwhile)
-                if (lightGuns.calibrating() && sc == SDL_SCANCODE_ESCAPE)   // pads: Esc ends the light-gun calibration
+                if (wiimotes.Calibrating() && sc == SDL_SCANCODE_ESCAPE)
+                    wiimotes.CancelCalibration();
+                else if (lightGuns.calibrating() && sc == SDL_SCANCODE_ESCAPE)   // pads: Esc ends the light-gun calibration
                     lightGuns.cancelCalibration();
                 else if (sc == SDL_SCANCODE_F9 && lightGuns.active() && !paused)   // pads: the light-gun calibration
                     lightGuns.startCalibration();
@@ -17384,9 +17924,12 @@ int main(int argc, char* argv[])
             continue;
         }
         // pads: the gamepads' and light guns' buttons / positions into the guns, the start buttons, the pause
+        // All three sources write into the existing per-player gun/pause state. Apply Wiimote input under the
+        // same gameplay gate so it cannot inject shots during menus, attract, scene playback or shutdown.
         if (screen == Screen::Game && running && !feAttract && !gScene.active()) {
             pads.apply(rt, guns, pause, pauseIn, lw, lh);
             lightGuns.apply(rt, guns, paused, lw, lh);
+            wiimotes.Apply(rt, guns, pause, pauseIn, lw, lh);
             if (lightGuns.calibrated) {   // a light gun calibrated (F9): kept in launcher.ini
                 lightGuns.calibrated = false;
                 for (int p = 0; p < game::kInputPlayers; ++p)   // (players 3 / 4 too: gun3cal / gun4cal)
@@ -17396,7 +17939,8 @@ int main(int argc, char* argv[])
                     if (launcher) menu.cfg.save(cache + "launcher.ini");   // (the launcher's choices + the calibration)
                 }
             }
-        }
+        } else
+            wiimotes.Idle(guns);   // review 2026-11-12: no Apply this frame: its presses dropped (no shot afterwards)
         if (screen == Screen::Game && running) {
             // HOTD_PAUSE_AT=F:N in a window (developer, pause): the pause opens at the first game frame from F where it
             // can (Escape), stays N loops, then a screenshot of the pause screen (F12's) and P closes it
@@ -17506,6 +18050,8 @@ int main(int argc, char* argv[])
                     if (SDL_Gamepad* g = pads.padOf(p) ? SDL_GetGamepadFromID(pads.padOf(p)) : nullptr)
                         held = SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_SOUTH) ||
                                SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000 || pads.fireHeld(p);   // (padpass: its own fire too)
+                for (int p = 0; p < game::kInputPlayers && !held; ++p)
+                    held = wiimotes.fireHeld(p);
                 const bool scene = cutSceneNow(rt);
                 if (static const bool dbg = std::getenv("HOTD_SKIP_TRACE") != nullptr; dbg && scene && rt.frameCount % 30 == 0)
                     std::printf("frame %llu: skip trace: held %d stale %d fast %d heldS %.2f holdSkip %d reward %d/%d skip_on %u card %u\n",
@@ -17987,15 +18533,15 @@ int main(int argc, char* argv[])
             }
             // perf: the chapter clear prepares the next chapter's view on a worker (ViewPrefetch)
             if (const int c = rt.mem.at<int8_t>(game::A::G::chapter); view && rt.clear.active && c >= 0 && c < 3)
-                gViewPrefetch.start(regions, dumps, texsets, c + 1, cfg.models == 1 && pcFilesOk ? cfg.pc : std::string(), viewBlood());
+                gViewPrefetch.start(regions, dumps, texsets, c + 1, viewPcDirOf(cfg, pcFilesOk), viewBlood(), viewMixOf(cfg));
             if (const int c = rt.mem.at<int8_t>(game::A::G::chapter);
                 view && rt.mem.at<int16_t>(game::A::G::game_mode) == 4 && c != viewChapter && c >= 0 && c < 4) {
                 auto fresh = std::make_unique<game::GameView>();
                 const uint64_t l0 = SDL_GetTicksNS();
-                const std::string pcDir = cfg.models == 1 && pcFilesOk ? cfg.pc : std::string();
-                std::unique_ptr<game::GameView::Prepared> ready = gViewPrefetch.take(c, pcDir, viewBlood());
+                const std::string pcDir = viewPcDirOf(cfg, pcFilesOk);   // (mixmodels: PC or Mixed)
+                std::unique_ptr<game::GameView::Prepared> ready = gViewPrefetch.take(c, pcDir, viewBlood(), viewMixOf(cfg));
                 const bool ahead = ready != nullptr;
-                if (ahead ? fresh->finish(std::move(ready), err) : fresh->init(regions, dumps, texsets, c, err, pcDir, viewBlood())) {
+                if (ahead ? fresh->finish(std::move(ready), err) : fresh->init(regions, dumps, texsets, c, err, pcDir, viewBlood(), viewMixOf(cfg))) {
                     view->shutdown();
                     view = std::move(fresh);
                     prevFrame.valid = false;   // rate: nothing to blend from in another world
@@ -18051,7 +18597,7 @@ int main(int argc, char* argv[])
             if (skipFast && !cutSceneNow(rt))   // the skipped scene is over: the game's pace again from here
                 break;
         }
-        if (paused || sceneHold || lightGuns.calibrating() || now > next + 4 * frameNs || skipFast)
+        if (paused || sceneHold || lightGuns.calibrating() || wiimotes.Calibrating() || now > next + 4 * frameNs || skipFast)
             next = now;
         if (inputTest)
             inputTest(1, rt, lw, lh);   // --input-test: this frame's checks
@@ -18067,8 +18613,11 @@ int main(int argc, char* argv[])
         }
         float aim[4][2] = {};   // players 3 / 4: the 4P mode
         for (int p = 0; p < 4; ++p) {
-            aim[p][0] = guns[p].x * ww / std::max(lw, 1);
-            aim[p][1] = guns[p].y * wh / std::max(lh, 1);
+            // fix141 (GitHub #88: Solo Player Seat = Player 2 left player 2's crosshair in the middle): the sight of
+            // seat p is the gun that plays it, as the gun input above swaps them (player 1's input plays seat 1)
+            const Gun& gp = rt.soloSeat == 1 && p < 2 ? guns[1 - p] : guns[p];
+            aim[p][0] = gp.x * ww / std::max(lw, 1);
+            aim[p][1] = gp.y * wh / std::max(lh, 1);
         }
         for (int p = 0; p < 4; ++p) {   // computer teammates: their own crosshair (the bot's aim), a CPU tag
             hud.drawCross[p] = cfg.crosshairs;   // Light Gun Edition: Show Crosshairs (launcher.ini crosshairs=)
@@ -18126,7 +18675,7 @@ int main(int argc, char* argv[])
         }
         // crt (render/crt.h): this frame's filter (the menu may have changed it); aim = the pointers on the window,
         // aimSrc = the picture's point the curved screen shows there (the netplay partner's: the other way round)
-        gCrt.configure(cfg.crt, cfg.models == 1 ? 480 : 384, cfg.models == 1 ? 640 : 496);
+        gCrt.configure(cfg.crt, pcLookOf(cfg) ? 480 : 384, pcLookOf(cfg) ? 640 : 496);
         setGamma100(cfg.gamma);   // gamma: this frame's (the menu may have changed it)
         setBlackLevel(cfg.blackLevel);   // bugs4 (#23): Black Level likewise
         if (gVrDropped) {   // vr2: the headset's session ended: the flat game's frame limiter and vsync again
@@ -18150,7 +18699,7 @@ int main(int argc, char* argv[])
         rt.teammateFlash = cfg.teamFlash;   // (Options can change it in the game)
         hud.translucentMarks = cfg.clearMarks;   // bugs1 (#35): Video > Hit Marks
         hud.bossCodenames = cfg.bossCodenames;   // spanish3: Gameplay > Boss Names
-        rt.hideSparks = !cfg.hitSparks, rt.shotFlashScale = game::shotFlashScaleOf(cfg.shotFlashSize), rt.hideMuzzle = !cfg.muzzleFlash; rt.hideBlood = !cfg.bloodParticles; rt.transparency = cfg.transparency;
+        rt.hideSparks = !cfg.hitSparks, rt.shotFlashScale = game::shotFlashScaleOf(cfg.shotFlashSize), rt.hideMuzzle = !cfg.muzzleFlash; rt.hideBlood = !cfg.bloodParticles; rt.transparency = cfg.transparency; rt.pcD3d = cfg.pcRenderer == 1;
         // totd5 (the feel report 2026-11-05: "every letter fires the arcade gun's big flash over the word; TotD: a small
         // white spark on the body"): The Typing of the Dead 0's shots with a small flash, no muzzle (no gun on screen)
         if (gTotd && gTyping && !gNet)
@@ -18178,6 +18727,7 @@ int main(int argc, char* argv[])
         // models drawn here before were 0x660 `tamahi`, the shot spark (user 2026-10-16: "an image of a gunshot")
         std::copy(cfg.sights, cfg.sights + 4, hud.sights);   // (firing range: each player's own)
         hud.showSights = cfg.showCrosshairs;   // gunfb: Video > Show Crosshairs
+        hud.cutSights = cfg.cutCross;   // vr141 (#80): Gameplay > Cut-scene Crosshairs
         hud.customDirs = xhairDirs;
         hud.widescreen = cfg.aspect != 1;
         hud.widen2D = cfg.widen2d == 0;   // wide2d: Video > Widen 2D Screens
@@ -18330,7 +18880,11 @@ int main(int argc, char* argv[])
             {
                 std::vector<std::string> note = pads.notice();
                 float tu, tv;
-                if (lightGuns.calibrationTarget(tu, tv)) {
+                if (wiimotes.CalibrationTarget(tu, tv)) {
+                    note = wiimotes.CalibrationLines();
+                    padTarget.setText({"\\ | /", "- + -", "/ | \\"}, wh >= 720 ? 4 : 3);
+                    padTarget.drawAt(ww, wh, tu * ww, tv * wh);
+                } else if (lightGuns.calibrationTarget(tu, tv)) {
                     note = lightGuns.calibrationLines();
                     padTarget.setText({"\\ | /", "- + -", "/ | \\"}, wh >= 720 ? 4 : 3);
                     padTarget.drawAt(ww, wh, tu * ww, tv * wh);
@@ -18486,8 +19040,11 @@ int main(int argc, char* argv[])
                         // preview) the left Y or the left menu button
                         // (vrprompts' style: the runtime's profile, HOTD_VR_PROFILE in tests; none yet: Touch's)
                         const int vs = vrPromptStyle();
-                        const char* keys = vs == game::kPsVrIndex ? "Left B"
-                                         : vs == game::kPsVrVive || vs == game::kPsVrWmr || vs == game::kPsVrSimple ? "Menu" : "Y / Menu";
+                        // (vr141: left-handed, the empty right hand's B: Index the right B, Touch / HP "B / Menu")
+                        const bool lefty = gVr && gVr->leftHanded;
+                        const char* keys = vs == game::kPsVrIndex ? (lefty ? "Right B" : "Left B")
+                                         : vs == game::kPsVrVive || vs == game::kPsVrWmr || vs == game::kPsVrSimple ? "Menu"
+                                         : lefty ? "B / Menu" : "Y / Menu";
                         const std::string t = std::string(keys) + ": Pause";   // (lang: "{buttons}: Pause")
                         hint.setText({t}, std::max(2, ph / 240));
                         hint.drawAnchored(pw, ph, float(pw) * 0.5f, float(ph) * 0.80f, 0.5f, 1.0f);

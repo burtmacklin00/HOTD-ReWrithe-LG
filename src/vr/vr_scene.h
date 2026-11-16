@@ -14,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace hotd {
@@ -110,6 +111,12 @@ public:
     // Crosshair (VR), launcher.ini vrlaser= / vrcrosshair=, else vr.ini laser / crosshair). Off: not drawn for any gun
     // (dual pistols too, the greyed off-screen sight neither); the aim, its depth and the shots stay the same
     bool laserOn = true, crosshairOn = true;
+    // vr141 (#86, user 2026-11-12: "VR left-handed mode"; main.cpp each frame: Gameplay > Gun Hand (VR), launcher.ini
+    // vrgunhand=, else vr.ini left_handed): the gun (its ray, laser, crosshair, shake / flick, reload buttons, the
+    // weapon stick, the menus' pointer) on the left controller, the empty hand (mirrored) on the right, Pause on the
+    // right B, Start on the right A. Done by swapping the two controllers' roles right after the backend's poses
+    // (fs_.hand[1] is the gun hand everywhere below), the models mirrored to the side they are on
+    bool leftHanded = false;
     // a controller's menu button pressed since the last take (main.cpp: the pause)
     bool takeMenu();
 
@@ -169,6 +176,8 @@ public:
         int refPitchClamped = 0;   // vrfix: frames the game camera pitched over 60 degrees (the player's space held at 60)
         int leftNearHidden = 0;    // vrfix: (questfb: no longer counted: the left hand near the face is drawn again)
         int panelFrames = 0, panelHandFrames = 0;   // questfb: the big screen's frames, those with the hands drawn
+        int leftyFrames = 0, leftyGunLeft = 0;   // vr141: left-handed frames with the gun tracked, the gun left of the head
+        int fadeIns = 0, fadeInFrames = 0;   // vr141 (#78): creatures that faded in (first seen outside the flat view), frames with one fading
         // bugs7: camera cuts (an instant jump) the comfort vignette ignored; frames it was on over 0.5 (vignette = on)
         int vignetteCuts = 0, vignetteOnFrames = 0;
         // vrcomfort (view = screen): frames of play on the screen, the round trips there (the game's aim -> the
@@ -195,6 +204,8 @@ public:
 private:
     std::unique_ptr<Backend> backend_;
     FrameState fs_;
+    void takeHands();   // vr141: beginFrame's poses with the roles swapped when leftHanded (backend_->beginFrame first)
+    int physHand(int h) const { return leftHanded ? 1 - h : h; }   // (a role's controller: haptics)
     std::string vrDir_;
     // GL
     unsigned spriteProg_ = 0;
@@ -223,6 +234,14 @@ private:
     int64_t prevTime_ = 0;
     HudDistance hudDist_;     // vr4: the HUD panel's adaptive distance
     std::vector<DrawItem> fxItems_;     // vr4: the frame's items with the shot flash / spark moved to the hit
+    // vr141 (#78): the creatures seen (by vrBody): when first seen (seconds), fading or not, the last frame drawn
+    struct Seen {
+        double t0 = 0;
+        bool fades = false;
+        uint64_t last = 0;
+    };
+    std::unordered_map<uint32_t, Seen> seen_;
+    uint64_t seenFrame_ = 0;
     std::vector<Placement> fxPlaces_;   // (their moved placements)
     int64_t hudTime_ = 0;
     // quest: the flat screens' big screen (panelFrame)

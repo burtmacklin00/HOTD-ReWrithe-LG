@@ -247,6 +247,24 @@ template <class P> void Game<P>::kind17_kenkyu_researcher_collapse(uint32_t obj)
     of<uint32_t>(obj, 0) = F::kind17_researcher_frame;
     of<int16_t>(obj, 0x60) = 0;
     of<int16_t>(obj, 0x5C) = 1;
+    // fix141 (GitHub #81: "Sophie's body is not visible" by the fountain, "Sophie!?", with the PC models): the 1998 PC
+    // files have no 0x621 (sofi_d), and THOTD.EXE never draws it: its kind17_kenkyu_researcher_collapse (0x50DDC4)
+    // sets the body up at once (body_init MO 0x186, creature_type_setup), its motion held (flags bit 26) until state 1
+    // lets it go, and kind17_researcher_frame (0x50DE70) always draws the body. The PC's way with the PC models (as
+    // kind 147's #52) and in PC Mode; the arcade's own games keep the plain model. mixmodels (#49): Models: Mixed
+    // takes the Players and Humans row's way (she is drawn with that row's models)
+    if (pc_path() || models_pc_humans()) {
+        const int32_t type = of<int16_t>(obj, 0xCC);
+        mem.at<int32_t>(G::hit_type) = type;
+        body_init(obj, type, 0x186);
+        creature_type_setup(obj);
+        of<int32_t>(obj, 0xF8) = 0;
+        of<int32_t>(obj, 0x10C) = 0;
+        of<int32_t>(obj, 0x30) = 0x8000;
+        of<int8_t>(obj, 0x2E7) = -1;
+        of<uint8_t>(obj, 0x3C5) = uint8_t(of<uint8_t>(obj, 0x3C5) & ~4u);
+        of<uint32_t>(obj, 0x58) = of<uint32_t>(obj, 0x58) | (1u << 26);
+    }
 }
 
 // 0x95770: a skipped scene: gakkuri from frame 48, event flags 0xB2 / 0xB3, state 3 step 3, the camera and the
@@ -281,7 +299,10 @@ template <class P> void Game<P>::kind17_researcher_frame(uint32_t obj)
     default: call_routine(r, obj); break;
     }
     const uint32_t f = of<uint32_t>(obj, 0x58);
-    if (((f >> 25) & 1) == 0)
+    if (pc_path() || models_pc_humans()) {   // (fix141 #81: THOTD.EXE's: the body, from the start)
+        if (((f >> 29) & 1) == 0)
+            object_draw(obj);
+    } else if (((f >> 25) & 1) == 0)
         kind17_researcher_model_draw(obj);
     else if (((f >> 29) & 1) == 0)
         object_draw(obj);
@@ -301,6 +322,15 @@ template <class P> void Game<P>::kind17_researcher_st1_appear(uint32_t obj)
 {
     if (of<int16_t>(obj, 0x60) != 0 || mem.at<uint8_t>(G::event_flags + 0xB0) != 1)
         return;
+    if (pc_path() || models_pc_humans()) {   // (fix141 #81: THOTD.EXE's 0x50DF78: the body is there already; its motion goes on)
+        of<uint32_t>(obj, 0x58) = of<uint32_t>(obj, 0x58) & ~(1u << 26);
+        mem.at<uint16_t>(G::enemies_alive) = uint16_t(mem.at<uint16_t>(G::enemies_alive) + 1);
+        mem.at<uint16_t>(G::enemy_count) = uint16_t(mem.at<uint16_t>(G::enemy_count) + 1);
+        enemy_slot_take(obj);
+        of<int16_t>(obj, 0x5C) = 2;
+        of<int16_t>(obj, 0x60) = 0;
+        return;
+    }
     const int32_t type = of<int16_t>(obj, 0xCC);
     mem.at<int32_t>(G::hit_type) = type;
     body_init(obj, type, 0x186);

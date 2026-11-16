@@ -11,6 +11,7 @@ set(HOTD_UNIT_SOURCES
     unit/test_launcher.cpp
     unit/test_lang.cpp
     unit/test_mods.cpp
+    unit/test_jpeg.cpp
     unit/test_files_vr_net.cpp
     unit/test_rollback.cpp
     unit/test_modes.cpp
@@ -52,6 +53,14 @@ foreach(s ${HOTD_UNIT_SUITES} ${HOTD_UNIT_TRANSLATION_SUITES})
     set_tests_properties(${_label}.${s} PROPERTIES LABELS ${_label} TIMEOUT 120
         ENVIRONMENT "HOTD_UNIT_SOURCE=${CMAKE_SOURCE_DIR}")
 endforeach()
+# the native Wii Remote protocol's own test (tests/wiimote_test.cpp: report decoding, button edges, the four-point
+# calibration, settings; no hardware): a unit test on every platform, built with hotd_unit (so CI's and
+# tools/run_tests' "--target hotd_unit" build it too)
+if(TARGET hotd_wiimote_test)
+    add_dependencies(hotd_unit hotd_wiimote_test)
+    add_test(NAME unit.wiimote COMMAND hotd_wiimote_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(unit.wiimote PROPERTIES LABELS unit TIMEOUT 60)
+endif()
 
 # ---- the module layer: the game's headless runs (they need the game files: HOTD_TEST_ARCADE, HOTD_TEST_PC, ...;
 # skipped without them). Each: name, the files it needs, timeout (s), arguments, the lines that must appear. The

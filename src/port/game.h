@@ -267,6 +267,18 @@ public:
     // seat p's gunshot (player_shoot / the cut-scenes' shots): players 1 / 3 0xA01208, 2 / 4 0xA01207, by look_seat
     static constexpr uint32_t shot_cue_of(int look) { return (look & 1) == 0 ? 0xA01208u : 0xA01207u; }
     uint32_t shot_cue(int p) const { return shot_cue_of(look_seat(p)); }
+    // fix141 (GitHub #88: G picked as player 1 still cried with Rogan's voice): the players' voices follow look_seat
+    // as the gunshot does. The arcade picks them by seat: Rogan's (player 1's) 0xA01455 / 0xA01456 hit cries and
+    // 0xA01457 knocked flying, G's (player 2's) 0xA01458 / 0xA01459 / 0xA0145A. `cue` is what the arcade sends for
+    // seat p; only Rogan / G sitting in another seat than their own changes it to their set (the arcade's own games,
+    // the proofs and the other characters keep the arcade's choice, its quirks too). Other cues pass unchanged
+    uint32_t voice_cue(int p, uint32_t cue) const
+    {
+        const int look = look_seat(p);
+        if (cue < 0xA01455u || cue > 0xA0145Au || look == p)
+            return cue;
+        return ((look & 1) != 0 ? 0xA01458u : 0xA01455u) + (cue - 0xA01455u) % 3;
+    }
     // the creature type of seat p's body in PC Mode (+0x10 through 0x5CE358: player_char_models_set 0x50C114, the
     // endings 0x4AA52C-0x4AB148; character 0 (No Player) has Rogan's type 2)
     int32_t pm_body_type(int p) const { return pm_table(pm_seat_char(p)).type; }
@@ -636,6 +648,9 @@ public:
     // issues5 (GitHub #52): the runtime: the world is the PC release's models (Video > Models: PC; synced online, in
     // the settings hash), for the props the PC's world has nothing under (kind 147's table group)
     virtual bool models_pc() const { return false; }
+    // mixmodels (GitHub #49): the people are the PC release's models (Models: PC, or Mixed with Players and Humans on
+    // PC; synced online as models_pc): #81's Sophie by the fountain
+    virtual bool models_pc_humans() const { return models_pc(); }
     // carchars (draws only): player_char_props_draw is about to draw seat `seat`'s car model; the runtime notes the
     // draw to put the seat's own character there after the frame (nothing in the game state)
     virtual void car_seat_mark(int seat) { (void)seat; }

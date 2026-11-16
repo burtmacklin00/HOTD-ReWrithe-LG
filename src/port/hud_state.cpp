@@ -199,9 +199,9 @@ template <class P> void Game<P>::hud_popup_update(uint32_t task)
             const int32_t v = int32_t(rand());
             const bool odd = v % 2 != 0;
             if (p == 0)
-                sound_cue(odd ? 0xA01455 : 0xA01456);
+                sound_cue(voice_cue(p, odd ? 0xA01455 : 0xA01456));   // (fix141 #88: Rogan / G their own voice)
             else
-                sound_cue(odd ? 0xA01458 : 0xA01459);
+                sound_cue(voice_cue(p, odd ? 0xA01458 : 0xA01459));
         }
     }
 }

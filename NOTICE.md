@@ -80,6 +80,9 @@ with.
   reference playthrough "The House Of The Dead (PC) - Doblaje español ORIGINAL" (https://youtu.be/OVnjusRO1wk).
   No Spanish game file is included: the voices are read from the player's own Spanish copy; only file sizes and SHA-1
   hashes are in the source (`src/game/pc_manifest_es.inc`).
+- Native Wii Remote support: zedhqx4 (GitHub PR #85), MIT; protocol / calibration adapted from GitFist/hotd2-re (via the fork zedhqx4/hotd2-re)
+  (MIT). The files: `src/game/wiimote*.cpp`, `src/game/wiimote.h`, `tests/wiimote_test.cpp`; their license text:
+  `src/game/wiimote_LICENSE.txt` (below; `docs/wiimotes.md`).
 - The Windows package also carries Microsoft's Visual C++ runtime DLLs (`msvcp140*.dll`, `vcruntime140*.dll`), the
   redistributable files of Visual Studio 2022, shipped as Microsoft allows for programs built with it.
 - Third-party code that is NOT compiled into the program: the Model 2 knowledge above (MAME), the developer tools in
@@ -95,6 +98,7 @@ with.
 | Monocypher 4.0.3 | compiled in (online co-op) | CC0-1.0 (or BSD-2-Clause) | `src/third_party/monocypher/LICENCE.md` (CC0 chosen) |
 | Musashi (Karl Stenerud, commit 313ebf1) | compiled in (arcade sound board) | MIT | below |
 | MAME SCSP / SCSP DSP (mame0289) | compiled in (arcade sound board) | BSD-3-Clause | below |
+| Native Wii Remote support (zedhqx4, GitHub PR #85; protocol / calibration from GitFist/hotd2-re) | compiled in (Options > Controls > Wii Remotes) | MIT | below |
 | Noto Sans KR / JP / SC / Arabic / Hebrew, Noto Sans | `data/fonts/` | SIL OFL 1.1 | `data/fonts/OFL.txt` |
 | Xelu's Free Controller & Key Prompts | `data/ui/prompts/xelu/` | CC0 1.0 | `data/ui/prompts/LICENSE-Xelu.txt` |
 | Kenney Input Prompts 1.5A | `data/ui/prompts/kenney/` | CC0 1.0 | `data/ui/prompts/LICENSE-Kenney.txt` |
@@ -151,6 +155,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+
+### Native Wii Remote support (MIT license)
+
+`src/game/wiimote_LICENSE.txt`:
+
+```
+MIT License
+
+Copyright (c) 2026 GitFist and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+The shared Wiimote protocol decoder and calibration code in this directory are
+adapted from zedhqx4/hotd2-re (MIT). Platform transport implementations are
+separate from that project-specific shared logic.
 ```
 
 ### MAME SCSP (BSD-3-Clause)

@@ -80,6 +80,8 @@ void Settings::set(const std::string& k, const std::string& v)
         else if (k == "flick_reload") flickReload = truthy(v);   // vrflick (docs/vr.md "Wrist flick to reload")
         else if (k == "flick_sensitivity") flickSensitivity = std::clamp(f > 0 ? f : 300.0f, 150.0f, 1500.0f);
         else if (k == "around") around = truthy(v);   // vr3 (docs/vr.md "All around you")
+        else if (k == "fade_in") fadeIn = truthy(v) && f <= 0.0f ? 0.25f : std::clamp(f, 0.0f, 2.0f);   // vr141 (docs/vr.md "Fade-in")
+        else if (k == "fade_in_all") fadeInAll = truthy(v);
         else if (k == "cutscenes") cutscenes = v == "cinema" ? 1 : v == "world" ? 0 : std::clamp(std::atoi(v.c_str()), 0, 1);
         else if (k == "view") view = v == "screen" ? 1 : v == "immersive" ? 0 : std::clamp(std::atoi(v.c_str()), 0, 1);   // vrcomfort
         else if (k == "cinema_distance") cinemaDistance = f > 0.5f ? f : cinemaDistance;
@@ -87,6 +89,7 @@ void Settings::set(const std::string& k, const std::string& v)
         else if (k == "desktop_view")   // vrnull (docs/vr.md "The desktop window")
             desktopView = v == "eye" ? 0 : v == "both" ? 1 : v == "spectator" ? 2 : std::clamp(std::atoi(v.c_str()), 0, 2);
         else if (k == "left_hand")leftHand = truthy(v);
+        else if (k == "left_handed") gunLeft = truthy(v);   // vr141 (#86: the gun in the left hand)
         else if (k == "gun_offset") three(v, gunOffset);
         else if (k == "gun_rotate") three(v, gunRotate);
         else if (k == "left_hand_offset") three(v, leftOffset);

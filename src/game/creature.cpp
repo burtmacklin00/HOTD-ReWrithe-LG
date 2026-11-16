@@ -253,7 +253,7 @@ void Runtime::body_part_draw_hook(uint32_t part)
         return;
     }
     const uint32_t k = uint32_t(int32_t(int16_t(uint16_t(type) - 2)) & 0xFFFF);
-    if ((k == 28 || k == 32) && body_hook_special(part, body, int32_t(k), cls))   // T1 (t1_bounds.cpp)
+    if ((k == 28 || k == 32 || (k == 24 && chars_on())) && body_hook_special(part, body, int32_t(k), cls))   // T1 (t1_bounds.cpp; k 24 fix142)
         return;
     {
         // ch4proof (the whole-game differential found type 55's +0x54 missing; read from the decompilation of
@@ -444,7 +444,7 @@ void Runtime::body_part_draw_hook(uint32_t part)
             geo_draw_model(mem.u32(part));
             // the arcade's coat (models 0xB5.., 0x119..) is a separate model; the PC release's Rogan parts include the
             // coat, so with the PC model source it is not drawn (it would show the arcade coat over the PC one)
-            if (type == 2 && motion != 0x168 && !pcModels) {
+            if (type == 2 && motion != 0x168 && !pcType(2)) {
                 const int32_t ch = mem.at<int8_t>(G::chapter);
                 const int32_t sub = int32_t(int16_t(mem.at<int16_t>(body + 0xF6) % 2));
                 const int32_t m = ch == 5 || ch == 6 ? int32_t(mem.u32(G::frame_counter) / 2 % 0x32) + 0x119
@@ -548,7 +548,7 @@ uint32_t Runtime::coop4_copy_model(const std::map<uint32_t, uint32_t>& map, int 
         // model of the joint, drawn in her texture area 2), whichever hand the hook swapped in (the gun hand, the empty
         // hand 0x36B); the gun goes on as a second draw (actor_gun_model). Arcade models only (the PC's zombie Sophie is
         // Sophie's model)
-        if (to == 67 && !pcModels)
+        if (to == 67 && !pcType(67))
             if (auto it = map.find(mem.u32(d.part)); it != map.end())
                 return it->second;
         return d.model;
@@ -569,7 +569,7 @@ uint32_t Runtime::coop4_copy_model(const std::map<uint32_t, uint32_t>& map, int 
 uint32_t Runtime::actor_gun_model(int from, int to, const DrawModel& d)
 {
     auto player = [](int t) { return t == 2 || (t >= 13 && t <= 15); };
-    if (to != 67 || pcModels || d.shadow || !player(from) || d.joint < 0 || d.joint >= 31 || d.model != kPlayerGunHand ||
+    if (to != 67 || pcType(67) || d.shadow || !player(from) || d.joint < 0 || d.joint >= 31 || d.model != kPlayerGunHand ||
         mem.at<int8_t>(kPartRoles + uint32_t(from) * 0xF8 + uint32_t(d.joint) * 8 + 3) != 6)
         return 0;
     return kGunOnlyKey;
@@ -1053,7 +1053,7 @@ void Runtime::actor_dress(uint32_t body, int from, int to, const std::map<uint32
             thigh[k - 10] = dOut.size() - 1;
         if (!d.shadow && (k == 8 || k == 9) && d.model == mem.u32(d.part))
             trunk[k - 8] = dOut.size() - 1;
-        if (to == 2 && from != 2 && !pcModels && !d.shadow && k == 8 && d.model == mem.u32(d.part)) {
+        if (to == 2 && from != 2 && !pcType(2) && !d.shadow && k == 8 && d.model == mem.u32(d.part)) {
             // Rogan's coat on the body he plays (body_part_draw_hook's rule, from that body's motion and frame)
             const int32_t motion = mem.at<int16_t>(body + 0xD0), f = mem.at<int16_t>(body + 0xF4);
             if (motion != 0x168) {
@@ -1125,10 +1125,10 @@ void Runtime::actor_dress(uint32_t body, int from, int to, const std::map<uint32
         bool hasBelly = false;
         for (const SkinDraw& s : sOut)
             hasBelly = hasBelly || s.type == to;
-        if (!pcModels && trunk[0] != SIZE_MAX && trunk[1] != SIZE_MAX && mem.at<int16_t>(kSkinNumbers + 2 * uint32_t(to)) != -1 &&
+        if (!pcType(to) && trunk[0] != SIZE_MAX && trunk[1] != SIZE_MAX && mem.at<int16_t>(kSkinNumbers + 2 * uint32_t(to)) != -1 &&
             !hasBelly)
             why += " no belly skin;";
-        if (to == 34 && from != 34 && !pcModels && strip) {
+        if (to == 34 && from != 34 && !pcType(34) && strip) {
             bool hasStrip = false;
             for (const SkinDraw& s : sOut)
                 hasStrip = hasStrip || s.type == kSophieStrip;
@@ -1193,7 +1193,7 @@ void Runtime::actor_fit(uint64_t key, std::vector<DrawModel>& d, size_t first, s
 
 bool Runtime::actor_needs_belly(int from, int to) const
 {
-    if (pcModels || from == to || from < 0 || to < 0 || from >= 100 || to >= 100)
+    if (pcType(to) || from == to || from < 0 || to < 0 || from >= 100 || to >= 100)
         return false;
     return mem.at<int16_t>(kSkinNumbers + 2 * uint32_t(from)) == -1 && mem.at<int16_t>(kSkinNumbers + 2 * uint32_t(to)) != -1;
 }
@@ -1374,7 +1374,8 @@ void Runtime::actor_areas_update()
 // arcade's: both model sets run alike, online too)
 void Runtime::ending_head_fallback()
 {
-    if (!pcModels || !modelAvailable)
+    // (mixmodels: Models: Mixed draws the arcade's talking head where the PC files have none: GameView's fallback)
+    if (!pcModels || mix.on || !modelAvailable)
         return;
     for (DrawModel& d : drawList) {
         if (d.body == 0 || endingBodySeat(mem.u32(d.body)) < 0)
@@ -1466,7 +1467,7 @@ void Runtime::part_owner_check()
         if (p < 0 || drawnAs[p] < 0)
             continue;
         ++partDrawn_[p];
-        if (pcModels && modelAvailable && d.model != 0 && !modelAvailable(d.model) && ++partMissing_ <= 20)   // (no model to draw: a part missing)
+        if (pcFor(kMixHumans) && modelAvailable && d.model != 0 && !modelAvailable(d.model) && ++partMissing_ <= 20)   // (no model to draw: a part missing)
             log("part check MISSING: frame " + std::to_string(frameCount) + " P" + std::to_string(p + 1) + " model " + std::to_string(d.model));
         if (d.model == 0 || owned(drawnAs[p]).count(d.model))   // (model 0: nothing drawn)
             continue;
@@ -1515,7 +1516,7 @@ int Runtime::car_seat_type(int seat)
         return -1;
     if (const PmExtra* x = pm_extra(c))
         return x->type;
-    if (pcModels && pm_model_drawable(uint32_t(pm_table(c).model)))
+    if (pcFor(kMixHumans) && pm_model_drawable(uint32_t(pm_table(c).model)))
         return -1;   // the PC's own car model of the character (as THOTD.EXE draws it)
     const int type = pm_table(c).type;
     return type == own ? -1 : type;
@@ -1646,7 +1647,7 @@ void Runtime::car_seats_dress()
                 parts.push_back(d);
                 if (k >= 0 && k < 12)
                     at[k] = int(parts.size()) - 1;
-                if (k == 8 && type == 2 && !pcModels) {   // Rogan's arcade coat (its first frame; PC models: built in)
+                if (k == 8 && type == 2 && !pcType(2)) {   // Rogan's arcade coat (its first frame; PC models: built in)
                     d.model = 0xB5;
                     parts.push_back(d);
                 }
@@ -1696,13 +1697,13 @@ void Runtime::car_seats_dress()
             drawList.erase(drawList.begin() + std::ptrdiff_t(carSeatDraw_[s]));
         drawList.insert(drawList.begin() + std::ptrdiff_t(carSeatDraw_[s]), parts.begin(), parts.end());
         // the belly skin (arcade models, a type that has one) and Sophie's strip, as her body draws them
-        if (!pcModels && at[8] >= 0 && at[9] >= 0 && mem.at<int16_t>(kSkinNumbers + 2 * uint32_t(type)) != -1) {
+        if (!pcType(type) && at[8] >= 0 && at[9] >= 0 && mem.at<int16_t>(kSkinNumbers + 2 * uint32_t(type)) != -1) {
             SkinDraw c{type, {}, {}};
             std::memcpy(c.a, parts[size_t(at[8])].m, sizeof c.a);
             std::memcpy(c.b, parts[size_t(at[9])].m, sizeof c.b);
             skinDraws.push_back(c);
         }
-        if (!pcModels && type == 34 && at[10] >= 0 && at[11] >= 0) {
+        if (!pcType(34) && type == 34 && at[10] >= 0 && at[11] >= 0) {
             SkinDraw c{kSophieStrip, {}, {}};
             std::memcpy(c.a, parts[size_t(at[10])].m, sizeof c.a);
             std::memcpy(c.b, parts[size_t(at[11])].m, sizeof c.b);
@@ -2104,7 +2105,7 @@ bool Runtime::coop4_scene_variant(int scene)
                             rec.stripAt[s][i][k - 10] = int(j);
                     }
                 }
-                if (to == 2 && from != 2 && !pcModels) {   // Rogan's coat (actor_dress's rule, this frame's motion)
+                if (to == 2 && from != 2 && !pcType(2)) {   // Rogan's coat (actor_dress's rule, this frame's motion)
                     const int32_t motion = mem.at<int16_t>(body[i] + 0xD0), f = mem.at<int16_t>(body[i] + 0xF4);
                     for (size_t j = 0; j < dd.size() && motion != 0x168; ++j)
                         if (!dd[j].shadow && cls(dd[j]) == 8 && dd[j].model == mem.u32(dd[j].part)) {

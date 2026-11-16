@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 # THE version (a release: change this line only): the exes' VERSIONINFO, the main menu's corner, hotd --version
-project(hotd_m2 VERSION 1.4.0 LANGUAGES C CXX)
-# Light Gun Edition: its own build number on top of the ReWrithe version (v1.4.0-lg16): raise it for each release of
-# this edition; the release tag must match (git tag v1.4.0-lg16)
-set(HOTD_LG_EDITION "lg16")
+project(hotd_m2 VERSION 1.4.1 LANGUAGES C CXX)
+# Light Gun Edition: its own build number on top of the ReWrithe version (v1.4.1-lg17): raise it for each release of
+# this edition; the release tag must match (git tag v1.4.1-lg17)
+set(HOTD_LG_EDITION "lg17")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -107,6 +107,8 @@ set(HOTD_GAME_SOURCES
     src/game/lightguns.cpp
     src/game/game_outputs.cpp
     src/game/lightgun_hid.cpp
+    src/game/wiimote_protocol.cpp
+    src/game/wiimote.cpp
     src/game/pads_test.cpp
     src/game/keybinds.cpp
     src/game/pad_prompts.cpp
@@ -310,6 +312,7 @@ add_library(hotd_engine STATIC
     src/render/gamma.cpp
     src/util/png.cpp
     src/util/png_read.cpp
+    src/util/jpeg_read.cpp
     src/util/recolour.cpp
     src/assets/mods.cpp
     src/assets/model_import.cpp
@@ -382,8 +385,28 @@ file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated/dispatch_arcade.inc 
 target_include_directories(hotd_flags INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 configure_file(src/res/hotd_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/hotd_version.h @ONLY)
 target_link_libraries(hotd_flags INTERFACE hotd_engine hotd_logic)
+# The protocol/game adapter is shared; only the HID transport differs by OS. Android deliberately gets a no-op
+# backend because a native Android transport is not implemented.
 if(WIN32)
-    target_link_libraries(hotd_flags INTERFACE winhttp)   # util/update_check.cpp
+    target_link_libraries(hotd_flags INTERFACE winhttp hid setupapi bthprops)   # update check and native Wii Remote HID
+    target_sources(hotd_game_obj PRIVATE src/game/wiimote_win.cpp)
+    # review 2026-11-12: the Bluetooth API (bthprops.cpl) loads only when Scan for Remotes first uses it, not at
+    # every start-up
+    if(MSVC)
+        target_link_options(hotd_flags INTERFACE "/DELAYLOAD:bthprops.cpl")
+        target_link_libraries(hotd_flags INTERFACE delayimp)
+    endif()
+elseif(APPLE)
+    target_sources(hotd_game_obj PRIVATE src/game/wiimote_mac.cpp)
+    target_link_libraries(hotd_flags INTERFACE "-framework IOKit" "-framework CoreFoundation")
+elseif(ANDROID)
+    target_sources(hotd_game_obj PRIVATE src/game/wiimote_unavailable.cpp)
+else()
+    target_sources(hotd_game_obj PRIVATE src/game/wiimote_linux.cpp)
+endif()
+if(NOT ANDROID)
+    add_executable(hotd_wiimote_test tests/wiimote_test.cpp src/game/wiimote_protocol.cpp)
+    target_include_directories(hotd_wiimote_test PRIVATE src)
 endif()
 # Experimental modes (user 2026-11-03: not in a public release until they are polished; docs/porting.md "Experimental
 # modes"): ON (development builds, build\Release and the private portable): the unreleased modes' menu items, command-line

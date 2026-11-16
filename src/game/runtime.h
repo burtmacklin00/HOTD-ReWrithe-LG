@@ -17,6 +17,7 @@
 #include "game/survival.h"
 #if HOTD_HORDE
 #include "game/horde.h"
+#include "game/model_mix.h"
 #endif
 #include "game/weapons.h"
 #include "port/game.h"
@@ -228,7 +229,19 @@ public:
     // PC Mode: whether the view has a model (the host sets it: GameView::hasModel; unset, as headless: none)
     std::function<bool(uint32_t)> modelAvailable;
     bool pm_model_drawable(uint32_t model) override { return modelAvailable && modelAvailable(model); }
-    bool models_pc() const override { return pcModels; }   // (#52)
+    bool models_pc() const override { return pcModels; }   // (#52; mixmodels: Mixed's World row, as pcModels)
+    bool models_pc_humans() const override { return pcFor(kMixHumans); }   // (mixmodels: #81's Sophie, the Players and Humans row)
+    // mixmodels (GitHub #49): Models: Mixed, each row's model set (game/model_mix.h; synced online with the Models
+    // setting, in the settings hash); off: every row follows pcModels
+    ModelMix mix;
+    bool pcFor(int cat) const { return mix.on ? mix.pcFor(cat) : pcModels; }
+    bool pcType(int type) const { return pcFor(mixCatOfType(type)); }   // a creature type's row
+    // the cut creatures cannot be drawn (Models: PC: the PC files have no meshes for them; Mixed draws the arcade's
+    // there, so Survival / Horde keep them): game logic, synced online with the Models setting
+    bool cutMeshesMissing() const { return pcModels && !mix.on; }
+    // mixmodels (user 2026-11-12): the in-play HUD's 2D is the PC's sprites (Models: PC, or Mixed's HUD row; the
+    // full-screen 2D screens and the fades follow pcModels, the World row). Draws only (Hud)
+    bool hudPc() const { return mix.on ? mix.pcFor(kMixHud) : pcModels; }
     // carchars (user 2026-10-28: "in the beginning where they drive the car, can you make the custom P1 and P2
     // characters show?"; game/creature.cpp): the opening car's seats (player_char_props_draw) show each seat's own
     // character. A seat whose character has a car model in the model set keeps it (the arcade's Rogan / G pair in
@@ -714,6 +727,7 @@ public:
     bool hideMuzzle = false;   // Options > Gun Muzzle Flash off: the cut-scene guns' flash (draw-only)
     bool hideBlood = false;    // Options > Blood Particles off: the blood bursts / drips (draw-only)
     int transparency = 3;      // Options > Video > Transparency (draw-only): 0 Smooth, 1 Clean Edges, 2 Dithered (arcade), 3 Auto (by the models); RenderOptions::transparency
+    bool pcD3d = false;        // Options > Video > PC Renderer: Direct3D (draw-only, PC models: RenderOptions::pcBilinear; pcd3d #79)
     bool hideMarks = false;   // trailer: Trailer Mode: no MISS SHOT marks (models 0x3F5 / 0x3F6; draw-only)
     int ownSeat = -1;
     // gunfb (a light-gun player 2026-11-03: flashes where nobody of them fired): the computer teammates' seats (bit per
@@ -843,6 +857,7 @@ public:
     // (the chapter's, else that area's chapter stage). Empty otherwise
     std::map<uint32_t, int> actorAreas;
     std::map<int, int> actorAreaLook;   // Survival Mode: an area's colour rows taken from this type's look (galleryLook)
+    std::map<int, const char*> actorAreaRows;   // fix141: or these rows first (an arena's own creatures: their story look)
     void actor_areas_update();
     // charsel (user 2026-11-06: "the researcher's body with Rogan's head" in the ending): HOTD_PART_CHECK=1, the
     // part-ownership check: every drawn part of players 1 / 2's bodies (cut-scenes, the ending's own bodies, the game

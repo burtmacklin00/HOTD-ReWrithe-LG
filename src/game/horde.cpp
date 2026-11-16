@@ -661,7 +661,7 @@ float HordeMode::pickType(Runtime& rt, const Lane& l, uint32_t t, int16_t& type)
     // the tall ones; she walks with Cyril's axe set), Cyril (29, walking: action 0) -> Baba (his), Sam (11) -> Neozom (Sam's parts and list) or
     // Disiprin (the plain zombie set), Bentley and his variants -> Debu (Bentley's textures and lists)
     static const bool noCut = std::getenv("HOTD_HORDE_CUT") && std::string(std::getenv("HOTD_HORDE_CUT")) == "0";
-    if (!rt.pcModels && !noCut && l.life > 1) {
+    if (!rt.cutMeshesMissing() && !noCut && l.life > 1) {
         int pick[2] = {-1, -1}, n = 0;
         if (l.type == 28) pick[n++] = 10;
         else if (l.type == 29 && l.action == 0) pick[n++] = 66;
@@ -1000,7 +1000,7 @@ void HordeMode::placeAtStop(Runtime& rt)
         bool cut = false;
         for (const SurvivalCut& c : survivalCuts())
             cut = cut || c.type == type;
-        if (type < 0 || (cut && rt.pcModels))   // (the PC files have no cut creatures' meshes)
+        if (type < 0 || (cut && rt.cutMeshesMissing()))   // (the PC files have no cut creatures' meshes)
             type = kChapterTypes[std::clamp(chapter, 0, 3)][next() % 4], cut = false;
         int life = placeLife(type);
         if (cut)

@@ -292,6 +292,23 @@ void Runtime::shadow_setup(float y)
 void Runtime::shadow_update(uint32_t obj)
 {
     port::Game<A>::shadow_update(obj);
+    // fix142 (GitHub #91: PC Mode with arcade models, the Murrers' shadows far below them on Chapter 1's bridge): the
+    // floor in PC Mode is the PC's (floor_probe there: -25, the ground under the bridge; the arcade's floor has the
+    // bridge at -13), which is why THOTD.EXE stands that scene's members pc_molb_height_offset (12) higher
+    // (kind34_molb_member; molb_floor_y). The shadow is still projected onto the PC's floor: under the PC's bridge
+    // model, so it is hidden with PC models (as on the PC), but the arcade's bridge is open below and the shadows
+    // showed 12 under the worms, pushed along the light. With the arcade's world drawn, a Murrer's (type 6) shadow
+    // goes onto that floor raised by the offset (the plane's d - offset x n.y): the bridge the arcade's world shows.
+    // Drawing only (the projection: stored matrix 3, its copy 0x51FDF0, the cache 0x520A90..; the next shadow_update
+    // with the probed plane projects again). The models choice is the same on every PC online (net_game's hash)
+    if (pc_path() && !pcFor(kMixWorld) && mem.at<int16_t>(obj + 0xCC) == 6 && molb_height_offset() != 0.0f) {
+        LocalScope scope(*this);
+        const uint32_t plane = local_alloc(0x10);
+        for (uint32_t k = 0; k < 3; ++k)
+            mem.set32(plane + 4 * k, mem.u32(0x520A90 + 4 * k));
+        mem.set32(plane + 12, port::fbits(mem.f32(0x520A9C) - molb_height_offset() * mem.f32(0x520A94)));
+        shadow_projection(plane);
+    }
     shadowFloor_ = mem.f32(0x51FE18);
 }
 

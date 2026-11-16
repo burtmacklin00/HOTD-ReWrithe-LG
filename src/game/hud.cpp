@@ -46,9 +46,11 @@ in vec2 vUV;
 out vec4 oColor;
 uniform sampler2D uTex;
 uniform vec4 uTint;   // rainbow2: a > 0.5: the brightest channel times rgb (the sights in the rainbow)
+uniform float uFaint;   // vr141: the alpha times 1 - uFaint (Cut-scene Crosshairs: Subtle; 0: as drawn)
 void main() {
     oColor = texture(uTex, vUV);
     if (uTint.a > 0.5) oColor.rgb = max(oColor.r, max(oColor.g, oColor.b)) * uTint.rgb;
+    oColor.a *= 1.0 - uFaint;
 }
 )";
 
@@ -159,6 +161,7 @@ bool Hud::init(std::string& err)
     }
     uRect_ = gl::GetUniformLocation(program_, "uRect");
     uTint_ = gl::GetUniformLocation(program_, "uTint");
+    uFaint_ = gl::GetUniformLocation(program_, "uFaint");
     uUV_ = gl::GetUniformLocation(program_, "uUV");
     gl::UseProgram(program_);
     gl::Uniform1i(gl::GetUniformLocation(program_, "uTex"), 0);
@@ -643,7 +646,7 @@ const uint8_t* Hud::spanishCut(const Runtime& rt, const uint8_t* tiles)
 {
     esCuts_.clear();
     const std::string& es = hotd::pcSpanishTextures();
-    if (rt.pcModels || es.empty() || !tiles)
+    if (pc2D(rt) || es.empty() || !tiles)
         return tiles;
     if (!pcTried_ || pcEs_ != es)
         loadPcSprites();
@@ -740,7 +743,7 @@ int Hud::bossCodenameCell(uint32_t sprite)
 // clip; the cell words are the layout's tiles plus the bank's offset (that of a cell shown)
 const uint8_t* Hud::codenameTiles(const Runtime& rt, const uint8_t* tiles)
 {
-    if (!bossCodenames || rt.pcModels || !tiles)
+    if (!bossCodenames || pc2D(rt) || !tiles)
         return tiles;
     port::Mem& mem = rt.mem;
     const bool es = !hotd::pcSpanishTextures().empty() && !esSprite_.empty();
@@ -894,7 +897,7 @@ bool Hud::drawUnder(const Runtime& rt, int ww, int wh, const float clear[3])
     // THOTD.EXE 0x4B1448 -> body_draw) shows over the map's opaque picture (real PC pcpolish2\gameover t03351-t03465:
     // the figure on the trail at FRONTYARD); ours drew the map over it, hiding it. The PC 2D layer goes under the 3D
     // there. UNVERIFIED (teaser): the PC's draw order for that task group not read
-    if (rt.pcModels && pcSprites_.loaded() && mem.at<int16_t>(G::game_mode) == 5 &&
+    if (pc2D(rt) && pcSprites_.loaded() && mem.at<int16_t>(G::game_mode) == 5 &&
         (mem.u32(G::game_submode) == 2 || mem.u32(G::game_submode) == 3)) {
         gl::Viewport(0, 0, ww, wh);
         gl::ClearColor(clear[0], clear[1], clear[2], 1.0f);
@@ -903,7 +906,7 @@ bool Hud::drawUnder(const Runtime& rt, int ww, int wh, const float clear[3])
         pcUnderFrame_ = (long long)rt.frameCount;
         return true;
     }
-    if (rt.pcModels || !mem.mapped(kTileRam) || !mem.mapped(kCharRam))
+    if (pc2D(rt) || !mem.mapped(kTileRam) || !mem.mapped(kCharRam))
         return false;   // PC: Runtime::pcCells carries no priority (all over the 3D)
     subHide_ = pauseSelection < 0 && subPlan(rt).hide;   // (lang, subs: as draw() will)
     const bool composed = composeEs(rt, codenameTiles(rt, spanishCut(rt, withoutP2Notice(rt, clean || noText || subHide_ ? filteredTiles(rt) : mem.ptr(kTileRam)))),
@@ -1030,6 +1033,15 @@ bool Hud::vrScreen2D(const Runtime& rt)
         }
     }
     return false;
+}
+
+bool Hud::pc2D(const Runtime& rt)
+{
+    if (!rt.mix.on)
+        return rt.pcModels;
+    const int16_t mode = rt.mem.at<int16_t>(G::game_mode);
+    const bool screen = mode != 4 || rt.clear.active || rt.mem.at<int8_t>(G::chapter) >= 4 || vrScreen2D(rt);
+    return screen ? rt.pcModels : rt.hudPc();
 }
 
 bool Hud::vrAttract2D(const Runtime& rt) const
@@ -1756,6 +1768,11 @@ void Hud::drawSight(int player, int ww, int wh, float x, float y)
     else
         r[0] = std::floor(x) - float(seatCx_[player]), r[1] = std::floor(y) - float(seatCy_[player]), r[2] = float(seatDw_[player]),
         r[3] = float(seatDh_[player]);
+    if (sightScale_ != 1.0f) {   // vr141 (Cut-scene Crosshairs: Subtle): smaller about the aim point
+        const float cx = r[0] + r[2] * 0.5f, cy = r[1] + r[3] * 0.5f;
+        r[2] *= sightScale_, r[3] *= sightScale_;
+        r[0] = cx - r[2] * 0.5f, r[1] = cy - r[3] * 0.5f;
+    }
     const unsigned tex = seatTex_[player];
     const float pw = r[2], ph = r[3];
     gl::Viewport(0, 0, ww, wh);
@@ -1769,11 +1786,15 @@ void Hud::drawSight(int player, int ww, int wh, float x, float y)
     gl::BindTexture(gl::TEXTURE_2D, tex);
     if (sightTintOn_[player])   // rainbow2: Rainbow Blood's crosshair (drawSights)
         gl::Uniform4f(uTint_, sightTint_[player][0], sightTint_[player][1], sightTint_[player][2], 1.0f);
+    if (sightFaint_ > 0.0f)
+        gl::Uniform1f(uFaint_, sightFaint_);
     gl::BindVertexArray(vao_);
     gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
     gl::BindVertexArray(0);
     if (sightTintOn_[player])
         gl::Uniform4f(uTint_, 0.0f, 0.0f, 0.0f, 0.0f);
+    if (sightFaint_ > 0.0f)
+        gl::Uniform1f(uFaint_, 0.0f);
     gl::Disable(gl::BLEND);
     gl::Enable(gl::DEPTH_TEST);
 }
@@ -2361,8 +2382,8 @@ void Hud::drawLivesCount(const Runtime& rt, int ww, int wh)
         return;
     if (mem.at<uint8_t>(G::scene_state) != 2 && !rt.clear.active)
         return;
-    const bool pc = rt.pcModels && pcSprites_.loaded();
-    if (!pc && rt.pcModels)
+    const bool pc = rt.hudPc() && pcSprites_.loaded();
+    if (!pc && rt.hudPc())
         return;
     const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
     const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
@@ -2467,8 +2488,8 @@ void Hud::drawVrLeftRounds(const Runtime& rt, int ww, int wh)
     const Player& pl = mem.at<Player>(G::players, 0u);
     if (pl.state != 5)
         return;
-    const bool pc = rt.pcModels && pcSprites_.loaded();
-    if (!pc && rt.pcModels)
+    const bool pc = rt.hudPc() && pcSprites_.loaded();
+    if (!pc && rt.hudPc())
         return;
     const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
     const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
@@ -2640,7 +2661,7 @@ float Hud::scoreText(const Runtime& rt, std::vector<uint8_t>& dst, int W, int H,
     // (the arcade's font with PC models too: the PC's text sprites are 1.6 times the cell and ran into each other over
     // the shop; HOTD_SURVIVAL_PC_FONT=1: the PC's, to compare)
     static const bool pcFont = std::getenv("HOTD_SURVIVAL_PC_FONT") != nullptr;
-    const bool pc = pcFont && rt.pcModels && pcSprites_.loaded();
+    const bool pc = pcFont && rt.hudPc() && pcSprites_.loaded();
     // jabanner (2026-11-10: Japanese Survival's round banner and weapon lines were tiny, all stacked at the top: a
     // translation the score font has no letters for went to one small overlay): such a line in the language's font
     // (lang::fontFor: Noto for CJK / Thai / Arabic / Hebrew / Cyrillic / Greek; Latin-1 too) at the line's own place,
@@ -2722,8 +2743,8 @@ void Hud::drawSurvival(const Runtime& rt, int ww, int wh, int scale)
 {
     const SurvivalMode& h = rt.survival;
     const Weapons& wp = rt.weapons;
-    const bool pc = rt.pcModels && pcSprites_.loaded();
-    if (rt.pcModels && !pc)
+    const bool pc = rt.hudPc() && pcSprites_.loaded();
+    if (rt.hudPc() && !pc)
         return;
     const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
     const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
@@ -2954,8 +2975,8 @@ void Hud::drawSurvival(const Runtime& rt, int ww, int wh, int scale)
 // (rows 6.5 / 7.75); a translation the font has no letters for: the English lines
 void Hud::drawTotdNote(const Runtime& rt, int ww, int wh)
 {
-    const bool pc = rt.pcModels && pcSprites_.loaded();
-    if (rt.pcModels && !pc)
+    const bool pc = rt.hudPc() && pcSprites_.loaded();
+    if (rt.hudPc() && !pc)
         return;
     const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
     const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
@@ -2984,8 +3005,8 @@ void Hud::drawHorde(const Runtime& rt, int ww, int wh)
     const HordeMode& h = rt.horde;
     if (rt.mem.at<int16_t>(G::game_mode) != 4 || rt.mem.at<uint8_t>(G::scene_state) != 2 || rt.clear.active)
         return;
-    const bool pc = rt.pcModels && pcSprites_.loaded();
-    if (rt.pcModels && !pc)
+    const bool pc = rt.hudPc() && pcSprites_.loaded();
+    if (rt.hudPc() && !pc)
         return;
     const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
     const int H = pc ? assets::PcSprites::kHeight : assets::Arcade2D::kHeight;
@@ -3103,8 +3124,8 @@ void Hud::drawSeatHud(const Runtime& rt, int ww, int wh)
     // 2026-10-26: P3 / P4's score boxes showed without them; the band goes under their boxes)
     const bool inClear = rt.clear.active;
     const bool hudOn = mem.at<uint8_t>(G::scene_state) == 2 || inClear;
-    const bool pc = rt.pcModels && pcSprites_.loaded();
-    if (!pc && (rt.pcModels || !mem.mapped(kTileRam) || !mem.mapped(0x2000000)))
+    const bool pc = rt.hudPc() && pcSprites_.loaded();
+    if (!pc && (rt.hudPc() || !mem.mapped(kTileRam) || !mem.mapped(0x2000000)))
         return;
     const int unit = pc ? 10 : 8;   // pixels a cell (the PC's picture is 1.25 times the arcade's)
     const int W = pc ? assets::PcSprites::kWidth : assets::Arcade2D::kWidth;
@@ -3578,7 +3599,7 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
             fillRect(rgb, ww, wh, wh - h, wh);
         }
     }
-    if (rt.pcModels && !pcTried_)
+    if ((rt.pcModels || rt.hudPc()) && !pcTried_)
         loadPcSprites();
     const bool paused = pauseSelection >= 0;
     const SubPlan subPlanNow = paused ? SubPlan() : subPlan(rt);   // lang, subs (Options > Gameplay > Subtitles)
@@ -3586,7 +3607,7 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
     if (paused) {
         // the pause (0x418CC8): no 2D sprites, subtitle or chapter-clear lines
     }
-    else if (rt.pcModels && pcSprites_.loaded()) {
+    else if (pc2D(rt) && pcSprites_.loaded()) {   // (mixmodels: the HUD row in play)
         if (pcUnderFrame_ != (long long)rt.frameCount) {   // (not when drawUnder drew it under the 3D)
             // pcfix (GitHub #53): the staff roll's sheet is the arcade's black right part of the screen (the 3D window narrows
             // to 8 .. 256 of 496: kind120_letterbox_open_frame); the PC draws only its credit box there, so the 3D showed
@@ -3606,7 +3627,7 @@ void Hud::draw(const Runtime& rt, int ww, int wh, const float aim[4][2], bool sh
                 blackSides(ww, wh, 0.0f, sides);   // credits43: the ending's 4:3 cards (the 2D is inside the 4:3 screen)
         }
     }
-    else if (rt.pcModels) {
+    else if (pc2D(rt)) {
         if (!clean)   // (Clean View / Trailer Mode: none)
             drawPlaceholder(rt, ww, wh, scale);
     }
@@ -3689,6 +3710,10 @@ void Hud::drawSights(const Runtime& rt, int ww, int wh, const float aim[4][2])
     // (hudfix4, user 2026-10-26)
     const uint32_t sub = rt.mem.u32(G::game_submode);
     const bool ending = mode == 4 && (sub == 7 || sub == 8);
+    // vr141 (#80): Cut-scene Crosshairs: hidden / subtle (0.6 x the size, 40 % opacity) while a cut-scene plays
+    const bool cut = cutSights < 2 && inCutscene(rt);
+    sightFaint_ = cut && cutSights == 1 ? 0.6f : 0.0f;
+    sightScale_ = cut && cutSights == 1 ? 0.6f : 1.0f;
     for (int p = 0; p < rt.seat_count(); ++p) {   // 4P: players 3 / 4 too (their records in the 4P block)
         drewSight[p] = false;
         const int32_t st = rt.mem.at<Player>(rt.player_rec(p)).state;
@@ -3700,7 +3725,7 @@ void Hud::drawSights(const Runtime& rt, int ww, int wh, const float aim[4][2])
                 cross_[p].drawAt(ww, wh, aim[p][0], aim[p][1]);
         } else if (drawCross[p] && !paused && !clean && !ending && (st == 5 || st == 8) && mode == 4) {
             drewSight[p] = true;
-            if (!showSights || game::sightStyleKept(sights[p].style) == game::kSightOff)
+            if (!showSights || game::sightStyleKept(sights[p].style) == game::kSightOff || (cut && cutSights == 0))
                 continue;   // gunfb: no crosshair (Show Crosshairs off, or the player's Crosshair Off): nothing drawn
             // rainbow2: Rainbow Blood's HUD & Crosshair (Crosshair / Both): the sight cycles through the rainbow, each
             // player half a cycle (P2) or a quarter (P3 / P4) on, also with Colours: Together, so they stay apart
@@ -3717,7 +3742,7 @@ void Hud::drawSights(const Runtime& rt, int ww, int wh, const float aim[4][2])
                 cross_[p].setStyle(0, c[0], c[1], c[2]);
                 cross_[p].setText({"  |  ", "--+--", "  |  "}, 2);
             }
-            if (buildSeatSight(p, rt.pcModels, wh, look))
+            if (buildSeatSight(p, rt.hudPc(), wh, look))
                 drawSight(p, ww, wh, aim[p][0], aim[p][1]);
             else
                 cross_[p].drawAt(ww, wh, aim[p][0], aim[p][1]);
@@ -3725,6 +3750,15 @@ void Hud::drawSights(const Runtime& rt, int ww, int wh, const float aim[4][2])
                 cpuTag_[p].drawAnchored(ww, wh, aim[p][0], aim[p][1] + float(wh) / 30.0f, 0.5f, 0.0f);
         }
     }
+    sightFaint_ = 0.0f, sightScale_ = 1.0f;
+}
+
+// vr141 (#80): a cut-scene for Cut-scene Crosshairs: in game, the HUD's play state off (scene_state 2 is play; 4 the
+// cut-scenes' HOLD YOUR FIRE!) or the cut-scene bars on; not the chapter clear (its results keep the sights)
+bool Hud::inCutscene(const Runtime& rt)
+{
+    return rt.mem.at<int16_t>(G::game_mode) == 4 && !rt.clear.active &&
+           (rt.mem.at<uint8_t>(G::scene_state) != 2 || rt.letterbox > 0);
 }
 
 
@@ -3848,7 +3882,7 @@ bool Hud::vrSight(const Runtime& rt, int seat, int wh, unsigned& tex, float& asp
     if (!showSights || game::sightStyleKept(sights[seat].style) == game::kSightOff)
         return false;   // gunfb: no crosshair
     const int32_t st = rt.mem.at<Player>(rt.player_rec(seat)).state;
-    if ((st != 5 && st != 8) || !buildSeatSight(seat, rt.pcModels, wh, rt.look_seat(seat)))
+    if ((st != 5 && st != 8) || !buildSeatSight(seat, rt.hudPc(), wh, rt.look_seat(seat)))
         return false;
     tex = seatTex_[seat];
     aspect = seatSprite_[seat] ? float(seatW_[seat]) / float(std::max(1, seatH_[seat]))

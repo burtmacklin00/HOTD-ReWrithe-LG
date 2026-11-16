@@ -254,8 +254,9 @@ void menuInGameRows(std::vector<Frontend::Extra>& rows, const std::string& title
     // the rules rows that still apply at once (draw-only or this PC's own)
     static const char* const kLive[] = {"Hold to Skip Cut-scenes", "Score Display", "Teammate Crosshair Flashes", "Auto Reload",
                                         "Edge Reload", "Chapter Retry", "Advanced", "Music Numbering", "Invincibility", "Infinite Ammo",
-                                        "Dual Pistols (VR)", "Laser (VR)", "Crosshair (VR)", "Hands in Menus (VR)"};
-    static const char* const kNextRows[] = {"Models", "Aspect", "Sound", "Player 1 Input", "Player 2 Input", "Player 3 Input",
+                                        "Dual Pistols (VR)", "Laser (VR)", "Crosshair (VR)", "Hands in Menus (VR)", "Gun Hand (VR)",
+                                        "Cut-scene Crosshairs"};
+    static const char* const kNextRows[] = {"Models", "Mixed Models", "Players and Humans", "Creatures", "Bosses", "World", "Effects", "HUD", "Arcade Extras", "Aspect", "Sound", "Player 1 Input", "Player 2 Input", "Player 3 Input",
                                             "Player 4 Input", "Light Gun Type", "Players in Arcade", "Solo Player Seat"};
     static const char* const kLockRows[] = {"Repair / Change Files", "Check for Updates", "What's New", "Language", "Local 2 Players",
                                             "Local 4 Players", "Online Co-op", "Trailer Mode", "Game Speed"};
@@ -293,10 +294,10 @@ void menuReset(LaunchConfig& c, int page)
     const LaunchConfig d;
     switch (page) {
     case kCatVideo:
-        c.models = d.models, c.aspect = d.aspect, c.menuStyle = d.menuStyle, c.liveBackground = d.liveBackground;
+        c.models = d.models, c.mixedPc = d.mixedPc, c.aspect = d.aspect, c.menuStyle = d.menuStyle, c.liveBackground = d.liveBackground;
         c.fullscreen = d.fullscreen, c.exclusive = d.exclusive, c.frameRate = d.frameRate, c.menuFps = d.menuFps, c.vsync = d.vsync, c.smooth = d.smooth;
         c.crosshairs = d.crosshairs, c.hitSparks = d.hitSparks, c.muzzleFlash = d.muzzleFlash, c.shotFlashSize = d.shotFlashSize, c.showCrosshairs = d.showCrosshairs;
-        c.bloodParticles = d.bloodParticles, c.clearMarks = d.clearMarks, c.transparency = d.transparency;
+        c.bloodParticles = d.bloodParticles, c.clearMarks = d.clearMarks, c.transparency = d.transparency, c.pcRenderer = d.pcRenderer;
         c.resFullW = d.resFullW, c.resFullH = d.resFullH, c.resWinW = d.resWinW, c.resWinH = d.resWinH;
         c.crt = d.crt;
         c.gamma = d.gamma, c.menuGamma = d.menuGamma, c.blackLevel = d.blackLevel, c.vrr = d.vrr;
@@ -308,7 +309,7 @@ void menuReset(LaunchConfig& c, int page)
         break;
     case kCatControls:
         if (menuQuest)   // (questui: the Quest's Controls page holds the VR rows)
-            c.vrDual = d.vrDual, c.vrLaser = d.vrLaser, c.vrCrosshair = d.vrCrosshair, c.vrMenuHands = d.vrMenuHands,
+            c.vrDual = d.vrDual, c.vrLaser = d.vrLaser, c.vrCrosshair = d.vrCrosshair, c.vrMenuHands = d.vrMenuHands, c.vrGunHand = d.vrGunHand,
             c.vrView = d.vrView, c.vrScreenDist = d.vrScreenDist, c.vrScreenSize = d.vrScreenSize, c.vrCutscenes = d.vrCutscenes,
             c.vrVignette = d.vrVignette;   // (vrcomfort)
         c.p1Input = d.p1Input, c.p2Input = d.p2Input, c.p3Input = d.p3Input, c.p4Input = d.p4Input;
@@ -324,6 +325,7 @@ void menuReset(LaunchConfig& c, int page)
         c.blood = d.blood, c.bloodRgb = d.bloodRgb, c.autoReload = d.autoReload, c.edgeReload = d.edgeReload, c.vrDual = d.vrDual, c.vrLaser = d.vrLaser, c.vrCrosshair = d.vrCrosshair, c.vrMenuHands = d.vrMenuHands, c.scoreDisplay = d.scoreDisplay, c.bossCodenames = d.bossCodenames, c.attractGore = d.attractGore, c.holdSkip = d.holdSkip, c.charSelect = d.charSelect, c.totdLive = d.totdLive, c.totdPractice = d.totdPractice, c.totdPacks = d.totdPacks, c.totdMutators = d.totdMutators, c.totdTts = d.totdTts;
         c.vrView = d.vrView, c.vrScreenDist = d.vrScreenDist, c.vrScreenSize = d.vrScreenSize, c.vrCutscenes = d.vrCutscenes;
         c.vrVignette = d.vrVignette;   // (vrcomfort)
+        c.vrGunHand = d.vrGunHand, c.cutCross = d.cutCross;   // (vr141)
         c.subtitles = d.subtitles, c.subtitleSize = d.subtitleSize;   // (subs)
         subs::configure(c.subtitles, c.subtitleSize);
         c.flashlight = d.flashlight, c.bigHeads = d.bigHeads, c.shotgun = d.shotgun, c.partyBoard = d.partyBoard, c.hardcore = d.hardcore, c.freeFire = d.freeFire, c.machineGun = d.machineGun, c.weaponSwitch = d.weaponSwitch, c.suddenDeath = d.suddenDeath, c.married = d.married, c.vampire = d.vampire, c.hostageCrisis = d.hostageCrisis, c.roulette = d.roulette, c.survival = d.survival, c.exploding = d.exploding, c.funLook = d.funLook, c.turbo = d.turbo, c.bossRush = d.bossRush;   // (Light Gun Edition)
@@ -344,6 +346,9 @@ void menuReset(LaunchConfig& c, int page)
         for (int s = 0; s < 4; ++s) c.sights[s] = d.sights[s];
         c.teamFlash = d.teamFlash;
         break;
+    case kResetMixed:   // (mixmodels: the Mixed Models page's rows; Models stays Mixed)
+        c.mixedPc = d.mixedPc, c.mixExtras = d.mixExtras;
+        break;
     default:
         break;
     }
@@ -353,6 +358,17 @@ void menuReset(LaunchConfig& c, int page)
 static void vrRows(std::vector<X>& r, LaunchConfig& c, const MenuHooks& h)
 {
     const auto save = [h]() { if (h.save) h.save(); };
+    // vr141 (#86, user 2026-11-12: "VR left-handed mode"): the gun hand; not set yet (-1): vr.ini left_handed is the
+    // default it shows; a click sets it here (launcher.ini vrgunhand=)
+    if (h.vrGunLeftDefault) {
+        auto left = [&c, d = h.vrGunLeftDefault]() { return c.vrGunHand >= 0 ? c.vrGunHand != 0 : d(); };
+        r.push_back({"Gun Hand (VR)", [left]() { return std::string(left() ? "Left" : "Right"); },
+                     [&c, save, left]() { c.vrGunHand = left() ? 0 : 1; save(); },
+                     "Which hand holds the gun. Left: the gun, its laser and its reload buttons on the left controller, "
+                     "the empty hand on the right (Pause: the right B; Start: the right A). VR only"});
+        listed(r, {"Right", "Left"});
+        experimental(r);
+    }
     // vr4 (user 2026-11-09): VR's dual pistols, a magazine each; only in a VR run (hidden in the flat game). Not set
     // yet (-1): vr.ini dual_pistols is the default it shows; a click sets it here (launcher.ini vrdual=)
     if (h.vrDualDefault) {
@@ -450,11 +466,37 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
     }
     switch (category) {
     case kCatVideo:
-        r.push_back({"Models", [&c]() { return std::string(c.models == 1 ? "PC" : "Arcade"); },
-                     [&c, save]() { c.models = c.models == 1 ? 0 : 1; save(); },
+        // mixmodels (GitHub #49, user 2026-11-12): a third choice, Mixed: each kind of model from either set (its rows on
+        // the Mixed Models page). Not on the Quest: both sets loaded at once is twice the models' memory (questui)
+        r.push_back({"Models", [&c]() { return std::string(c.models == 2 && !menuQuest ? "Mixed" : c.models == 1 ? "PC" : "Arcade"); },
+                     [&c, save]() { c.models = c.models == 0 ? 1 : c.models == 1 && !menuQuest ? 2 : 0; save(); },
                      "The 3D models and world: the arcade's (Model 2) or the PC release's"});
-        listed(r, {"Arcade", "PC"});
+        r.back().clickBack = [&c, save]() { c.models = c.models == 0 ? (menuQuest ? 1 : 2) : c.models == 2 ? 1 : 0; save(); };
+        if (menuQuest)
+            listed(r, {"Arcade", "PC"});
+        else
+            listed(r, {"Arcade", "PC", "Mixed"});
         previewed(r, h, "models");   // (fix28: the same frame with each)
+        r.back().previewList = {0, 1};   // (mixmodels: no picture of a mix)
+        if (!menuQuest) {   // mixmodels: Mixed's page (its five rows)
+            r.push_back({"Mixed Models", []() { return page("Open"); }, [h]() { if (h.mixedPage) h.mixedPage(); },
+                         "Choose the arcade's or the PC's models for each kind; where the PC files have none, the arcade's are drawn"});
+            r.back().off = [&c]() { return c.models == 2 ? std::string() : std::string("For Models: Mixed"); };
+        }
+        // pcd3d (GitHub #79, 2026-11-12): THOTD.EXE has two drivers, picked by its command line (0x563440: "ddraw" /
+        // "d3d"): the DirectDraw software one (0x5677F0, driver type 1: point-sampled texels) and the Direct3D one
+        // (0x573CA0, type 3: TEXTUREMAG / MIN LINEAR on the 3D polygons, 0x583A67; the 2D sprites stay point-sampled,
+        // their polygon flag 0x1000 at 0x583133). Software is the look so far; the PC models only (grey otherwise)
+        r.push_back({"PC Renderer", [&c]() { return std::string(c.pcRenderer == 1 ? "Direct3D" : "Software"); },
+                     [&c, save]() { c.pcRenderer = c.pcRenderer == 1 ? 0 : 1; save(); },
+                     "How the PC models are drawn: Software (sharp, blocky textures, as the 1998 PC's software renderer) or "
+                     "Direct3D (smooth, filtered textures, as its Direct3D renderer)"});
+        r.back().clickBack = r.back().click;
+        indexed(r, {"Software", "Direct3D"}, [&c]() { return c.pcRenderer == 1 ? 1 : 0; },
+                [&c, save](int k) { c.pcRenderer = k != 0 ? 1 : 0; save(); });
+        r.back().off = [&c]() {
+            return c.models != 0 ? std::string() : std::string("For the PC models: set Models to PC");   // (mixmodels: Mixed too)
+        };
         // aspect1610: 16:9 (shown as "16:9" since prerel; was "Widescreen"; fills any window) -> 16:10 (fills a 16:10 screen, thin bars on a wider one) -> 4:3
         r.push_back({"Aspect", [&c]() { return std::string(c.aspect == 1 ? "4:3" : c.aspect == 2 ? "16:10" : "16:9"); },
                      [&c, save]() { c.aspect = c.aspect == 0 ? 2 : c.aspect == 2 ? 1 : 0; save(); },
@@ -802,6 +844,8 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         r.push_back({"Light Gun Setup", []() { return std::string("Start"); }, [h]() { if (h.gunSetup) h.gunSetup(); },
                      "Each player pulls their light gun's trigger in turn; saved in LightgunHID.ini and used at every start"});
         // (Light Gun Edition: no "Light Guns" Assign page: LightgunHID.ini / Light Gun Setup decide whose gun is whose)
+        // (Light Gun Edition, user 2026-11-16: no Wii Remotes row: "no need for the Wii Remote support"; v1.4.1's
+        // code stays, unused)
         for (int p = 0; p < 4; ++p)
             lightGunRow(r, "Light Gun: Player " + std::to_string(p + 1) + (p >= 2 ? " (4P)" : ""), c.gunCal[p], save);
         r.push_back({"Light Gun Type", [&c]() {
@@ -957,6 +1001,15 @@ std::vector<Frontend::Extra> menuCategoryRows(int category, LaunchConfig& c, con
         }
         r.push_back({"Hold to Skip Cut-scenes", [&c]() { return onOff(c.holdSkip); }, [&c, save]() { c.holdSkip = !c.holdSkip; save(); },
                      "Hold the trigger 2 s to skip a cut-scene the arcade cannot skip (black bars up): a red ring fills. Offline"});
+        // vr141 (#80, user 2026-11-12): the players' crosshairs while a cut-scene plays (Hud::cutSights), flat and VR
+        {
+            static const char* const kCut[3] = {"Hide", "Subtle", "Show"};
+            auto setCut = [&c, save](int k) { c.cutCross = std::clamp(k, 0, 2); save(); };
+            r.push_back({"Cut-scene Crosshairs", [&c]() { return std::string(kCut[std::clamp(c.cutCross, 0, 2)]); },
+                         [&c, setCut]() { setCut((c.cutCross + 1) % 3); },
+                         "The crosshairs while a cut-scene plays. Hide: none. Subtle: small and faint. Show: as in play"});
+            indexed(r, {"Hide", "Subtle", "Show"}, [&c]() { return std::clamp(c.cutCross, 0, 2); }, setCut);
+        }
         r.push_back({"Attract Gore", [&c]() { return onOff(c.attractGore); },
                      [&c, save]() { c.attractGore = !c.attractGore; hotd::port::gAttractGore = c.attractGore; save(); },
                      "The attract demo's shots blow off heads and limbs, as in the 1998 PC version. Off: as the arcade (Revision A)"});
@@ -1214,7 +1267,8 @@ std::vector<X> menuModRows(LaunchConfig& c, const std::vector<ModPack>& mods, st
         // leftovers (user: "the mod settings need a better experience"): who made it and its version under its name
         // (grey: no action; its help line: the mod's description)
         if (!mp.author.empty() || !mp.version.empty()) {
-            const std::string by = std::string(mp.type == "textures" ? (modelPackOnly(mp) ? "  Model pack" : "  Texture pack") : "  Built-in mod") +
+            const std::string by = std::string(mp.type == "textures" ? (modelPackOnly(mp) ? "  Model pack" : "  Texture pack")
+                                               : mp.type == "splash" ? "  Splash screen" : "  Built-in mod") +   // (menu141)
                                    (mp.author.empty() ? std::string() : ", by " + (mp.author.size() > 18 ? util::utf8Head(mp.author, 17) + "." : mp.author));
             r.push_back({by, [v = mp.version]() { return v.empty() ? std::string() : "v" + v; }, nullptr, about(mp)});
             r.back().raw = true;
@@ -1521,6 +1575,37 @@ bool isMenuLanguageName(const std::string& text)
         if (!i.english.empty() && t == i.name + " (" + i.english + ")")
             return true;
     return false;
+}
+
+// mixmodels (GitHub #49, user 2026-11-12): the Mixed Models page: each kind of model from the arcade's set or the PC's
+std::vector<Frontend::Extra> menuMixedRows(LaunchConfig& c, const MenuHooks& h)
+{
+    const auto save = [h]() { if (h.save) h.save(); };
+    std::vector<X> r;
+    static const char* const kName[kMixCats] = {"Players and Humans", "Creatures", "Bosses", "World", "Effects", "HUD"};
+    static const char* const kHelp[kMixCats] = {
+        "Rogan, G, Sophie, the researchers and PC Mode's characters",
+        "The zombies and the other enemies",
+        "The Chariot, the Hangedman, the Hermit and the Magician",
+        "The stages, the sky, doors and props; also the full-screen 2D screens (title, chapter cards, GAME OVER)",
+        "Blood, shot flashes, sparks, hit marks and splashes",
+        "The bullets, life torches, scores, messages and crosshairs over the game"};   // (the user 2026-11-12: a row of its own)
+    for (int k = 0; k < kMixCats; ++k) {
+        const int bit = 1 << k;
+        r.push_back({kName[k], [&c, bit]() { return std::string((c.mixedPc & bit) ? "PC" : "Arcade"); },
+                     [&c, save, bit]() { c.mixedPc ^= bit; save(); }, kHelp[k]});
+        indexed(r, {"Arcade", "PC"}, [&c, bit]() { return (c.mixedPc & bit) ? 1 : 0; },
+                [&c, save, bit](int v) { c.mixedPc = v ? (c.mixedPc | bit) : (c.mixedPc & ~bit); save(); });
+        r.back().off = [&c]() { return c.models == 2 ? std::string() : std::string("For Models: Mixed"); };
+    }
+    // (user 2026-11-13) the PC rows' arcade fallback for what the real PC draws nothing for: the bodies' shadows and the
+    // Chariot's armor pieces (GameView; ModelMix::extras)
+    r.push_back({"Arcade Extras", [&c]() { return onOff(c.mixExtras); }, [&c, save]() { c.mixExtras = !c.mixExtras; save(); },
+                 "On: the PC rows also get the arcade's body shadows and the Chariot's armor pieces, which the PC files lack. Off: as the 1998 PC"});
+    listed(r, {"Off", "On"});
+    r.back().off = [&c]() { return c.models == 2 ? std::string() : std::string("For Models: Mixed"); };
+    resetRow(r, h, kResetMixed);
+    return r;
 }
 
 std::vector<Frontend::Extra> menuAdvancedRows(LaunchConfig& c, const MenuHooks& h)

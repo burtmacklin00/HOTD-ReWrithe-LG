@@ -57,6 +57,7 @@ uniform samplerBuffer uSortKeys;   // Renderer::sortKeysOf: 4 texels per triangl
 uniform vec3 uCamFwd;
 uniform float uHybrid;          // depthfix: Depth Buffer's key band (renderer.h DrawDepth), 0 = off
 uniform int uKeyless;           // depthopt: the item drawn per pixel under Arcade Sort (a mod's depth = buffer): its keys unread
+uniform int uPcKeys;            // mixmodels (#49): Models: Mixed: 1 a PC model with its own sort keys (DrawItem::pcKeyed), 2 an arcade model by its plain depth (keyless)
 uniform vec2 uProj;             // depthfix: the projection's depth terms: ndc z = uProj.x - uProj.y / view z
 uniform float uBiasScale;       // depthfix: the near plane (the NDC biases were tuned at near 1; Free Cam 0.1)
 uniform int uRainbow;           // cosmods: RenderOptions::rainbow (0 off, 1 per item, 2 one hue, 3 the custom colour)
@@ -148,7 +149,7 @@ void main() {
     vSortKz = -1.0;
     vSortDepth = -1.0;
     float kz = 0.0;
-    if ((uSort != 0 || uHybrid > 0.0) && uShading == 1) {
+    if ((uSort != 0 || uHybrid > 0.0) && ((uShading == 1 && uPcKeys != 2) || uPcKeys == 1)) {
         int t = gl_VertexID / 3;
         vec4 k0 = texelFetch(uSortKeys, t * 4);
         int mode = uKeyless != 0 ? 0 : int(k0.w);
@@ -202,7 +203,7 @@ R"(
 #endif
         }
     }
-    if (uSort != 0 && uShading == 1) {
+    if (uSort != 0 && ((uShading == 1 && uPcKeys != 2) || uPcKeys == 1)) {
         // float_to_zval with the z-sort register's value: HOTD sends 4.0 (geometry command 0x04000808 in every display
         // list of the fullgame_bufram dumps; MAME raster command 0x08, z_adjust), so the exponent counts from 2: keys
         // 2^-10 .. 2^17 units apart, below 4 units with less precision (depthcmp, 2026-10-27; before: 1.0 assumed).
@@ -373,7 +374,9 @@ uniform int uPcCullSign;         // which side of a PC polygon (normal from its 
 uniform int uCull;               // Model 2 back-face culling (MAME check_culling)
 uniform int uMip;                // Model 2 texture mip levels
 uniform float uFade;             // DrawItem::fade
+uniform float uDissolve;         // vr141: DrawItem::dissolve (the VR fade-in: that part of the pixels left out, 4 x 4 ordered)
 uniform int uSideOnly;           // DrawItem::sideOnly: no pixels inside the centred 4:3 picture
+uniform mat4 uGameVP;            // vr141: a VR eye's draw: the game camera's 4:3 view-projection (the sideOnly pieces' clip)
 uniform vec2 uSideClip;          // its centre x and half width in pixels
 uniform int uSideCover;          // render5: 1 = uCover holds the zone's coverage (alpha > 0: drawn) for the sideOnly items
 uniform sampler2D uCover;
@@ -548,6 +551,11 @@ void prepassDiscards() {
 )"  // (MSVC: the raw string's size limit)
 R"(
 void main() {
+    if (uDissolve > 0.0) {   // vr141 (#78): a creature fading in (VR): a 4 x 4 ordered dither's share of its pixels left out
+        ivec2 q = ivec2(gl_FragCoord.xy);
+        int a = ((q.x ^ q.y) & 1) * 2 + (q.y & 1), b = (((q.x >> 1) ^ (q.y >> 1)) & 1) * 2 + ((q.y >> 1) & 1);
+        if ((float(a * 4 + b) + 0.5) / 16.0 < uDissolve) discard;
+    }
 #ifdef BAND_SHIFT_TEST
     if (uBandShift > 1e30) discard;   // (sinkfix test: an extra uniform first, the others at other places)
 #endif
@@ -567,6 +575,12 @@ void main() {
 #endif
     if ((vFL.x & CHECKER) != 0u && ((int(gl_FragCoord.x) + int(gl_FragCoord.y)) & 1) != 0) discard;
     if (uSideOnly == 1 && abs(gl_FragCoord.x - uSideClip.x) < uSideClip.y) discard;
+    // vr141 (#78): a VR eye (uSideClip.y < 0): a neighbouring zone's piece across the game camera's 4:3 edge is drawn
+    // with the zone (depth-tested) only outside the game camera's 4:3 frustum, where the arcade's zone list decides
+    if (uSideOnly == 1 && uSideClip.y < 0.0) {
+        vec4 g = uGameVP * vec4(vWorld, 1.0);
+        if (g.w > 0.0 && abs(g.x) < g.w && abs(g.y) < g.w) discard;
+    }
     // render5 (the player's list: "background areas not culled through empty doors"): a neighbouring zone's piece fills
     // only a hole of the side strip itself. Where the zone drew nothing in the 4:3 picture's edge column and nothing
     // between it and this pixel (a doorway / opening the original shows black running out of the picture), it stays
@@ -1115,7 +1129,7 @@ bool Renderer::init(std::string& err)
     makeSpareTextures();
     // the uniforms the draw sends, by name (each member: its location in program_)
     const std::pair<const char*, gl::GLint*> uniforms[] = {
-        {"uSort", &uSort_}, {"uHybrid", &uHybrid_}, {"uKeyless", &uKeyless_}, {"uProj", &uProj_},
+        {"uSort", &uSort_}, {"uHybrid", &uHybrid_}, {"uKeyless", &uKeyless_}, {"uPcKeys", &uPcKeys_}, {"uProj", &uProj_},
         {"uBiasScale", &uBiasScale_}, {"uSortItem", &uSortItem_}, {"uPrepass", &uPrepass_}, {"uHasRepl", &uHasRepl_},
         {"uPcFilter", &uPcFilter_}, {"uGreyRepl", &uGreyRepl_}, {"uViewProj", &uViewProj_}, {"uOffset", &uOffset_},
         {"uRot", &uRot_}, {"uUVScroll", &uUVScroll_}, {"uShading", &uShading_}, {"uLighting", &uLighting_},
@@ -1123,7 +1137,7 @@ bool Renderer::init(std::string& err)
         {"uCamPos", &uCamPos_}, {"uM2Known", &uM2Known_}, {"uM2Gamma", &uM2Gamma_}, {"uM2Black", &uM2Black_},
         {"uCull", &uCull_}, {"uMip", &uMip_}, {"uPcCullSign", &uPcCullSign_}, {"uClampUV", &uClampUV_},
         {"uDepthBias", &uDepthBias_}, {"uFloorY", &uFloorY_}, {"uFloorPull", &uFloorPull_}, {"uPush", &uPush_},
-        {"uFade", &uFade_}, {"uSideOnly", &uSideOnly_}, {"uSideClip", &uSideClip_}, {"uFlat", &uFlat_},
+        {"uFade", &uFade_}, {"uDissolve", &uDissolve_}, {"uSideOnly", &uSideOnly_}, {"uSideClip", &uSideClip_}, {"uGameVP", &uGameVP_}, {"uFlat", &uFlat_},
         {"uTie", &uTie_}, {"uTieItem", &uTieItem_}, {"uIdMode", &uIdMode_}, {"uGrey", &uGrey_},
         {"uRainbow", &uRainbow_}, {"uRainbowPhase", &uRainbowPhase_}, {"uBloodRgb", &uBloodRgb_},   // (cosmods)
         {"uRainbowTable", &uRainbowTable_}, {"uRainbowGame", &uRainbowGame_}, {"uRainbowSync", &uRainbowSync_},
@@ -1286,7 +1300,7 @@ void Renderer::upload(const StageData& stage)
                 continue;
             }
             for (const Mesh& m : model.meshes)
-                if (!m.vertices.empty()) sortKeysOf(m, m.vertices.size(), keys);
+                if (!m.vertices.empty()) sortKeysOf(m, m.vertices.size(), keys, pcSortKeys && stage.source == Source::PC);
         }
         keys.resize(std::max<size_t>(total / 3 * 16, 16), 0.0f);
         gl::GenBuffers(1, &g.sortBuf);
@@ -1390,19 +1404,21 @@ void Renderer::upload(const StageData& stage)
     textureBytes += tex, vertexBytes += vtx;
 }
 
-void Renderer::sortKeysOf(const Mesh& m, size_t count, std::vector<float>& out)
+void Renderer::sortKeysOf(const Mesh& m, size_t count, std::vector<float>& out, bool pcMin)
 {
     const std::vector<Vertex>& v = m.vertices;
     size_t side = 0;   // m.sortKeys, in triangle order
     for (size_t t = 0; t < count / 3; ++t) {
         float k[16] = {};
         const Vertex* a = &v[t * 3];
-        const int mode = (a->layer & kSortMask) >> kSortShift;
+        // (mixmodels: pcMin, a PC triangle: keyed by its nearest corner, mode 1)
+        const int mode = pcMin ? 1 : (a->layer & kSortMask) >> kSortShift;
         while (side < m.sortKeys.size() && m.sortKeys[side].tri < t) ++side;
         if (mode != 0) {
             // the polygon's corners: a quad's two triangles (0 1 2, 0 2 3) each lack one, taken from the other
             const Vertex* c[4] = {&a[0], &a[1], &a[2], &a[2]};
-            if ((a->layer & kSortQuadFirst) && (t + 1) * 3 + 2 < v.size()) c[3] = &v[t * 3 + 5];
+            if (pcMin) {}   // (one triangle: its third corner twice)
+            else if ((a->layer & kSortQuadFirst) && (t + 1) * 3 + 2 < v.size()) c[3] = &v[t * 3 + 5];
             else if ((a->layer & kSortQuadSecond) && t > 0) c[3] = &v[t * 3 - 2];
             for (int i = 0; i < 4; ++i) std::copy_n(c[i]->pos, 3, &k[i * 4]);
             k[3] = float(mode);
@@ -1595,7 +1611,13 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     static const float camZoom = std::getenv("HOTD_CAM_ZOOM") ? std::max(0.2f, float(std::atof(std::getenv("HOTD_CAM_ZOOM")))) : 1.0f;
     float proj[16] = {t * camZoom / aspect, 0, 0, 0, 0, t * camZoom, 0, 0, cam.shift[0], cam.shift[1], (fa + n) / (fa - n), 1,
                       0, 0, -2 * fa * n / (fa - n), 0};   // (w = z: the shift moves every point the same on screen)
+    float gameVP[16] = {};
     if (eye) {   // vr: the eye's own view and (off-axis) frustum; the eye position / forward for the shading from its view
+        // vr141 (#78): the game camera's own 4:3 frustum (248 x 192, the arcade's) first: the sideOnly pieces' clip
+        float gp[16];
+        std::memcpy(gp, proj, sizeof gp);
+        gp[0] = proj[5] * 192.0f / 248.0f;
+        multiply(gp, view, gameVP);
         std::memcpy(view, eye->view, sizeof view);
         for (int k = 0; k < 3; ++k) {
             r[k] = view[k * 4], u[k] = view[k * 4 + 1], f[k] = view[k * 4 + 2];
@@ -1632,6 +1654,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     gl::BindTexture(gl::TEXTURE_2D, coverTex_);
     gl::ActiveTexture(gl::TEXTURE0);
     gl::UniformMatrix4fv(uViewProj_, 1, gl::FALSE_, vp);
+    if (eye) gl::UniformMatrix4fv(uGameVP_, 1, gl::FALSE_, gameVP);   // (vr141)
     gl::Uniform1i(uLighting_, opt.lighting ? 1 : 0);
     gl::Uniform1i(uFilter_, opt.filter ? 1 : 0);
     gl::Uniform1i(uTransp_, std::clamp(opt.transparency, 0, 2));   // (team: Transparency)
@@ -1688,7 +1711,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         int n = -1;   // -1: not sent yet in this draw
     };
     enum { kOffset, kRot, kBias, kFloorY, kFloorPull, kPush, kFade, kRamp, kBodyHue, kFlat, kUV, kShading, kM2Known, kM2Light, kGrey, kHasRepl,
-           kClampUV, kSortItem, kHybrid, kKeyless, kSideOnly, kPalOver, kPcTint, kSlots };
+           kClampUV, kSortItem, kHybrid, kKeyless, kSideOnly, kPalOver, kPcTint, kDissolve, kTransp, kPcKeys, kSlots };
     Cache cache[kSlots];
     auto changed = [&](int slot, const float* v, int n) {
         Cache& c = cache[slot];
@@ -1782,9 +1805,10 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
     // coverage in the alpha (cleared to 0, its pixels write 1) copied to uCover, then the depth cleared and the pieces
     // drawn where the zone drew nothing and the opening does not run on from the 4:3 picture (the fragment shader).
     // Before, a doorway cut by the picture's edge was black inside it and showed the next room beside it
+    static const bool vrSideOld = std::getenv("HOTD_VR_SIDE_OLD") != nullptr;   // (vr141: comparisons: under the zone)
     bool hasSide = false;
     for (const DrawItem& it : items)
-        hasSide = hasSide || it.sideOnly;
+        hasSide = hasSide || (it.sideOnly && (!eye || vrSideOld));   // (vr141: a VR eye draws them with the zone, clipped: uGameVP)
     static const bool sideOld = std::getenv("HOTD_SIDE_OLD") != nullptr;   // (comparisons: the visfix order, no cover test)
     const bool cover = hasSide && !sideOld && !eye;
     auto clearAlpha = [&](float a) {
@@ -1844,7 +1868,7 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         if (it.around && !eye) continue;   // (vr3: a VR eye's piece outside the game camera's view; never in a flat picture)
         // PC models fading out are blended: after the opaque pass, without depth writes (with the decals). Arcade
         // Sort: the arcade decals in the opaque pass, in their list order (their polygons' sort keys place them)
-        const bool late = (it.decal && !(sort && it.stage->source == Source::Arcade)) || (it.fade < 1.0f && it.stage->source == Source::PC);
+        const bool late = (it.decal && !(sort && it.stage->source == Source::Arcade && !it.keyless)) || (it.fade < 1.0f && it.stage->source == Source::PC);
         if ((pass == 1 && late) || (pass == 2 && !late)) continue;
         if (!resolved_[ii].g) continue;
         const GpuStage& g = *resolved_[ii].g;
@@ -1868,14 +1892,16 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
         int itemMode = -1;
         if (!g.modelDepth.empty() && (!cam.perPixelDepth || cam.keyBand >= 0.0f))   // (vrnull: the VR eyes keep them)
             if (auto md = g.modelDepth.find(it.model->key); md != g.modelDepth.end()) itemMode = md->second;
-        const float itemBand = sort || itemMode < 0 ? band : itemMode == kArcadeSort ? 1e6f : 0.0f;
-        set1i(kKeyless, uKeyless_, sort && itemMode == kDepthBuffer ? 1 : 0);
+        const float itemBand = it.keyless ? 0.0f : sort || itemMode < 0 ? band : itemMode == kArcadeSort ? 1e6f : 0.0f;   // (mixmodels: keyless)
+        set1i(kKeyless, uKeyless_, sort && (itemMode == kDepthBuffer || it.keyless) ? 1 : 0);
+        set1i(kPcKeys, uPcKeys_, it.pcKeyed ? 1 : it.keyless ? 2 : 0);   // (mixmodels)
         set1f(kHybrid, uHybrid_, itemBand);
         if (sort || itemBand > 0.0f) set1i(kSortItem, uSortItem_, int(std::min<size_t>(ii, 127)));
         set1f(kFloorY, uFloorY_, it.floorY);
         set1i(kFloorPull, uFloorPull_, int(it.floorPull));
         set1f(kPush, uPush_, it.push);
         set1f(kFade, uFade_, it.fade);
+        set1f(kDissolve, uDissolve_, it.dissolve);   // (vr141)
         set1i(kSideOnly, uSideOnly_, it.sideOnly ? 1 : 0);
         set1i(kRamp, uRamp, it.ramp >= 0 && it.ramp < 4 ? it.ramp : -1);
         set1f(kBodyHue, uBodyHue, it.bloodHue);   // cosmods
@@ -1915,7 +1941,9 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
             if (set != boundSet && set >= 0 && set < int(g.sets.size())) {
                 const GpuSet& s = g.sets[size_t(set)];
                 set1i(kShading, uShading_, s.shading == Shading::Model2Indexed ? 1 : 0);
-                if (const bool keyed = sortVertex && s.shading == Shading::Model2Indexed; keyed != keyedRange) {
+                if (opt.transpAuto)   // (mixmodels: Mixed, Transparency Auto: the PC pages Clean Edges, the arcade sets Dithered)
+                    set1i(kTransp, uTransp_, s.shading == Shading::DirectRgba ? 1 : 2);
+                if (const bool keyed = sortVertex && ((s.shading == Shading::Model2Indexed && !it.keyless) || it.pcKeyed); keyed != keyedRange) {
                     gl::DepthRange(0.0, keyed ? 1.0 / 256.0 : 1.0);
                     keyedRange = keyed;
                     ++stateCalls;
@@ -1935,9 +1963,10 @@ void Renderer::draw(const std::vector<DrawItem>& items, const Camera& cam, int w
                 bindTex(0, gl::TEXTURE_2D_ARRAY, brown ? s.layersBrown : s.layers);
                 set1i(kGrey, uGrey_, opt.grey && !brown ? 1 : 0);
                 if (s.shading == Shading::DirectRgba) {
-                    // PC: THOTD.EXE (0x583A67) sets D3DRENDERSTATE_TEXTUREMAG / MIN to LINEAR only with the driver
-                    // dialog's bilinear option (0x12E8C4C, devs.cfg), else NEAREST; no mip levels. The release's devs.cfg
-                    // is empty and the game runs point-sampled (PC harness screenshots): pcBilinear off by default
+                    // PC: THOTD.EXE's Direct3D driver (0x583A67) sets D3DRENDERSTATE_TEXTUREMAG / MIN to LINEAR with the
+                    // driver dialog's bilinear option (0x12E8C4C, default 1), else NEAREST; no mip levels. Its software
+                    // (DirectDraw) driver, the default without "d3d" on the command line (0x563440), is point-sampled
+                    // (PC harness screenshots). pcd3d (#79): Video > PC Renderer picks (pcBilinear = Direct3D)
                     const gl::GLint f = opt.pcBilinear ? gl::GLint(gl::LINEAR) : gl::GLint(gl::NEAREST);
                     gl::GLint& was = brown ? s.filterBrown : s.filterLayers;   // (perf: set once, it stays on the texture)
                     if (was != f) {

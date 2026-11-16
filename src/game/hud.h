@@ -41,6 +41,11 @@ public:
     // gunfb (Video > Show Crosshairs; LaunchConfig::showCrosshairs): off, no sight drawn for anyone (a player's own
     // Crosshair Off: theirs alone); the sight still counts as shown for the desktop cursor (drewSight: hidden)
     bool showSights = true;
+    // vr141 (#80, user 2026-11-12; Gameplay > Cut-scene Crosshairs, LaunchConfig::cutCross): the sights while a
+    // cut-scene plays (in game, scene_state not 2 (4: HOLD YOUR FIRE!) or the bars on; not the chapter clear): 0 hidden
+    // (main.cpp's default), 1 subtle (smaller and faint), 2 shown as in play (the Hud's own default: as before)
+    int cutSights = 2;
+    static bool inCutscene(const Runtime& rt);
     std::vector<std::string> customDirs;
     // the launcher's aspect is widescreen (full-window flashes) rather than the original 4:3 (pillarboxed)
     bool widescreen = true;
@@ -182,6 +187,10 @@ public:
     // chapter's title card, the GAME OVER card / route map, the ending's staff roll): VR shows the flat picture on the
     // cinema screen in a dark room (vr_scene.cpp), not the 4:3 panel floating in the lit world
     static bool vrScreen2D(const Runtime& rt);
+    // mixmodels (user 2026-11-12): the 2D drawn now is the PC sprites: a full-screen 2D screen (vrScreen2D's, the
+    // attract, GAME OVER, the chapter clear, the chapters past 4) the World row's (pcModels), the in-play HUD the HUD
+    // row's (Runtime::hudPc); Arcade / PC: pcModels
+    static bool pc2D(const Runtime& rt);
     // vrend: the same in the attract / title flow (modes other than 4 / 5): the title with its logo (mode 2 from the
     // logo's frame 184), or the 2D just drawn opaque at the 4:3 screen's left and right edges (a whole-screen card:
     // the date card, the ranking); after draw
@@ -211,6 +220,8 @@ private:
     unsigned program_ = 0, vao_ = 0, texture_ = 0;
     int uRect_ = -1;
     int uTint_ = -1;
+    int uFaint_ = -1;   // vr141: the sights' faintness (Cut-scene Crosshairs: Subtle; 0 as drawn)
+    float sightFaint_ = 0.0f, sightScale_ = 1.0f;   // (drawSights for drawSight: a subtle sight's)
     int uUV_ = -1;     // wide2d: the quad's texture range (kVs uUV)   // rainbow2: the sights in the rainbow (a > 0.5: the picture's brightest channel times rgb)
     bool sightTintOn_[4] = {};
     float sightTint_[4][3] = {};   // (rainbow2: each player's sight colour this frame, drawSights)

@@ -215,6 +215,19 @@ struct DrawItem {
     // 3 the shot's spark (0x95630, model 0x660 / 0x661: both drawn 1 unit in front of the game camera); 4 (questsim) a
     // creature's generated skin (the arcade's joints between the parts: the CPU aim ray's targets); 0 the rest
     uint8_t vrKind = 0;
+    // vr141 (#78, user 2026-11-12: "creatures fade in quickly when they first appear" in VR): the creature (body) that
+    // drew it (its body record's address), 0 none (read by
+    // the VR frame only); dissolve: the share of its pixels left out (a screen-door fade, 0 opaque .. 1 none drawn;
+    // the opaque pass, its depth writes and the arcade sort unchanged)
+    uint32_t vrBody = 0;
+    float dissolve = 0.0f;
+    // mixmodels (#49): Models: Mixed, an arcade model among the PC world: drawn by its own depth only, as the PC's (no sort
+    // keys, in the whole depth range: the Depth Buffer's key band / Arcade Sort's keyed range 0 .. 2^-8 put it over the
+    // PC world's walls: Chapter 1's dog seen through the fountain's wall); false: as before
+    bool keyless = false;
+    // mixmodels: a PC model in the arcade world: its own sort keys (Renderer::pcSortKeys), ordered among the arcade
+    // polygons as theirs are (a PC body on the opening's slab: under it, plain z hid it; the arcade one shows over it)
+    bool pcKeyed = false;
 };
 
 // Resolves which source draws each canonical ID of a stage. stages[s] may be null (source missing or failed to load).

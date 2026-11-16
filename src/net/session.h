@@ -98,7 +98,7 @@ struct Settings {
     uint8_t chapter = 0;        // 0-3
     uint8_t event = 0;
     uint8_t players = 1;        // 1-2 at the start
-    uint8_t models = 0;         // 0 arcade, 1 PC
+    uint8_t models = 0;         // 0 arcade, 1 PC, 0x80 + rows: Mixed (mixmodels #49: game/model_mix.h MixCat bits on PC, 6 rows with the HUD; 0x40: Arcade Extras off)
     uint8_t difficulty = 2;     // 0-4
     uint8_t lives = 0;          // 0-11 (the launcher's lives setting) or a (start, most) pair's code (game/lives.h, #30)
     uint8_t blood = 0;          // 0-5 (the launcher's blood setting)

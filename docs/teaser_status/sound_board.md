@@ -254,6 +254,7 @@ private/notes/issue_review_2026-11-04. Each fix is one bit of `hotd_scsp_fix` (s
 | 2 | EG attack: key on at attenuation 0x280 (-60 dB), each EG clock takes 1/2^n of the attenuation off (exponential in amplitude, the chip's EG clock), the level through the same dB table as the other phases | starts at 0x17F/0x3FF linear (-8.5 dB) and ramps linearly |
 | 4 | key-rate scaling: clamp(KRS + octave, 0, 15) added to each 5-bit rate, a rate of 0 does not move, a DL / RR rewrite keeps the scaling | octave + 2 KRS + FNS bit 9 on the 64-step tables, negative at low octaves (all HOTD's notes: KRS 0, octave -3..0 = slower decays / releases) |
 | 8 | timers: a reload is loaded on the next prescaler tick of the chip's sample counter, then counts to 0xFF | counts from the moment of the write |
+| 32 | sound stack: a value the 68000 writes to its registers counts like a slot output (#87, below) | half of it |
 
 **Measured** (`--board-wav`, each song alone, 72 s; the reference is the CD's tracks, which have the board's pitch):
 - Tempo. The driver reloads timer B (0x03C6: prescale 8, 57 counts) 92 cycles into its interrupt in all songs
@@ -273,3 +274,64 @@ private/notes/issue_review_2026-11-04. Each fix is one bit of `hotd_scsp_fix` (s
 **Not changed (ranked plan in the worker's STATUS.md):** wait states, the EG's decay / release clocking (MAME's
 continuous tables vs the chip's discrete stepping), the level curve (one attenuation sum in the chip), the loop end's
 second interpolation point, a timer that is not reloaded (the chip keeps counting), MAME's DSP vs the chip's buffering.
+
+## The lead voice and the sound stack (GitHub #87, 2026-11-12, worker claude/bossmusic)
+
+The report: the boss theme (0xA01004) has a broken, muffled melody on the arcade sound with both Sound Chip settings.
+
+**What the "FM voice" of #26 really is.** The driver keeps a wave bank in sound RAM 0x2000-0x2FFF (copied from the
+program ROM 0x3344: sines, noise, pulses, saws of 64 / 128 16-bit samples). The lead voice (tone record at RAM 0x51E8)
+is one slot on sample 0x028C0 (a 64-sample loop in the middle of that bank) with MDL 0xD, MDXSL = MDYSL = 0 and
+**STWINH set**: the slot never writes its sound stack entries. The 68000 writes them instead, through the stack's
+registers 0x100600-0x10067F: at key on 0x3368 to entry `slot` and 0x0CC6 to entry `slot + 32` (driver 0x600B2C /
+0x600B32), and its timer interrupt adds a triangle LFO (+-2 per tick, 15 ticks) to entry `slot` (0x6006C2). So the
+"modulation" is a fixed wave offset per entry, and the slot reads the two entries on alternate samples: two places of
+the bank mixed by one slot, one of them swept. The boss theme keys this voice 587 times a minute over 6 octaves (its
+melody); Chapter 2, Chapter 3, the chapter clear and the Magician use it too (the songs of #26).
+
+**The bug (MAME's, so in both chip settings until now).** MAME's ring holds 2x each slot's output and halves the
+X + Y sum, but stores a register write as it is: a value from the 68000 moved the wave half as far as the same value
+from a slot. The voice read 0x359A (MAME: past the bank, in the driver's tables) or 0x259A (with fix 1's 11-bit wrap)
+and 0x2BF0 (a constant 0x7FC0), i.e. a full-level 22.05 kHz tone plus a noisy wave. With the value counted like a
+slot output the offsets are -806 and +817.5 samples: 0x2274, which is 43 samples before the only edge of the 128-sample
+pulse at 0x2200 (the LFO moves that edge by 7 samples: pulse-width modulation), and 0x2F22 in the saw at 0x2F00.
+
+**The fix:** bit 32 of `hotd_scsp_fix` (cmake/scsp_hw.cmake): a register write to the stack is doubled like a slot's
+output, a read halved. On in Accurate; Sound Chip MAME stays MAME's (bit-identical to before, so still wrong there).
+
+**Measured** (`--board-wav`, the voice alone with `HOTD_SCSP_SOLO=28C0`, 8-28 s of the boss theme): above 18 kHz
+-26.4 dB -> -37.7 dB, below 8 kHz -31.7 dB -> -28.8 dB. Changed songs: 0xA01002 / 04 / 05 / 08 / 0B; the other ten
+and the effects tried (0xA01208, 0xA01225, 0xA01300, 0xA01356, 0xA0146C) are byte-identical.
+
+The alternate read leaves mirrored partials (22.05 kHz - n x pitch) in the voice; the reference has them (below).
+
+### Against the issue's reference (2026-11-12, later the same day)
+
+The reporter's reference (YouTube cqRwsw0K084, 48 kHz audio supplied by the coordinator) is a board recording: its
+third-octave spectrum is ours within 1 dB from 40 Hz to 5 kHz (the CD track differs by 5-8 dB), the lead's pitches are
+ours (e.g. 1748 Hz), and it runs 4.1 % slower than our render (onset-envelope fit per 8 s window, correlation
+0.62-0.85; ours = fix 8 on). Compared on the boss theme, 8-48 s, the levels normalised at 100-1000 Hz:
+
+| | Reference | Before (1.4.0 Accurate) | After (fix 32) | Sound Chip MAME |
+|---|---|---|---|---|
+| Third-octave spectrum 40 Hz-5 kHz, rms difference to the reference | - | 1.2 dB | 0.65 dB | 1.4 dB |
+| Lead phrase (24-26 s), 1-2 kHz against 100-1000 Hz | -2.1 dB | -6.0 dB | -1.8 dB | -8.2 dB |
+| Lead fundamental, median over 18 clean notes, against the reference | 0 | -9.0 dB | -2.5 dB | (no fundamental: -67.7 dB on the 618 Hz note, the reference -35) |
+| The 13-18 kHz band rises toward 22 kHz in lead phrases | yes | no | yes | no |
+
+- **The alternate-sample read is real.** In the reference a clean 618 Hz lead note has partials at 19552, 18928, 18303,
+  17660 and 17025 Hz, i.e. 22050 Hz - 4..8 x the pitch (the same peaks, 19552 / 18901 Hz, are in our render).
+- **The scale.** `HOTD_SCSP_STACKMUL=a,b` (testing) sets the 68000-written entries' scale per half of the stack; 1,1
+  = MAME, 2,2 = the fix. Lead fundamental against the reference: 1,1 -9.0 dB, 2,2 -2.5 dB, 4,4 -10.4 dB, 1,4 -6.3 dB.
+  The harmonic envelope (2nd-7th partial of four clean notes) is within 4-6 dB rms of the reference for all of them
+  (the reference's mix hides partials below about -25 dB), so the level decides: 2,2.
+- **Left open:** the tempo (4.1 % fast against this recording; the CD track 0.85 %), and a 2-7 dB excess above 6 kHz
+  in every version (the board's output filter / the video's codec). The lead's 2nd partial is about 4 dB stronger
+  than the reference's on average (-13.6 against -18.1 dB below the fundamental).
+
+Implementation note: the ring keeps the 68000's value as written (a flag per entry marks it), the scale is applied
+where the modulation is read (fix 1's path; with fix 1 off, fix 32 does nothing).
+
+Testing aids: `HOTD_SCSP_SOLO=<SA hex>` (only that sample in the direct mix), `HOTD_SCSP_KEYS=1` now also prints the
+time, the modulation / loop / send registers, a short 16-bit wave's data once and the 68000's stack writes,
+`HOTD_BOARD_RAMDUMP=<prefix>` (sound RAM + SCSP registers every 5 s).

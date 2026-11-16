@@ -5,6 +5,7 @@
 #pragma once
 
 #include "game/keybinds.h"
+#include "game/model_mix.h"
 #include "game/sights.h"
 #include "render/crt.h"
 #include "render/overlay.h"
@@ -222,7 +223,11 @@ Cheats& cheats();
 struct LaunchConfig {
     std::string arcade;          // a zip or a folder with the ROMs (any names)
     std::string pc;              // the PC game's folder or a .zip of it (pczip)
-    int models = 0;              // 0 arcade, 1 PC (world and every model the PC release has)
+    int models = 0;              // 0 arcade, 1 PC (world and every model the PC release has), 2 Mixed (mixmodels, #49)
+    // mixmodels (GitHub #49): Models: Mixed, the rows on PC (game/model_mix.h MixCat bits; launcher.ini mixedmodels=
+    // "humans,world,..." / "none"); the rest arcade. Default: none (every row arcade)
+    int mixedPc = 0;
+    bool mixExtras = true;       // mixmodels (user 2026-11-13): Mixed Models > Arcade Extras (launcher.ini mixextras=1 / 0)
     int sound = 0;               // 0 auto (the arcade sound board; the PC sound without its ROMs), 1 arcade (the sound board), 2 PC
     // spanish (docs/spanish.md): the voices, 0 Auto (spanish2: the Spanish dub while the language is Spanish), 1 Spanish
     // (the Spanish release's dub, from spanishVoiceDir: a Spanish PC copy as `pc`, as `spanishPc`, or in the package's
@@ -335,6 +340,11 @@ struct LaunchConfig {
     bool bloodParticles = true;   // Blood Particles: off hides the blood spray / bursts (draw-only); launcher.ini bloodparticles=
     bool clearMarks = false;      // bugs1 (#35) Hit Marks: Dithered (the arcade's stipple) / See-through (the PC's D3D look); launcher.ini hitmarks=
     int transparency = 3;         // Transparency (team 2026-11-03): 0 Smooth (as before), 1 Clean Edges, 2 Dithered (arcade), 3 Auto (default: 2 arcade models, 1 PC models); launcher.ini transparency=
+    // pcd3d (GitHub #79): PC Renderer, for the PC models only: 0 Software (default: point-sampled texels, as THOTD.EXE's
+    // DirectDraw driver 0x5677F0), 1 Direct3D (THOTD.EXE's Direct3D driver 0x573CA0: TEXTUREMAG / MIN LINEAR on the 3D
+    // polygons, 0x583A67; its 2D sprites stay point-sampled, 0x583133); draw-only; launcher.ini pcrenderer=software|d3d,
+    // --pc-renderer
+    int pcRenderer = 0;
     // players 3 / 4 in the cut-scenes (docs/coop4.md section 16): the variation picked per scene, "00:B,09:C" (a scene
     // not named: A, the look of sections 10-12); launcher.ini scene4p=, --scene4p
     std::string scene4p;
@@ -470,6 +480,12 @@ struct LaunchConfig {
     // questfb (user 2026-11-10: "add hands on the menu by default but allow people to turn them off"): Gameplay > Hands
     // in Menus (VR), a VR run's row only: -1 not set (on), 0 off, 1 on (launcher.ini vrmenuhands=)
     int vrMenuHands = -1;
+    // vr141 (#86, user 2026-11-12: "VR left-handed mode"): Gameplay > Gun Hand (VR), a VR run's row only (the Quest's
+    // Controls page): -1 not set (vr.ini left_handed decides), 0 right, 1 left (launcher.ini vrgunhand=)
+    int vrGunHand = -1;
+    // vr141 (#80, user 2026-11-12): Gameplay > Cut-scene Crosshairs, the players' crosshairs while a cut-scene plays
+    // (the flat game and VR): 0 hide (the default), 1 subtle (small and faint), 2 show (as before) (launcher.ini cutcross=)
+    int cutCross = 0;
     // vrcomfort (user 2026-11-10, a player's wish: comfort options in game, vr.ini is hard to reach on the Quest):
     // Gameplay > View (VR) (0 immersive, 1 screen: vr.ini view), Screen Distance (VR) (2 / 3 / 4 / 6 metres: vr.ini
     // cinema_distance / menu_distance), Screen Size (VR) (0 small, 1 medium, 2 large: the screen's width 0.9 / 1.33 /

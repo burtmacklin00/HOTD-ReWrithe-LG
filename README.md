@@ -2,7 +2,7 @@
 
 Unofficial build of [The House of the Dead: ReWrithe](https://github.com/TawhidI-602/The-House-of-the-Dead-ReWrithe)
 for light gun setups (arcade cabinets, Gun4IR, Sinden, AimTrak and other guns that act as a mouse). Based on ReWrithe
-**v1.4.0**. New ReWrithe releases are merged in only when they are worth it, so a working setup is never broken by
+**v1.4.1**. New ReWrithe releases are merged in only when they are worth it, so a working setup is never broken by
 upstream changes. Not made by, or supported by, ReWrithe's author: please report problems with this edition here, not
 on the original's page.
 
@@ -617,7 +617,9 @@ resistance that gives way with a click (Adaptive Trigger Off / Light / Medium / 
 
 **Light guns.** Guns that show up in Windows as a mouse with absolute positions should work: Sinden (with its own
 software running), Ultimarc AimTrak, GunCon 3 through a mouse driver / feeder, a Wii Remote through a Mayflash
-DolphinBar in mouse mode, and similar (the Wii Remote's own camera is not read without the DolphinBar). The game needs
+DolphinBar in mouse mode, and similar. Wii Remotes also work natively over Bluetooth (their own IR camera, up to four,
+rumble; experimental): Options > Controls > **Wii Remotes**, [docs/wiimotes.md](docs/wiimotes.md); contributed by
+zedhqx4 (GitHub PR #85, MIT; protocol / calibration adapted from GitFist/hotd2-re, MIT). The game needs
 no vendor software of its own. In the menus a DualSense / DualShock 4 touchpad, or tilting a pad with a gyro while
 ZL / L2 / LT is held, moves the bone hand too (Controls > Touchpad Cursor / Gyro Cursor, each with its own Cursor Sensitivity); the prompts
 show your pad's own buttons (Controls > Button Icons / Button Style). Set the player's input to

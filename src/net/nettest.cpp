@@ -234,6 +234,21 @@ int main()
         check(decodeSettings(v.data(), v.size(), t) && t.chapter == 2 && t.players == 2 && t.models == 1 && t.delay == 5 &&
                   t.hashEvery == 7 && t.sonic == 3 && t.routes.size() == 2 && t.routes[1].key == 104 && t.gameSpeed == 1 && t.autoReload == 1,
               "settings round trip");
+        // mixmodels (#49): Models: Mixed travels as 0x80 + its PC rows; another high code refused
+        Settings sm = s;
+        sm.models = 0x80 | 0x0A;
+        Settings tm;
+        auto vm = encodeSettings(sm);
+        check(decodeSettings(vm.data(), vm.size(), tm) && tm.models == (0x80 | 0x0A), "settings: Mixed models round trip");
+        sm.models = 0x80 | 0x20;   // (the HUD row, user 2026-11-12)
+        vm = encodeSettings(sm);
+        check(decodeSettings(vm.data(), vm.size(), tm) && tm.models == (0x80 | 0x20), "settings: Mixed with the HUD row round trip");
+        sm.models = 0x80 | 0x40 | 0x3F;   // (Arcade Extras off, user 2026-11-13)
+        vm = encodeSettings(sm);
+        check(decodeSettings(vm.data(), vm.size(), tm) && tm.models == (0x80 | 0x40 | 0x3F), "settings: Mixed with Arcade Extras off round trip");
+        sm.models = 0x40;
+        vm = encodeSettings(sm);
+        check(!decodeSettings(vm.data(), vm.size(), tm), "settings: an unknown models code refused");
         // protocol 14 (misc16): the host's 4P Boss Hit Points / 4P Enemy Toughness travel with the settings; out of
         // range (> 200) refused
         Settings s4;

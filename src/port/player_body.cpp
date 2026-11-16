@@ -456,12 +456,12 @@ template <class P> void Game<P>::player_scene04_fall_backside(uint32_t task)
     if (mem.at<int16_t>(G::players_in_game) == 2 && p == 1) {
         set_motion(body, 0x179);
         pl.scene_routine = 0x4C6C0;
-        sound_cue(0xA01459);
+        sound_cue(voice_cue(int(p), 0xA01459));   // (fix141 #88: Rogan / G their own voice)
         return;
     }
     set_motion(body, 0x174);
     pl.scene_routine = 0x4C6B0;
-    sound_cue(0xA01456);
+    sound_cue(voice_cue(int(p), 0xA01456));
 }
 
 // 0x4C6C0: at the motion's end 0xC1 (blend 20), idle
@@ -487,7 +487,7 @@ template <class P> void Game<P>::player_scene05_knocked_flying(uint32_t task)
     o.ang[1] = 0xC000;
     set_motion(body, p == 0 ? 0x156 : 0xBD);
     mem.at<Player>(G::players, p).scene_routine = 0x4C860;
-    sound_cue(p == 0 ? 0xA01457 : 0xA0145A);
+    sound_cue(voice_cue(int(p), p == 0 ? 0xA01457 : 0xA0145A));   // (fix141 #88)
 }
 
 // 0x4C860 / 0x4C8E0 / 0x4C960: flying (gravity 0.0272, x - 0.04 a frame); at anim_time 149 held at 148; landed (y <= 0)
@@ -793,7 +793,7 @@ template <class P> void Game<P>::player_scene13_knocked_flying_b(uint32_t task)
     o.ang[1] = 0xC000;
     set_motion(body, p == 0 ? 0x156 : 0xBD);
     mem.at<Player>(G::players, p).scene_routine = 0x4C860;
-    sound_cue(p == 0 ? 0xA01457 : 0xA0145A);
+    sound_cue(voice_cue(int(p), p == 0 ? 0xA01457 : 0xA0145A));   // (fix141 #88)
 }
 
 // 0x4D870 player_scene14_rattle_door: the body at the table 0xC0FB8 (y too), facing 0; the motion from 0xC0FF8

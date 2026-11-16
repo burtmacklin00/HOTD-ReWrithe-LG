@@ -25,13 +25,24 @@ extern "C" {
 #include <cstring>
 
 // sound2 (GitHub #26): the SCSP's hardware behaviour where MAME differs (cmake/scsp_hw.cmake patches MAME's scsp.cpp):
-// 1 FM precision, 2 EG attack, 4 key-rate scaling, 8 timer reload on the prescaler tick, 16 FM interpolation quirk. All on; HOTD_SCSP_MAME=<bits>
+// 1 FM precision, 2 EG attack, 4 key-rate scaling, 8 timer reload on the prescaler tick, 16 FM interpolation quirk,
+// 32 the sound stack as the 68000 writes it (bossmusic, GitHub #87). All on; HOTD_SCSP_MAME=<bits>
 // (decimal, or "all") turns those fixes off: MAME's behaviour, for A/B tests
 int hotd_scsp_fix = [] {
     const char* e = std::getenv("HOTD_SCSP_MAME");
     if (!e)
-        return 31;
-    return std::strcmp(e, "all") == 0 ? 0 : 31 & ~std::atoi(e);
+        return 63;
+    return std::strcmp(e, "all") == 0 ? 0 : 63 & ~std::atoi(e);
+}();
+
+// bossmusic (testing, GitHub #87): HOTD_SCSP_SOLO=<the sample's SA, hex>: only the slots playing that sample are heard
+int hotd_scsp_solo = std::getenv("HOTD_SCSP_SOLO") ? int(std::strtol(std::getenv("HOTD_SCSP_SOLO"), nullptr, 16)) : -1;
+// (fix 32) the scale of a stack entry written by the 68000, for entries 0-31 and 32-63 (testing: HOTD_SCSP_STACKMUL=a,b)
+int hotd_stack_mul[2] = {2, 2};
+static const bool hotd_stack_mul_env = [] {
+    if (const char* e = std::getenv("HOTD_SCSP_STACKMUL"))
+        std::sscanf(e, "%d,%d", &hotd_stack_mul[0], &hotd_stack_mul[1]);
+    return true;
 }();
 
 // Audio > Sound Chip (user 2026-11-09, launcher.ini soundchip=): 0 Accurate (every fix), 1 MAME (none); the test
@@ -39,7 +50,7 @@ int hotd_scsp_fix = [] {
 void hotd_scsp_set_chip(int chip)
 {
     if (!std::getenv("HOTD_SCSP_MAME"))
-        hotd_scsp_fix = chip == 1 ? 0 : 31;
+        hotd_scsp_fix = chip == 1 ? 0 : 63;
 }
 
 namespace hotd::audio {
@@ -82,6 +93,7 @@ struct SoundBoard::Impl {
     }
     void tapTimerWrite(uint32_t a, uint32_t v)
     {
+        tapStackWrite(a, v);
         if (!timerTap || (a & 0xFFFFFE) != 0x10041A || !timerBFire)
             return;
         const int cyc = int(samplesRun - timerBFire) * kCyclesPerSample + m68k_cycles_run();
@@ -97,6 +109,16 @@ struct SoundBoard::Impl {
     // address and loop end: the arcade's own samples' format (docs/typing.md, the typing sounds by board)
     bool keysTap = std::getenv("HOTD_SCSP_KEYS") != nullptr;
     bool keyWas[32] = {};
+    std::vector<bool> waveShown = std::vector<bool>(0x8000);
+    // bossmusic (HOTD_SCSP_KEYS=1): the 68000's writes to the sound stack (0x100600-0x10067F): the driver sets the
+    // lead voice's wave offset there (GitHub #87); the first 400
+    int stackTaps = 0;
+    void tapStackWrite(uint32_t a, uint32_t v)
+    {
+        if (keysTap && a >= 0x100600 && a < 0x100700 && stackTaps < 400 && ++stackTaps)
+            std::printf("SCSP STACK write %03X = %04X t %.4f pc %06X\n", a & 0xFFF, v, double(samplesRun) / 44100.0,
+                        m68k_get_reg(nullptr, M68K_REG_PPC));
+    }
     void tapKeys(uint32_t a, uint32_t w)
     {
         if (!keysTap || (a & 0xFFF) >= 0x400 || ((a & 0x1F) >> 1) != 0)
@@ -111,7 +133,20 @@ struct SoundBoard::Impl {
                 if (oct & 8) oct -= 16;
                 const double rate = 44100.0 * std::pow(2.0, oct) * (1.0 + (r8 & 0x3FF) / 1024.0);
                 const u16 r4 = scsp->read(s * 0x10 + 4), r5 = scsp->read(s * 0x10 + 5);
-                std::printf("SCSP KEY slot %d %s rate %.0f SA %05X LEA %04X TL %d AR %d D1R %d D2R %d RR %d KRS %d OCT %d MDL %d\n", s,
+                const u16 r7 = scsp->read(s * 0x10 + 7), rb = scsp->read(s * 0x10 + 0xB), ra = scsp->read(s * 0x10 + 0xA);
+                const uint32_t sa = ((r0 & 0xF) << 16) | scsp->read(s * 0x10 + 1);
+                if (scsp->read(s * 0x10 + 3) < 0x80 && !(r0 & 0x10) && !waveShown[sa >> 4]) {   // a short 16-bit wave: once
+                    waveShown[sa >> 4] = true;
+                    std::printf("SCSP WAVE %05X:", sa);
+                    for (uint32_t i = 0; i < scsp->read(s * 0x10 + 3) + 2u; ++i)
+                        std::printf(" %d", int16_t((ram[(sa + i * 2) & 0x7FFFF] << 8) | ram[(sa + i * 2 + 1) & 0x7FFFF]));
+                    std::printf("\n");
+                }
+                std::printf("SCSP KEY t %.4f MDXSL %d MDYSL %d LSA %04X LPCTL %d SBCTL %d DISDL %d DIPAN %d IMXL %d ISEL %d r6 %04X r9 %04X ",
+                            double(samplesRun) / 44100.0, (r7 >> 6) & 0x3F, r7 & 0x3F, scsp->read(s * 0x10 + 2), (r0 >> 5) & 3,
+                            (r0 >> 9) & 3, (rb >> 13) & 7, (rb >> 8) & 0x1F, ra & 7, (ra >> 3) & 0xF, scsp->read(s * 0x10 + 6),
+                            scsp->read(s * 0x10 + 9));
+                std::printf("slot %d %s rate %.0f SA %05X LEA %04X TL %d AR %d D1R %d D2R %d RR %d KRS %d OCT %d MDL %d\n", s,
                             (r0 & 0x10) ? "8-bit" : "16-bit", rate, ((r0 & 0xF) << 16) | scsp->read(s * 0x10 + 1),
                             scsp->read(s * 0x10 + 3), scsp->read(s * 0x10 + 6) & 0xFF, r4 & 0x1F, (r4 >> 6) & 0x1F, (r4 >> 11) & 0x1F,
                             r5 & 0x1F, (r5 >> 10) & 0xF, oct, (scsp->read(s * 0x10 + 7) >> 12) & 0xF);
@@ -382,6 +417,20 @@ void SoundBoard::render(float* out, int frames, float gain)
         out[i * 2] += s[0] * b.scsp->gain(0) * gain;
         out[i * 2 + 1] += s[1] * b.scsp->gain(1) * gain;
         ++b.samplesRun;
+        // bossmusic (testing, HOTD_BOARD_RAMDUMP=<file prefix>): the sound RAM and the SCSP's registers every 5 s
+        static const char* const ramDump = std::getenv("HOTD_BOARD_RAMDUMP");
+        if (ramDump && b.samplesRun % (5 * 44100) == 0) {
+            const std::string name = std::string(ramDump) + std::to_string(b.samplesRun / 44100) + ".bin";
+            if (std::FILE* f = std::fopen(name.c_str(), "wb")) {
+                std::fwrite(b.ram.data(), 1, b.ram.size(), f);
+                for (int r = 0; r < 0x800; ++r) {
+                    const u16 w = b.scsp->read(r);
+                    std::fputc(w >> 8, f);
+                    std::fputc(w & 0xFF, f);
+                }
+                std::fclose(f);
+            }
+        }
         if (b.trace && b.samplesRun % 44100 == 0)
             std::printf("[board %llus] pc %06X sr %04X irq %X out %.4f scieb %04X scipd %04X scilv %04X %04X %04X fifo %zu midi in %llu read %llu irqs %llu\n",
                         (unsigned long long)(b.samplesRun / 44100), m68k_get_reg(nullptr, M68K_REG_PC),

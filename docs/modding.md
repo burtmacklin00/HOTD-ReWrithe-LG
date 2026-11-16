@@ -62,7 +62,7 @@ A `;` after a value (with a space before it) starts a comment too.
 |---|---|
 | `name`, `author`, `version` | Shown in the Mods list and its help line |
 | `description` | The help line when the mod's row is lit |
-| `type` | `textures`: a texture pack (pictures, models, colour rules). `models`: a model pack (the same kind, its `[model]` sections: "Model packs" below; its Mods row says Model pack). `ragdoll`, `rainbowblood`, `bighead`, `hermithead`: the built-in Ragdoll, Rainbow Blood, Big Head and Hermit Fly Head Mods (their code is in the game; the folder gives them their texts and settings) |
+| `type` | `textures`: a texture pack (pictures, models, colour rules). `models`: a model pack (the same kind, its `[model]` sections: "Model packs" below; its Mods row says Model pack). `splash`: your own start-up picture ("Splash screens" below). `ragdoll`, `rainbowblood`, `bighead`, `hermithead`: the built-in Ragdoll, Rainbow Blood, Big Head and Hermit Fly Head Mods (their code is in the game; the folder gives them their texts and settings) |
 | `default` | `off`: the mod starts switched off (good for a mod that changes a lot). Default `on` |
 | `models` | Texture packs: which model source the pictures are for |
 | `depth` | How the models this mod draws hide each other and the rest. `auto` (default): your custom models (OBJ) per pixel, models that only get your pictures as the game draws them (Arcade Sort). `sort`: the arcade's polygon sort (whole polygons in order; good for flat, layered arcade-style art). `buffer`: a per-pixel depth buffer (good for new, detailed shapes that cross other polygons). Only the models your mod changes are affected |
@@ -444,6 +444,41 @@ its bind pose on the one part it replaces. What it needs, written down before an
   own rule before skinned characters are shipped.
 - **Determinism.** All of this is in the renderer, after the game's frame, as the Ragdoll mod is: the hit areas stay the
   parts', so the scores and online co-op cannot change.
+
+## Splash screens
+
+Your own start-up picture instead of the built-in one (GitHub #83): a mod with `type = splash`.
+
+```
+mods\my-splash\            (in the settings folder; data\mods\ in the game's folder works too)
+    mod.ini
+    splash.png             the picture shown in the title art's place (or splash.jpg / splash.jpeg)
+    logo.png               optional: the picture shown in the SEGA logo's place (or logo.jpg / logo.jpeg)
+```
+
+```ini
+[mod]
+name = My Splash
+author = you
+type = splash
+```
+
+- Switch it On in **Options > Mods** (its row says Splash screen); it is used from the next start. With several On,
+  the highest in the list wins. Off (or no mod): the game's own splash, unchanged.
+- **Any size** (up to 4096 x 4096 for a PNG, 8192 x 8192 for a JPEG): the picture is fitted to the window at the
+  window's resolution (up to 1440 lines, as the menus), its shape kept, black bars where it does not fill it, in both
+  menu styles. A 3840 x 2160 picture fills a 16:9 screen.
+- **PNG**: any non-interlaced PNG (transparent parts show black). **JPEG**: baseline JPEGs (what most programs save by
+  default); a progressive JPEG is refused with a message in the log: save it again as a baseline JPEG or a PNG.
+- The splash shows at start-up with Title / Attract on, the Remake menu style or PC Start-up Screens on, as before; a
+  splash mod On shows it in any case (the SEGA logo or your `logo.png` first, then your `splash.png`; a key or click
+  skips each). The Remake style's boot, which shows only the logo, shows your `splash.png` after it too. `--auto-start`
+  and the other quick starts skip the splash, as they always did.
+- The log says which picture was read: `[mods] splash screen: splash.jpg 3840 x 2160`.
+- **Use only a picture you may share.** The project ships no splash art of its own beyond the PC game's and never
+  includes AI-made art; a mod made from SEGA's artwork or logo is yours to keep, not to pass around.
+- Developers: `util/jpeg_read.h` (our own baseline JPEG reader; tests/unit/test_jpeg.cpp), `Frontend::setCustomSplash`,
+  `loadSplashFolder`; `HOTD_FE_SPLASH=<folder> hotd --frontend-screen 124 --frontend-shot out.png` draws it.
 
 ## Custom crosshairs
 

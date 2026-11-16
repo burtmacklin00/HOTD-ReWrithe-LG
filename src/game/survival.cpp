@@ -952,14 +952,14 @@ int SurvivalMode::pickType(const Runtime& rt, bool& cut)
     if (special == 1)   // the runners: the lighter front half of the list
         return t[size_t(rand(std::max(2, all / 2)))];
     if (special == 2) {   // the brutes: the heavier back half (and the cut creatures among them)
-        if (cutCreatures && !rt.pcModels && rand(100) < 20) {
+        if (cutCreatures && !rt.cutMeshesMissing() && rand(100) < 20) {
             cut = true;
             const auto& c = survivalCuts();
             return c[size_t(rand(int(c.size())))].type;
         }
         return t[size_t(all / 2 + rand(all - all / 2))];
     }
-    if (cutCreatures && !rt.pcModels && wave >= 2 && rand(100) < std::min(5 + 2 * wave, 25)) {
+    if (cutCreatures && !rt.cutMeshesMissing() && wave >= 2 && rand(100) < std::min(5 + 2 * wave, 25)) {
         cut = true;
         const auto& c = survivalCuts();
         return c[size_t(rand(int(c.size())))].type;
@@ -1620,6 +1620,27 @@ void Runtime::survival_areas()
     if (survival.active() && mem.at<int8_t>(G::chapter) != 0)
         for (const int t : {8, 0})   // (the last one gives the area its look: type 0's rows, galleryLook)
             list.push_back({t, "Kenfis", 1, 0, 1});
+    // fix141 (user on v1.4.0: "Survival on Chapter 4's roof: some creatures (the big zombie) have glitched textures"):
+    // the roof is the Magician's room, texture area 12, where the story has no standard creatures; its arena's types
+    // were drawn with area 12's pages (type 72's head and arms someone else's textures). They take the area and the
+    // colour rows Chapter 4's story draws them in (HOTD_TRACE_TYPE_ROWS over --chapter 4 --default-route: types 11 /
+    // 53 in area 4 with these rows, type 72 in area 9), from Chapter 4's stage as the cut creatures' are
+    struct StoryLook {
+        const char* arena;
+        int type, area;
+        const char* rows;
+    };
+    static const StoryLook kStoryLooks[] = {
+        {"roof", 11, 4, "7:81 9:28 11:0 13:26 15:5 17:12 19:104 21:111"},
+        {"roof", 53, 4, "7:81 9:28 11:0 13:26 15:5 17:12 19:104 21:111"},
+        {"roof", 72, 9, "5:39 7:81 9:28 21:107"},
+    };
+    if (survival.active() && survival.arena >= 0 && survival.arena < int(survivalArenas().size()))
+        for (const StoryLook& s : kStoryLooks)
+            if (std::string(s.arena) == survivalArenas()[size_t(survival.arena)].key) {
+                list.push_back({s.type, "story", s.area, 0, 1});
+                actorAreaRows[s.area] = s.rows;
+            }
     for (const SurvivalCut& c : list) {
         std::function<void(uint32_t, int)> walk = [&](uint32_t part, int depth) {
             if (part == 0 || depth > 16 || !mem.mapped(part))

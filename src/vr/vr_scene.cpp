@@ -73,6 +73,49 @@ Rigid leftAnchor()
     return a;
 }
 
+// vr141 (#86, left-handed): a placement in a controller's local frame reflected across that frame's x (the right
+// controller holding what the left one holds, as a mirror image: the empty left hand 0x717 becomes a right hand; the
+// renderer turns the normals by the same matrix, as gunAnchorLeft's)
+Rigid mirrorLocal(Rigid a)
+{
+    for (int k = 0; k < 3; ++k) a.r[k] = -a.r[k];   // (diag(-1, 1, 1) x R)
+    a.t[0] = -a.t[0];
+    return a;
+}
+
+// vr141: the Pause buttons in the roles' order (fs.hand[1] the gun hand): the empty hand's B / Y (OpenXR: the left Y,
+// Index's left B; left-handed: the right B), either menu button
+bool pauseHeld(const FrameState& fs)
+{
+    return fs.hand[0].secondary || fs.hand[0].menu || fs.hand[1].menu;
+}
+
+// the hands' places in their controller's local frame (game units): vr.ini's gun_* / left_hand_* moves, then the
+// anchor. The gun on the left controller (dual pistols' left gun; left-handed: the gun): gun_offset / gun_rotate
+// mirrored (x, yaw and roll the other way) and the mirrored gun hand; the empty hand on the right controller
+// (left-handed): the left hand's place mirrored (mirrorLocal)
+Rigid tuneOf(const float offset[3], const float rotate[3], float upm)
+{
+    Pose p;
+    std::copy(offset, offset + 3, p.pos);
+    quatFromYawPitchRoll(rotate[1] * kPi / 180.0f, rotate[0] * kPi / 180.0f, rotate[2] * kPi / 180.0f, p.rot);
+    p.valid = true;
+    return poseToLocal(p, upm);
+}
+Rigid gunLocal(const Settings& s, float upm, bool onLeft)
+{
+    if (!onLeft)
+        return tuneOf(s.gunOffset, s.gunRotate, upm) * gunAnchor();
+    const float offL[3] = {-s.gunOffset[0], s.gunOffset[1], s.gunOffset[2]};
+    const float rotL[3] = {s.gunRotate[0], -s.gunRotate[1], -s.gunRotate[2]};
+    return tuneOf(offL, rotL, upm) * gunAnchorLeft();
+}
+Rigid emptyLocal(const Settings& s, float upm, bool onRight)
+{
+    const Rigid l = tuneOf(s.leftOffset, s.leftRotate, upm) * leftAnchor();
+    return onRight ? mirrorLocal(l) : l;
+}
+
 gl::GLuint compileProgram(const char* vs, const char* fs, const char* what, std::string& err)
 {
     auto one = [&](gl::GLenum type, const char* src) {
@@ -527,6 +570,14 @@ bool Scene::playerInControl(const game::Runtime& rt)
     return st == 5 || st == 8;
 }
 
+void Scene::takeHands()
+{
+    backend_->setLeftHanded(leftHanded);   // (the preview: its mouse gun in the left hand)
+    backend_->beginFrame(fs_);
+    if (leftHanded)
+        std::swap(fs_.hand[0], fs_.hand[1]);   // (vr141: hand[1] is the gun hand from here on)
+}
+
 void Scene::frame(const Frame& f)
 {
     if (!backend_ || !f.view || !f.rt)
@@ -536,7 +587,7 @@ void Scene::frame(const Frame& f)
     backend_->setOutputSize(f.outW, f.outH);
     backend_->setDual(dual);   // (dual pistols: the preview points the left hand too)
     noteFrame();
-    backend_->beginFrame(fs_);
+    takeHands();
     flatFrame_ = false;
     if (lastPanel_) {   // vrflow: from the big screen: the buttons still held (the click on Arcade) are no new presses
         lastPanel_ = false;
@@ -545,10 +596,10 @@ void Scene::frame(const Frame& f)
         for (int h = 0; h < 2; ++h) {
             const Controller& c = fs_.hand[h];
             gripDown_[h] = c.squeeze > 0.4f;
-            wasReload_[h] = gripDown_[h] || c.secondary || (h == 1 && c.primary);
+            wasReload_[h] = gripDown_[h] || (h == 1 && (c.primary || c.secondary));
         }
         wasStart_ = fs_.hand[0].primary;
-        wasMenu_ = fs_.hand[0].menu || fs_.hand[1].menu;
+        wasMenu_ = pauseHeld(fs_);
         pressHeld_ = true;
     }
     frame_ = &f;   // (vrfix: name entry / cinema-screen aim)
@@ -744,22 +795,23 @@ void Scene::frame(const Frame& f)
 
         // the hands: the game's own models (no models of ours), in game units as the world (their size is the game's);
         // the gun hand on the right controller's aim pose with its barrel on the aim ray, the left hand on the left
-        // grip pose; vr.ini's gun_* / left_hand_* move them from there
-        auto tune = [&](const float offset[3], const float rotate[3]) {
-            Pose p;
-            std::copy(offset, offset + 3, p.pos);
-            quatFromYawPitchRoll(rotate[1] * kPi / 180.0f, rotate[0] * kPi / 180.0f, rotate[2] * kPi / 180.0f, p.rot);
-            p.valid = true;
-            return poseToLocal(p, upm);
-        };
-        const bool right = fs_.hand[1].active && fs_.hand[1].aim.valid;
+        // grip pose; vr.ini's gun_* / left_hand_* move them from there. vr141 (left-handed): the roles swapped
+        // (takeHands: hand[1] / gun[1] the gun hand on the left controller), each model mirrored to its side
+        const bool right = fs_.hand[1].active && fs_.hand[1].aim.valid;   // (the gun hand tracked)
         gun[1].on = right;
         gun[0].on = dual && fs_.hand[0].active && fs_.hand[0].aim.valid;
-        // the left gun's tune: gun_offset / gun_rotate mirrored (x, yaw and roll the other way)
-        const float offL[3] = {-settings.gunOffset[0], settings.gunOffset[1], settings.gunOffset[2]};
-        const float rotL[3] = {settings.gunRotate[0], -settings.gunRotate[1], -settings.gunRotate[2]};
-        const Rigid gunW = ref * poseToLocal(fs_.hand[1].aim, upm) * tune(settings.gunOffset, settings.gunRotate) * gunAnchor();
-        const Rigid gunLW = ref * poseToLocal(fs_.hand[0].aim, upm) * tune(offL, rotL) * gunAnchorLeft();
+        if (leftHanded && right && fs_.head.valid) {   // (tests: the gun controller left of the head, along the head's x)
+            float hr[9];
+            quatToMatrix(fs_.head.rot, hr);
+            float side = 0;
+            for (int k = 0; k < 3; ++k) side += (fs_.hand[1].aim.pos[k] - fs_.head.pos[k]) * hr[k * 3];
+            ++test.leftyFrames;
+            if (side < 0.0f) ++test.leftyGunLeft;
+        }
+        const Rigid gunLocal1 = gunLocal(settings, upm, leftHanded), gunLocal0 = gunLocal(settings, upm, !leftHanded);
+        const Rigid emptyLocal0 = emptyLocal(settings, upm, leftHanded);
+        const Rigid gunW = ref * poseToLocal(fs_.hand[1].aim, upm) * gunLocal1;
+        const Rigid gunLW = ref * poseToLocal(fs_.hand[0].aim, upm) * gunLocal0;
         for (int h = 0; h < 2; ++h) {
             const Rigid& w = h == 1 ? gunW : gunLW;
             float ahead[3];
@@ -770,7 +822,7 @@ void Scene::frame(const Frame& f)
             normalize3(gun[h].d);
         }
         const bool left = !dual && settings.leftHand && fs_.hand[0].active && fs_.hand[0].grip.valid;
-        const Rigid leftW = ref * poseToLocal(fs_.hand[0].grip, upm) * tune(settings.leftOffset, settings.leftRotate) * leftAnchor();
+        const Rigid leftW = ref * poseToLocal(fs_.hand[0].grip, upm) * emptyLocal0;
         std::vector<DrawItem> hands;
         DrawItem hi;
         if (showHands && right && view.placedItem(0, kGunHandModel, gunW.r, gunW.t, hi))
@@ -826,9 +878,9 @@ void Scene::frame(const Frame& f)
                     s.down = d[1] < -std::sin(settings.reloadPitch * kPi / 180.0f);   // (the seat's up: the player's own)
                     for (int k = 0; k < 3; ++k) s.o[k] = o[k] / upm, s.p[k] = (o[k] + d[k] * t) / upm;
                 };
-                const Rigid seatGun = poseToLocal(fs_.hand[1].aim, upm) * tune(settings.gunOffset, settings.gunRotate) * gunAnchor();
-                const Rigid seatLeft = poseToLocal(fs_.hand[0].grip, upm) * tune(settings.leftOffset, settings.leftRotate) * leftAnchor();
-                const Rigid seatGunL = poseToLocal(fs_.hand[0].aim, upm) * tune(offL, rotL) * gunAnchorLeft();
+                const Rigid seatGun = poseToLocal(fs_.hand[1].aim, upm) * gunLocal1;
+                const Rigid seatLeft = poseToLocal(fs_.hand[0].grip, upm) * emptyLocal0;
+                const Rigid seatGunL = poseToLocal(fs_.hand[0].aim, upm) * gunLocal0;
                 if (right) meet(seatGun, screenAim_);
                 if (gun[0].on) screenAimL_.on = true, meet(seatGunL, screenAimL_);   // (dual pistols: the left gun)
                 // (the hands' texture set: the model's own; the name entry's area 2 and its colour rows 0xC-0xE turned
@@ -968,6 +1020,61 @@ void Scene::frame(const Frame& f)
                 test.fxDistSum += double(want / upm);
             }
             drawItems = &fxItems_;
+        }
+
+        // vr141 (#78, user 2026-11-12: "creatures fade in quickly when they first appear" in VR, e.g. the arcade's
+        // scripted zombie of Chapter 1's opening that spawns just behind the player): a creature (DrawItem::vrBody, its
+        // body record) seen for the first time fades in over vr.ini fade_in seconds (0.25; 0 off), a screen-door
+        // dissolve (Renderer: DrawItem::dissolve; no blending, so the arcade sort and the depth stay as they are).
+        // Only those first seen outside the flat game's 4:3 view (fade_in_all = on: every one): inside it the arcade
+        // shows them popping in by design. A creature stays known while it is drawn (a dead body never fades again)
+        // and 1 s after its last draw (the body record's +8 changes as it dies: no key; a body address drawn again
+        // after more than 1 s is a new creature)
+        if (settings.fadeIn > 0.0f) {
+            const uint64_t fnow = rt.frameCount;
+            if (fnow < seenFrame_) seen_.clear();   // (a new game / a loaded chapter: the frame count went back)
+            seenFrame_ = fnow;
+            const double tnow = followGameAim ? double(fnow) / 60.0 : double(fs_.displayTime) / 1e9;   // (tests: game time)
+            const float tanY = std::tan(base.fovY / 2), tanX = tanY * halfW / 192.0f;
+            auto inFlatView = [&](const DrawItem& it) {
+                float c[3], r, d[3], l[3];
+                itemSphere(it, c, r);
+                for (int k = 0; k < 3; ++k) d[k] = c[k] - gp[k];
+                for (int k = 0; k < 3; ++k) l[k] = gr[k] * d[0] + gr[3 + k] * d[1] + gr[6 + k] * d[2];   // (camera space)
+                return l[2] + r > 0.0f && std::abs(l[0]) <= tanX * std::max(l[2], 0.0f) + r &&
+                       std::abs(l[1]) <= tanY * std::max(l[2], 0.0f) + r;
+            };
+            bool fading = false;
+            for (const DrawItem& it : *drawItems) {
+                if (!it.vrBody || !it.model || !it.placement) continue;
+                auto [s, isNew] = seen_.try_emplace(it.vrBody);
+                if (isNew) {
+                    s->second.t0 = tnow;
+                    s->second.fades = settings.fadeInAll || !inFlatView(it);
+                    if (s->second.fades) ++test.fadeIns;
+                    static const bool trace = std::getenv("HOTD_VR_FADE_TRACE") != nullptr;
+                    if (trace)
+                        SDL_Log("vr fade-in: frame %llu body %08X model %#x at %.0f %.0f %.0f: %s", (unsigned long long)fnow,
+                                it.vrBody, it.model->key, it.placement->pos[0], it.placement->pos[1], it.placement->pos[2],
+                                s->second.fades ? "fades in (outside the flat view)" : "inside the flat view: no fade");
+                }
+                s->second.last = fnow;
+                fading = fading || (s->second.fades && tnow - s->second.t0 < settings.fadeIn);
+            }
+            for (auto s = seen_.begin(); s != seen_.end();)   // (not drawn for 1 s: forgotten; its address a new one's)
+                s = fnow - s->second.last > 60 ? seen_.erase(s) : std::next(s);
+            if (fading) {
+                if (drawItems != &fxItems_) fxItems_ = *drawItems;
+                for (DrawItem& it : fxItems_) {
+                    if (!it.vrBody) continue;
+                    const auto s = seen_.find(it.vrBody);
+                    if (s == seen_.end() || !s->second.fades) continue;
+                    const float a = float((tnow - s->second.t0) / settings.fadeIn);
+                    if (a < 1.0f) it.dissolve = 1.0f - std::max(a, 0.0f);
+                }
+                drawItems = &fxItems_;
+                ++test.fadeInFrames;
+            }
         }
 
         // the dominant (right) eye first: its depth tells how far the gun's ray and the preview's cursor go
@@ -1294,7 +1401,7 @@ void Scene::frame(const Frame& f)
     if (triggerDown_ && !wasDown_) {
         if (pullR != Pull::Ignore) {
             ++pending_.pulls;
-            backend_->haptic(1, 0.7f, 0.06f);   // openxr: the gun's kick (the preview: nothing)
+            backend_->haptic(physHand(1), 0.7f, 0.06f);   // openxr: the gun's kick (the preview: nothing)
         }
         ++(pullR == Pull::Ignore ? test.pullsIgnored : pullR == Pull::Reload ? test.pullsReload : test.pullsShot);
     }
@@ -1321,7 +1428,7 @@ void Scene::frame(const Frame& f)
         triggerDownL_ = triggerDownL_ ? tl > 0.4f : tl > 0.6f;
         if (triggerDownL_ && !wasDownL_ && pullL != Pull::Ignore) {
             ++l.pulls;
-            backend_->haptic(0, 0.7f, 0.06f);   // (the left controller's own kick)
+            backend_->haptic(physHand(0), 0.7f, 0.06f);   // (the left controller's own kick)
         }
         wasDownL_ = triggerDownL_;
         l.held = triggerDownL_ && pullL != Pull::Ignore;
@@ -1338,13 +1445,14 @@ void Scene::frame(const Frame& f)
         pending_.x = pending_.left.x, pending_.y = pending_.left.y, pending_.onScreen = pending_.left.onScreen;
         pending_.ignore = pending_.left.ignore;
     }
-    // openxr: either hand's grip, the right A / B (Vive / WMR: the right trackpad) reload (vrflow: the left Y is the
-    // menu action now, Pause); the left X (Index: left A; Vive / WMR: the left trackpad) is Start (join / continue);
-    // the menu button pauses
+    // openxr: either hand's grip, the gun hand's A / B (Vive / WMR: its trackpad) reload; the empty hand's Y / B is
+    // Pause (vrflow; the menu buttons too: pauseHeld) and its X / A (Index: A; Vive / WMR: the trackpad) Start (join /
+    // continue). vr141: the roles' order (takeHands): right-handed the right A / B reload, the left Y pauses, the left X
+    // starts; left-handed the left X / Y reload, the right B pauses, the right A starts
     for (int h = 0; h < 2; ++h) {
         const Controller& c = fs_.hand[h];
         gripDown_[h] = gripDown_[h] ? c.squeeze > 0.4f : c.squeeze > 0.6f;
-        const bool reload = gripDown_[h] || c.secondary || (h == 1 && c.primary);
+        const bool reload = gripDown_[h] || (h == 1 && (c.primary || c.secondary));
         if (reload && !wasReload_[h]) pending_.reload = pending_.reloadHand[h] = true;
         wasReload_[h] = reload;
     }
@@ -1364,7 +1472,7 @@ void Scene::frame(const Frame& f)
                 // while player 1 is in control (playerInControl), not in cut-scenes, cards or the attract
                 if (controlRun_ >= 1) {
                     pending_.reload = pending_.reloadHand[h] = true;
-                    SDL_Log("vr: %s reload (the %s gun), frame %llu", gestures_[h].last(), h ? "right" : "left",
+                    SDL_Log("vr: %s reload (the %s gun), frame %llu", gestures_[h].last(), physHand(h) ? "right" : "left",
                             (unsigned long long)rt.frameCount);
                 } else {
                     SDL_Log("vr: %s ignored (a cut-scene: no skip), frame %llu", gestures_[h].last(), (unsigned long long)rt.frameCount);
@@ -1374,7 +1482,7 @@ void Scene::frame(const Frame& f)
             gestures_[h].reset();
         }
     }
-    // vrweapon: the right stick (the gun hand's) flicked past 0.7 left / right, back under 0.3 before the next
+    // vrweapon: the gun hand's stick (vr141: left-handed the left stick) flicked past 0.7 left / right, back under 0.3 before the next
     {
         const float sx = fs_.hand[1].stick[0], sy = fs_.hand[1].stick[1];
         if (!stickHeld_ && std::abs(sx) > 0.7f && std::abs(sx) > std::abs(sy)) pending_.weaponStep = sx > 0 ? 1 : -1, stickHeld_ = true;
@@ -1388,7 +1496,7 @@ void Scene::frame(const Frame& f)
     const bool anyHeld = fs_.hand[0].trigger > 0.4f || fs_.hand[1].trigger > 0.4f || fs_.hand[0].primary || fs_.hand[1].primary;
     if (anyPress && !pressHeld_) pending_.press = true;
     pressHeld_ = pressHeld_ ? anyHeld : anyPress;
-    const bool menu = fs_.hand[0].menu || fs_.hand[1].menu;
+    const bool menu = pauseHeld(fs_);
     if (menu && !wasMenu_) menuPending_ = true;
     wasMenu_ = menu;
 #if !defined(__ANDROID__)
@@ -1671,7 +1779,7 @@ Scene::Pointer Scene::panelFrame(unsigned srcFbo, int w, int h, int pointW, int 
 
     backend_->setOutputSize(w, h);
     noteFrame();
-    backend_->beginFrame(fs_);
+    takeHands();   // (vr141: left-handed, the gun hand points)
     if (!lastPanel_) {   // vrflow: from the game (the attract's trigger): the buttons still held click nothing
         lastPanel_ = true;
         const Controller& pc = fs_.hand[1].active && fs_.hand[1].aim.valid ? fs_.hand[1] : fs_.hand[0];
@@ -1681,7 +1789,7 @@ Scene::Pointer Scene::panelFrame(unsigned srcFbo, int w, int h, int pointW, int 
     }
     // the screen in the player's space (metres; left-handed, +z ahead; OpenXR LOCAL: the origin at the head's start)
     const float D = settings.menuDistance, hw = settings.menuWidth * 0.5f, hh = hw * float(h) / float(w);
-    // the pointer: the right controller's aim ray (the left's when the right one is not tracked)
+    // the pointer: the gun hand's aim ray (the right controller's; left-handed the left's: takeHands), the other's when untracked
     const Controller& c = fs_.hand[1].active && fs_.hand[1].aim.valid ? fs_.hand[1] : fs_.hand[0];
     bool ray = false;
     float o[3] = {0, 0, 0}, d[3] = {0, 0, 1}, hit[3] = {0, 0, 0};
@@ -1711,7 +1819,7 @@ Scene::Pointer Scene::panelFrame(unsigned srcFbo, int w, int h, int pointW, int 
     out.back = back && !panelBack_;
     out.enter = enter && !panelEnter_;
     panelBack_ = back, panelEnter_ = enter;
-    if (out.press) backend_->haptic(fs_.hand[1].active ? 1 : 0, 0.3f, 0.02f);
+    if (out.press) backend_->haptic(physHand(fs_.hand[1].active ? 1 : 0), 0.3f, 0.02f);
 
     // questfb (user 2026-11-10 on the Quest: "add hands on the menu by default but allow people to turn them off";
     // Gameplay > Hands in Menus (VR)): the gun hand and the empty left hand in front of the big screen, the game's own
@@ -1720,20 +1828,13 @@ Scene::Pointer Scene::panelFrame(unsigned srcFbo, int w, int h, int pointW, int 
     const float upm = settings.unitsPerMetre;
     if (handsView) {
         DrawItem hi;
-        auto tune = [&](const float offset[3], const float rotate[3]) {   // (frame()'s: vr.ini's hand offsets)
-            Pose p;
-            std::copy(offset, offset + 3, p.pos);
-            quatFromYawPitchRoll(rotate[1] * kPi / 180.0f, rotate[0] * kPi / 180.0f, rotate[2] * kPi / 180.0f, p.rot);
-            p.valid = true;
-            return poseToLocal(p, upm);
-        };
         if (fs_.hand[1].active && fs_.hand[1].aim.valid) {
-            const Rigid g = poseToLocal(fs_.hand[1].aim, upm) * tune(settings.gunOffset, settings.gunRotate) * gunAnchor();
+            const Rigid g = poseToLocal(fs_.hand[1].aim, upm) * gunLocal(settings, upm, leftHanded);
             if (handsView->placedItem(0, kGunHandModel, g.r, g.t, hi))
                 hi.variant = hi.model->preferredVariant, menuHands.push_back(hi);
         }
         if (settings.leftHand && fs_.hand[0].active && fs_.hand[0].grip.valid) {
-            const Rigid l = poseToLocal(fs_.hand[0].grip, upm) * tune(settings.leftOffset, settings.leftRotate) * leftAnchor();
+            const Rigid l = poseToLocal(fs_.hand[0].grip, upm) * emptyLocal(settings, upm, leftHanded);
             if (handsView->placedItem(1, kLeftHandModel, l.r, l.t, hi))
                 hi.variant = hi.model->preferredVariant, menuHands.push_back(hi);
         }

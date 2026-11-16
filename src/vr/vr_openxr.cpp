@@ -1290,8 +1290,8 @@ private:
             !make(squeeze_, XR_ACTION_TYPE_FLOAT_INPUT, "squeeze", "Reload (grip)") ||
             !make(gripPose_, XR_ACTION_TYPE_POSE_INPUT, "grip_pose", "Hand pose") ||
             !make(aimPose_, XR_ACTION_TYPE_POSE_INPUT, "aim_pose", "Gun pose") ||
-            !make(primary_, XR_ACTION_TYPE_BOOLEAN_INPUT, "primary", "Start (left) / reload (right)") ||
-            !make(secondary_, XR_ACTION_TYPE_BOOLEAN_INPUT, "secondary", "Reload") ||
+            !make(primary_, XR_ACTION_TYPE_BOOLEAN_INPUT, "primary", "Reload (the gun hand) / Start (the other hand)") ||
+            !make(secondary_, XR_ACTION_TYPE_BOOLEAN_INPUT, "secondary", "Reload (the gun hand) / Pause (the other hand)") ||
             !make(menu_, XR_ACTION_TYPE_BOOLEAN_INPUT, "menu", "Pause") ||
             !make(haptic_, XR_ACTION_TYPE_VIBRATION_OUTPUT, "haptic", "Recoil") ||
             !make(recentre_, XR_ACTION_TYPE_BOOLEAN_INPUT, "recentre", "Recentre (hold)") ||
@@ -1330,12 +1330,14 @@ private:
                      {menu_, "/user/hand/left/input/menu/click"}, {menu_, "/user/hand/right/input/menu/click"}}));
         // vrflow (user 2026-11-10, "I don't know how to pause"): the left Y is Pause too (Touch, HP; was a reload: the
         // grip, A, B, the shake / flick and pointing down still reload), a dedicated button beside the left menu
-        // button, which SteamVR may keep for its dashboard
+        // button, which SteamVR may keep for its dashboard. vr141 (#86, left-handed mode): the left Y (Index: the left B)
+        // is the "secondary" action as the right B, so the scene tells the hands apart: the empty hand's B / Y pauses,
+        // the gun hand's reloads (vr_scene.cpp pauseHeld)
         bind("/interaction_profiles/oculus/touch_controller",   // (Quest, Rift S; the right menu is the system's)
              common({{trigger_, "/user/hand/left/input/trigger/value"}, {trigger_, "/user/hand/right/input/trigger/value"},
                      {squeeze_, "/user/hand/left/input/squeeze/value"}, {squeeze_, "/user/hand/right/input/squeeze/value"},
                      {primary_, "/user/hand/left/input/x/click"}, {primary_, "/user/hand/right/input/a/click"},
-                     {menu_, "/user/hand/left/input/y/click"}, {secondary_, "/user/hand/right/input/b/click"},
+                     {secondary_, "/user/hand/left/input/y/click"}, {secondary_, "/user/hand/right/input/b/click"},
                      {menu_, "/user/hand/left/input/menu/click"},
                      {recentre_, "/user/hand/left/input/thumbstick/click"}, {recentre_, "/user/hand/right/input/thumbstick/click"},
                      {stick_, "/user/hand/left/input/thumbstick"}, {stick_, "/user/hand/right/input/thumbstick"}}));
@@ -1343,7 +1345,7 @@ private:
              common({{trigger_, "/user/hand/left/input/trigger/value"}, {trigger_, "/user/hand/right/input/trigger/value"},
                      {squeeze_, "/user/hand/left/input/squeeze/value"}, {squeeze_, "/user/hand/right/input/squeeze/value"},
                      {primary_, "/user/hand/left/input/a/click"}, {primary_, "/user/hand/right/input/a/click"},
-                     {secondary_, "/user/hand/right/input/b/click"}, {menu_, "/user/hand/left/input/b/click"},
+                     {secondary_, "/user/hand/right/input/b/click"}, {secondary_, "/user/hand/left/input/b/click"},
                      {recentre_, "/user/hand/left/input/thumbstick/click"}, {recentre_, "/user/hand/right/input/thumbstick/click"},
                      {stick_, "/user/hand/left/input/thumbstick"}, {stick_, "/user/hand/right/input/thumbstick"}}));
         bind("/interaction_profiles/htc/vive_controller",
@@ -1364,7 +1366,7 @@ private:
                  common({{trigger_, "/user/hand/left/input/trigger/value"}, {trigger_, "/user/hand/right/input/trigger/value"},
                          {squeeze_, "/user/hand/left/input/squeeze/value"}, {squeeze_, "/user/hand/right/input/squeeze/value"},
                          {primary_, "/user/hand/left/input/x/click"}, {primary_, "/user/hand/right/input/a/click"},
-                         {menu_, "/user/hand/left/input/y/click"}, {secondary_, "/user/hand/right/input/b/click"},
+                         {secondary_, "/user/hand/left/input/y/click"}, {secondary_, "/user/hand/right/input/b/click"},
                          {menu_, "/user/hand/left/input/menu/click"}, {menu_, "/user/hand/right/input/menu/click"},
                          {recentre_, "/user/hand/left/input/thumbstick/click"}, {recentre_, "/user/hand/right/input/thumbstick/click"},
                      {stick_, "/user/hand/left/input/thumbstick"}, {stick_, "/user/hand/right/input/thumbstick"}}));

@@ -590,8 +590,9 @@ void Runtime::geo_draw_model(uint32_t model)
     // Ours was the big orange ball over every hit, its first frames right in front of the camera (the real PC shows
     // only the flash 0x2D's white puffs and the streaks there: pc_look\pcpolish\full t11205-t13956). The arcade logic
     // runs on; its place n frames on (start + 20 n along the shot ray from the eye) is pushed out along that ray by
-    // another 20 n (the camera's turn since the shot left out). UNVERIFIED (teaser): judged by headless shots
-    if (pcModels && (model == 0x660 || model == 0x661)) {
+    // another 20 n (the camera's turn since the shot left out). UNVERIFIED (teaser): judged by headless shots.
+    // mixmodels (#49): Models: Mixed, the Effects row
+    if (pcFor(kMixEffects) && (model == 0x660 || model == 0x661)) {
         const uint32_t t = mem.u32(G::task_current);
         if (mem.u32(t) == F::shot_effect_debris) {
             const uint32_t n = mem.u32(t + 0x50);
@@ -746,10 +747,11 @@ uint16_t Runtime::header_ram_flat(uint32_t header)
 // flash with the PC models: THOTD.EXE's part hooks draw no flash colour. The Hangedman (0x51D84E: the part not drawn
 // while +0x2FC is odd) and the Hermit's face (0x4EF2B8: neither model on odd frames) leave the part out; the Magician
 // (0x51DF7E) draws a white copy the PC data has for 15 of his parts (0x1D3C..0x1D4A), else model 0 (nothing). The
-// other flat sets (0x8F0400: chapter 4's vein glow) are drawn as the model itself. False: not drawn
+// other flat sets (0x8F0400: chapter 4's vein glow) are drawn as the model itself. False: not drawn. mixmodels (#49):
+// Models: Mixed, the Bosses row decides (the flashes are the bosses')
 bool Runtime::pc_flash_model(uint32_t& model, uint16_t& flat) const
 {
-    if (!pcModels || flat == 0xFFFF)
+    if (!pcFor(kMixBosses) || flat == 0xFFFF)
         return true;
     if (flat != 7) {
         flat = 0xFFFF;

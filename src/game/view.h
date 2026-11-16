@@ -4,6 +4,7 @@
 #pragma once
 
 #include "assets/arcade_anim.h"
+#include "assets/arcade_categories.h"
 #include "assets/arcade_loader.h"
 #include "assets/pc_loader.h"
 #include "game/ragdoll.h"
@@ -38,13 +39,16 @@ public:
     // regions / dumps / texsets as hotd_viewer takes them (assets/arcade_loader.h); chapter 0-3. pcDir non-empty: the
     // model source is the PC release (R4's model switch): the PC world, sky and every model by ID from the PC files only
     // (creature parts share the arcade's IDs); an ID the PC lacks is logged ("PC model gap") and not drawn, no arcade
-    // fallback (user rule "Assets"); no generated skins (the PC draws none). blood: the blood colour setting (PC pages)
+    // fallback (user rule "Assets"); no generated skins (the PC draws none). blood: the blood colour setting (PC pages).
+    // mixmodels (#49): mix.on (Models: Mixed, with pcDir): both sets loaded and uploaded, each item drawn from its row's
+    // set (game/model_mix.h), an ID the PC lacks from the arcade's; the generated skins of the arcade rows' types
     bool init(const std::string& regions, const std::string& dumps, const std::string& texsets, int chapter, std::string& err,
-              const std::string& pcDir = {}, int blood = 0);
+              const std::string& pcDir = {}, int blood = 0, ModelMix mix = {});
     // perf (2026-10-21): init in two parts: prepare (the files, the models, the decal layers; no GL, so on any thread:
     // the next chapter's view during the chapter clear) and finish (the GL part: shaders, upload; on the GL thread)
     struct Prepared {
         int chapter = 0, blood = 0;
+        ModelMix mix;   // (mixmodels)
         bool ok = false;
         std::string err;
         ArcadeConfig arcadeCfg;
@@ -58,7 +62,8 @@ public:
         uint64_t setupMs = 0, stageMs = 0, pcNs = 0, layersNs = 0;
     };
     static std::unique_ptr<Prepared> prepare(const std::string& regions, const std::string& dumps, const std::string& texsets,
-                                             int chapter, const std::string& pcDir = {}, int blood = 0, bool background = false);
+                                             int chapter, const std::string& pcDir = {}, int blood = 0, bool background = false,
+                                             ModelMix mix = {});
     bool finish(std::unique_ptr<Prepared> p, std::string& err);
     // remakefix: a camera cut between two frames' Runtime::camera (the menu's live attract cross-fades there)
     static bool cameraCut(const float* a, const float* b);
@@ -124,6 +129,17 @@ private:
     std::unique_ptr<StageData> stage_;
     std::unique_ptr<PcSource> pcSource_;
     std::unique_ptr<StageData> pcStage_;    // the PC source's stage (model source PC), else null
+    // mixmodels (#49): Models: Mixed (game/model_mix.h). Off: every row is the one model source (pcStage_ or not)
+    ModelMix mix_;
+    bool pcWorld_ = false;       // the world (stage, sky, props, the PC's later world files) is the PC's
+    bool arcadeDrawn_ = true;    // the arcade stage is uploaded and drawn from (arcade models, or Mixed)
+    // row c's items come from the PC stage (pcStage_ loaded and, in Mixed, that row on PC)
+    bool pcCat(int c) const { return pcStage_ && (!mix_.on || mix_.pcFor(c)); }
+    // Mixed: a game-drawn model's row (by its body's creature type, the boss part hooks, the effect models by ID / name,
+    // the creatures' / bosses' / people's part IDs: assets/arcade_categories.h; the rest is the world's)
+    int mixCat(const Runtime& rt, const DrawModel& dm) const;
+    std::unique_ptr<CreatureCategories> partCats_;   // (Mixed only: the part IDs' categories)
+    mutable std::set<uint32_t> mixLogged_;            // HOTD_MIX_LOG: each model's row said once
     CreatureAnimations anim_;
     std::vector<DrawItem> world_;           // resolved once
     std::vector<Placement> placements_;     // this frame's creature / object placements (stable while drawing)

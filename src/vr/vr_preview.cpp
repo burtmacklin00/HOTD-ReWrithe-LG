@@ -94,6 +94,7 @@ public:
     }
     void cursorDistance(float m) override { cursorDist_ = std::clamp(m, 0.3f, 200.0f); }
     void setDual(bool on) override { dual_ = on; }
+    void setLeftHanded(bool on) override { lefty_ = on; }   // vr141 (#86)
     void scriptTrigger(int hand, float v) override { trigger_[std::clamp(hand, 0, 1)] = std::clamp(v, 0.0f, 1.0f); }
 
     bool desktopCursorRay(float o[3], float d[3]) override
@@ -195,16 +196,20 @@ public:
         float yr[9];
         quatToMatrix(yawOnly, yr);
         // (dual pistols: the left hand holds its gun as the right one, mirrored, and points it at the cursor's point too)
+        // vr141 (left-handed): the roles mirrored: the gun in the left hand, the idle hand on the right; trigger_ and the
+        // keys stay the roles' (0 the second gun / idle hand, 1 the gun)
         const float hand[2][3] = {{dual_ ? -0.17f : -0.20f, dual_ ? -0.25f : -0.32f, dual_ ? -0.32f : -0.30f}, {0.17f, -0.25f, -0.32f}};
         for (int h = 0; h < 2; ++h) {
             Controller& c = fs.hand[h];
             c.active = true;
+            const int role = lefty_ ? 1 - h : h;
+            const float hx = lefty_ ? -hand[role][0] : hand[role][0];
             float p[3];
             for (int k = 0; k < 3; ++k)
-                p[k] = fs.head.pos[k] + yr[k * 3] * hand[h][0] + yr[k * 3 + 1] * hand[h][1] + yr[k * 3 + 2] * hand[h][2];
-            float fwd[3] = {-yr[2], -yr[5] - 0.35f, -yr[8]};   // (the idle left hand: ahead, a little down)
-            c.trigger = trigger_[h];
-            if (h == 1 || dual_) {
+                p[k] = fs.head.pos[k] + yr[k * 3] * hx + yr[k * 3 + 1] * hand[role][1] + yr[k * 3 + 2] * hand[role][2];
+            float fwd[3] = {-yr[2], -yr[5] - 0.35f, -yr[8]};   // (the idle hand: ahead, a little down)
+            c.trigger = trigger_[role];
+            if (role == 1 || dual_) {
                 float o[3], d[3];
                 last_ = fs;   // (the cursor ray from this frame's eyes)
                 if (desktopCursorRay(o, d)) {
@@ -268,7 +273,8 @@ public:
 private:
     // vrflow (tests): HOTD_VR_BUTTONS="<frame>:<hand><button> ..." presses a controller button for 4 preview frames
     // from that frame (beginFrame calls: the game's and the big screen's frames alike). hand l / r; button t trigger,
-    // a primary (A / X), b secondary (B), y the left Y (OpenXR: bound to Pause, as the menu button), m menu, g grip, < / > the stick left / right (vrweapon);
+    // a primary (A / X), b secondary (B / Y), y the same (the left Y: Pause right-handed; vr141: the right B pauses
+    // left-handed, "rb"), m menu, g grip, < / > the stick left / right (vrweapon);
     // x: the runtime asks the app to quit (OpenXR EXITING: lost() + exitAsked(), the game closes).
     // E.g. "200:rt 400:ra 1500:ly 1700:ly": the attract's trigger, A on the menu, pause, Continue
     void scriptedButtons(FrameState& fs)
@@ -287,7 +293,8 @@ private:
                 if (b == 't') c.trigger = 1.0f;
                 else if (b == 'a') c.primary = true;
                 else if (b == 'b') c.secondary = true;
-                else if (b == 'y' || b == 'm') c.menu = true;   // (the left Y: OpenXR's Pause action, as the menu)
+                else if (b == 'y') c.secondary = true;   // (the left Y: OpenXR's "secondary" as the right B since vr141)
+                else if (b == 'm') c.menu = true;
                 else if (b == 'g') c.squeeze = 1.0f;
                 else if (b == '<') c.stick[0] = -1.0f;   // (vrweapon: the stick flicked left / right)
                 else if (b == '>') c.stick[0] = 1.0f;
@@ -320,6 +327,7 @@ private:
     bool keys_[8] = {};
     bool scripted_ = false;
     bool dual_ = false;
+    bool lefty_ = false;   // vr141: left-handed (setLeftHanded)
     float trigger_[2] = {0, 0};
     uint64_t lastNs_ = 0;
     int cursorEye_ = 1;

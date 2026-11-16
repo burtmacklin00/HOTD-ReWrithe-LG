@@ -182,6 +182,55 @@ PrintWindow every 40-50 ticks (no focus change; scratch script in the session's 
   point-sampled (blocky texels in every capture). PC sets are NEAREST now; `RenderOptions::pcBilinear` for the option.
   (Not settled: an empty devs.cfg defaults the option to 1 and opens the driver dialog; how the harness passes the
   dialog was not looked at. The captures are the evidence.)
+  **Settled (pcd3d, GitHub #79, 2026-11-12): THOTD.EXE has two drivers** and the point-sampled look is the other one.
+  See "The PC's two renderers" below; Options > Video > **PC Renderer** (Software / Direct3D) picks the look.
+
+### The PC's two renderers (pcd3d, GitHub #79, 2026-11-12; read in THOTD.EXE.orig, disassembly + private\decomp\pc)
+- **The choice:** the window set-up 0x563440 looks for the words `ddraw` (0x5C6E80) and `d3d` (0x5C6E88) in the
+  command line: `d3d` without `ddraw` installs the Direct3D driver (0x573CA0: driver pointer 0xC649E0 = table
+  0xC66EF8, **type 3** in its first word), anything else the DirectDraw **software** driver (0x565E70 / 0x5677F0:
+  table 0xC652A4, **type 1**). So a plain `THOTD.EXE` is the software renderer. The game code asks the type only for
+  the screen mode (0x418434 / 0x4184E4 / 0x418550, driver +0x68): type 1 gets **8 bits per pixel** (640 x 480, or
+  320 x 240 with option bit 0x20 of 0x5CE534; its mode list 0x5676D0 takes 8-bit modes up to 1024 x 768), any other
+  type 640 x 480 x **16**.
+- **Both tables have the same slots** (+0x74 queue a polygon record, +0x78 / +0x7C untextured triangle / quad, +0x80 /
+  +0x84 textured, +0xBC / +0xC4 the 2D sprites):
+
+  | | Software (type 1) | Direct3D (type 3) |
+  |---|---|---|
+  | untextured triangle | 0x57F230: the mesh colour as RGB555 \| 0x8000 through the 64 KB table at [0xC64CA4] (`STAGEn.TBL`) to a **palette index** (record +7) | 0x577CA0: D3DTLVERTEX diffuse = the colour & 0xFFFFFF, 0 -> 0x080808, alpha 0xFF (0x7F with head bit 0x80) |
+  | textured triangle | 0x57EEB0: flags 0x92, + 0x800 with head bit 0x40 or beyond the distance [0xC64CD0], + 0x400 with head bit 0x100 (the rasteriser's meaning of 0x400 / 0x800 not read); head bit 0x80 not looked at | 0x577870: flags 0x92, or 0x292 at alpha 0x7F with head bit 0x80; diffuse white |
+  | back faces | head bit 0x200 clear: 0x586426 (the 2D cross product's sign) | the same test in the dispatcher (0x578F60), D3D CULLMODE none |
+  | depth | always the sort key (painter's order) | the z-buffer (key 0 / 1.0) unless the dialog's sort option 0x12E8C54 |
+  | texels | 8-bit, the stage palette (`STAGEn.PAL`), point-sampled | filtered, see below |
+  | 2D sprites | 0x57DBD0 / 0x57DF50: flags 0xA2 (+ 0x400 unless flag bit 2) | 0x576E20 / 0x577110: D3D quads, flags **0x10A4** (0x12A4 and alpha 0x7F with flag bit 1), texture coordinates + 0.25 texel |
+
+- **Direct3D's render states** (0x583960..0x583AC0, `SetRenderState` = device +0x5C): ZENABLE (7) 1 with a z-buffer;
+  ZWRITEENABLE (14) 0 here; SRCBLEND (19) SRCALPHA, DESTBLEND (20) INVSRCALPHA, ALPHABLENDENABLE (27) 1;
+  TEXTUREMAPBLEND (21) MODULATEALPHA; COLORKEYENABLE (41) 1; FILLMODE (8) solid; SHADEMODE (9) Gouraud; CULLMODE (22)
+  none; DITHERENABLE (26) 1; SPECULARENABLE (29) 0 (the earlier note's "fog off" was this state; fog is never set);
+  TEXTUREPERSPECTIVE (4) 1; TEXTUREADDRESS (3) wrap; **TEXTUREMAG (17) / TEXTUREMIN (18) = 2 LINEAR with the dialog's
+  bilinear option 0x12E8C4C, else 1 NEAREST** (0x583A67); no mip levels.
+- **The dialog's defaults** (0x575284, `D3DDRIVERSELECT`, when devs.cfg does not parse: the release's is 2 bytes):
+  texture depth 0x12E8C58 = 8, **bilinear 0x12E8C4C = 1**, sort 0x12E8C54 = 0, half-size textures 0x12E8C5C = 0.
+- **The 2D stays sharp in Direct3D:** the batch draw 0x582ED0 sets TEXTUREMAG / MIN to NEAREST around every polygon
+  record whose flags have 0x1000 (0x583133..0x5831B4) and back to LINEAR after it; only the sprite routines queue
+  0x1000 (0x576E69.., 0x577177..: a scan of the code section for an immediate push with bit 0x1000 before a +0x74 call
+  finds only those six `push 0x10A4 / 0x12A4`).
+- **Texture formats in Direct3D:** 0x584390 / 0x5850B0 pick the device's texture format: 8-bit palettised when the
+  dialog's depth is 8 and the device offers one (0x585040), else the nearest 16-bit one (0x5848A0 converts the
+  ARGB1555 pages by the format's masks); with 0x12E8C5C (set by the dialog, or when video memory is short) 0x584550 halves a texture's size when its header
+  word is 500 or more. With 8-bit
+  textures the driver's palette load (+0x34 = 0x585530) reads `STAGEn.PAL` and the same `.TBL` as the software driver.
+- **What ReWrithe draws.** Software (the default, the look so far): the ARGB1555 pages in their own colours,
+  point-sampled, z-buffer. That is the software driver's sampling without its 8-bit palette (the original's software
+  picture has 256 colours; the issue's captures show banded skies and a grey car where Direct3D's is blue). Direct3D: `RenderOptions::pcBilinear` = the
+  Direct3D driver with 16-bit textures and bilinear on: LINEAR on every 3D polygon's texture (the sky too), no mip
+  levels, the transparent texels cut at half the filtered cover (the dark fringe of the black key texels stays, as a
+  colour-keyed filtered texture has it), the HUD / 2D point-sampled as before. `--pc-renderer software|d3d`,
+  launcher.ini `pcrenderer=`. Not done: DITHERENABLE (a 16-bit target's pattern; our target is 8 bits per channel),
+  the 8-bit palettised texture path (either renderer), the software driver's painter's sort and its 0x400 / 0x800
+  polygon flags (not read).
 - **PC untextured polygons:** colour = the mesh's own colour table at header + 8 (an offset in BODY 0: the table lies
   just before the header; read with ReadProcessMemory from the running harness game, `d3d_tri_untextured` 0x577CA0),
   & 0xFFFFFF, 0 -> 0x080808. Were grey (the scientist's eyebrows / eyes now dark as in the PC).

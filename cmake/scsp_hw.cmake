@@ -10,6 +10,7 @@
 #   4  key-rate scaling: clamp(KRS + octave, 0, 15) added to each rate, rate 0 = hold (MAME: octave + 2 KRS + FNS bit 9)
 #   8  timers: a reload is loaded on the next prescaler tick of the chip's sample counter (MAME: counts from the write)
 #  16  FM (with 1): the chip's interpolation quirk, the second point's whole part from the next slot's phase fraction
+#  32  sound stack: a value the 68000 writes to it counts like a slot output (MAME: half of it)
 
 # one edit: old -> new in the parent's `text` (named arguments keep the code's semicolons)
 function(_hotd_scsp_edit old new)
@@ -28,7 +29,10 @@ function(hotd_scsp_hw_patch src dst)
         _hotd_scsp_edit([==[DEFINE_DEVICE_TYPE(SCSP, scsp_device]==]
         [==[// HOTD ReWrithe (cmake/scsp_hw.cmake): hardware behaviour, one bit each (sound_board.cpp: hotd_scsp_fix)
 extern int hotd_scsp_fix;
-static u32 hotd_sc = 0;      // the chip's sample counter (EG clocking, timer ticks)
+extern int hotd_stack_mul[2];   // (fix 32) the scale of a 68000-written stack entry, entries 0-31 / 32-63
+static bool hotd_stack_cpu[64];  // the entry was last written by the 68000 (not by its slot)
+extern int hotd_scsp_solo;  // (testing, HOTD_SCSP_SOLO) -1, or the one sample (SA) that reaches the direct mix
+static u32 hotd_sc = 0;     // the chip's sample counter (EG clocking, timer ticks)
 static int hotd_att[32];     // the attack's attenuation per slot, 0 (loudest) .. 0x3FF, 6 dB per 0x40
 // key-rate scaling: added to the 5-bit rates; KRS 0xF = off
 static int hotd_kes(int krs, int oct) { return krs == 0xf ? 0 : std::clamp(krs + ((oct ^ 8) - 8), 0, 15); }
@@ -107,7 +111,11 @@ DEFINE_DEVICE_TYPE(SCSP, scsp_device]==])
 		if (MDL(slot) > 4)
 		{
 			// the ring holds 2x each slot's output: (X + Y) / 2 = the sum of the two outputs
-			const s32 sum = (m_RINGBUF[(m_BUFPTR + MDXSL(slot)) & 63] + m_RINGBUF[(m_BUFPTR + MDYSL(slot)) & 63]) / 2;
+			// (fix 32) an entry the 68000 wrote: its value times hotd_stack_mul (per half of the stack)
+			const int ix = (m_BUFPTR + MDXSL(slot)) & 63, iy = (m_BUFPTR + MDYSL(slot)) & 63;
+			const s32 vx = hotd_stack_cpu[ix] ? s32(m_RINGBUF[ix]) * hotd_stack_mul[ix >> 5] : s32(m_RINGBUF[ix]);
+			const s32 vy = hotd_stack_cpu[iy] ? s32(m_RINGBUF[iy]) * hotd_stack_mul[iy >> 5] : s32(m_RINGBUF[iy]);
+			const s32 sum = (vx + vy) / 2;
 			off = ((sum * 64) >> (0x10 - MDL(slot))) & ~1;
 		}
 		const s32 pos = off + s32((slot->cur_addr & ((1 << SHIFT) - 1)) >> (SHIFT - 6));
@@ -144,6 +152,32 @@ DEFINE_DEVICE_TYPE(SCSP, scsp_device]==])
         [==[m_timerB->adjust((hotd_scsp_fix & 8) ? hotd_timer_time(clock(), m_TimPris[1], m_udata.data[0x1A/2] & 0xff) : attotime::from_ticks(512, time));]==])
         _hotd_scsp_edit([==[m_timerC->adjust(attotime::from_ticks(512, time));]==]
         [==[m_timerC->adjust((hotd_scsp_fix & 8) ? hotd_timer_time(clock(), m_TimPris[2], m_udata.data[0x1C/2] & 0xff) : attotime::from_ticks(512, time));]==])
+        # the sound stack from the 68000 (fix 32, bossmusic, GitHub #87). The stack is also registers 0x600-0x67F, and
+        # HOTD's driver uses them: its lead voice (sample 0x028C0, a 64-sample loop next to the driver's wave bank at
+        # 0x2000-0x2FFF) is keyed with STWINH (the slot does not write its entries), MDL 0xD and MDXSL = MDYSL = 0,
+        # and the 68000 writes the two entries itself (0x600 + 2 x slot and + 0x40: 0x3368 and 0x0CC6, the first one
+        # swept by a software LFO, driver 0x600B2C / 0x6006C2): fixed wave offsets, one per sample in turn. MAME keeps
+        # twice each slot's output in its ring (and halves the X / Y sum), but stored a register write as it is: half
+        # the offset the chip takes, so the voice read the wrong places of the bank (one of them a constant: a
+        # full-level 22.05 kHz tone plus a noisy wave instead of the pulse and the saw). The ring keeps the
+        # written value, marked per entry; where the modulation is read (fix 1) it counts hotd_stack_mul times (2:
+        # like a slot output; checked against the issue.s board recording, docs/teaser_status/sound_board.md)
+        _hotd_scsp_edit([==[m_RINGBUF[(addr - 0x600)/2] = val;]==]
+        [==[{ m_RINGBUF[(addr - 0x600)/2] = val; if (addr < 0x680) hotd_stack_cpu[(addr - 0x600)/2] = (hotd_scsp_fix & 32) != 0; }]==])
+        _hotd_scsp_edit([==[	if (!STWINH(slot))
+	{]==]
+        [==[	if (!STWINH(slot))
+	{
+		hotd_stack_cpu[m_BUFPTR & 63] = false;]==])
+
+        # bossmusic (testing, HOTD_SCSP_SOLO=<hex SA>): only the slots playing that sample reach the direct mix
+        _hotd_scsp_edit([==[smpl += (sample * m_LPANTABLE[Enc]) >> SHIFT;
+					smpr += (sample * m_RPANTABLE[Enc]) >> SHIFT;]==]
+        [==[if (hotd_scsp_solo < 0 || int(SA(slot)) == hotd_scsp_solo)
+					{
+						smpl += (sample * m_LPANTABLE[Enc]) >> SHIFT;
+						smpr += (sample * m_RPANTABLE[Enc]) >> SHIFT;
+					}]==])
     # written only when it changes (no rebuild on every configure)
     set(old_text "")
     if(EXISTS "${dst}")

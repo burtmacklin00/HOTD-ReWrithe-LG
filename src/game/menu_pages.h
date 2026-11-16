@@ -25,7 +25,7 @@ int menuTabCount();
 int menuTabCategory(int tab);   // the category of the strip's tab
 int menuTabOf(int category);    // the strip's tab of a category (-1: none)
 // menufb: the pages with a Reset to Defaults row past the categories: Gameplay's Advanced page, the Firing Range
-enum : int { kResetAdvanced = 100, kResetRange = 101 };
+enum : int { kResetAdvanced = 100, kResetRange = 101, kResetMixed = 102 };   // (mixmodels: 102 Video > Mixed Models)
 // menufb: page's settings (a category, kResetAdvanced, kResetRange) back to their defaults (LaunchConfig's)
 void menuReset(LaunchConfig& c, int page);
 const char* menuCategoryName(int category);
@@ -45,10 +45,12 @@ struct MenuHooks {
     std::function<void(int page)> resetPage;            // menufb: a page's Reset to Defaults (ask, then menuReset)
     std::function<void()> languagePage;                 // menufb: System > Language's page (menuLanguageRows)
     std::function<void()> advancedPage;                 // advopt: the Advanced page (Gameplay's last row)
+    std::function<void()> mixedPage;                    // mixmodels (#49): Video > Mixed Models' page (menuMixedRows)
     std::function<void()> totdPage;                     // totdex: Gameplay > Typing of the Dead 0's page (null: no row)
     std::function<bool()> vrDualDefault;                // vr4: a VR run: vr.ini's dual_pistols (null: flat, no Dual Pistols row)
     std::function<bool()> vrLaserDefault;               // vrsight: a VR run: vr.ini's laser (null: flat, no Laser (VR) row)
     std::function<bool()> vrCrosshairDefault;           // vrsight: a VR run: vr.ini's crosshair (null: no Crosshair (VR) row)
+    std::function<bool()> vrGunLeftDefault;             // vr141: a VR run: vr.ini's left_handed (null: no Gun Hand (VR) row)
     // vrcomfort: a VR run: vr.ini's value for the comfort rows (0 view, 1 cutscenes, 2 vignette, 3 the screen's distance
     // in cm, 4 its size: 0 small / 1 medium / 2 large, -1 none of them); null: flat, no rows
     std::function<int(int which)> vrComfortDefault;
@@ -86,6 +88,8 @@ struct MenuHooks {
     std::function<void()> gunPage;
     // Light Gun Edition: Controls > Light Gun Setup: each player pulls their gun's trigger, LightgunHID.ini written
     std::function<void()> gunSetup;
+    // Native Wii Remote setup: connection scan, per-player status and four-point IR calibration page.
+    std::function<void()> wiimotePage;
     // fix28: a comparison picture "<kind>_<choice>" (models / blood: Frontend::Extra::preview): "mem:<key>" when it
     // can be drawn (Frontend::previewImage), else "" (its render asked for, menus3: in-process); "": "x" while
     // pictures can be made, "" not
@@ -135,6 +139,9 @@ std::vector<Frontend::Extra> menuModSettingRows(LaunchConfig& c, const ModPack& 
 // advopt: the Advanced page's rows (Game Speed, Music Numbering, Teammate Flashes, 4P Boss Hit Points, Guards; the
 // same values and launcher.ini keys they had on Video, Audio and Gameplay)
 std::vector<Frontend::Extra> menuAdvancedRows(LaunchConfig& c, const MenuHooks& h);
+// mixmodels (GitHub #49): Video > Mixed Models' rows: per kind (game/model_mix.h: Players and Humans, Creatures,
+// Bosses, World, Effects) Arcade / PC (LaunchConfig::mixedPc, launcher.ini mixedmodels=), then Reset to Defaults
+std::vector<Frontend::Extra> menuMixedRows(LaunchConfig& c, const MenuHooks& h);
 // menufb: the Firing Range page's rows for player seat (its Player row changes seat): the crosshair, colour, size,
 // thickness, Copy to Every Player (the page shows the range under them: Frontend::extrasRange)
 std::vector<Frontend::Extra> menuRangeRows(LaunchConfig& c, const MenuHooks& h, int& seat);

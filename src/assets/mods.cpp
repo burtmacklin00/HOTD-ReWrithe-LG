@@ -607,9 +607,10 @@ std::vector<ModPack> findModPacks(const std::vector<std::string>& roots)
                     } else if (k == "type") {
                         p.type = lower(v);
                         if (p.type == "models" || p.type == "model") p.type = "textures";   // modelpacks: a model pack is a texture pack's kind
+                        // (menu141, GitHub #83: splash: a splash screen mod, its splash.png / .jpg: docs/modding.md "Splash screens")
                         if (p.type != "textures" && p.type != "ragdoll" && p.type != "rainbowblood" && p.type != "bighead" &&
-                            p.type != "hermithead")
-                            std::fprintf(stderr, "mods: %s: type = %s: textures, ragdoll, rainbowblood, bighead or hermithead (docs/modding.md)\n",
+                            p.type != "hermithead" && p.type != "splash")
+                            std::fprintf(stderr, "mods: %s: type = %s: textures, splash, ragdoll, rainbowblood, bighead or hermithead (docs/modding.md)\n",
                                          p.id.c_str(), v.c_str());
                     } else if (k == "default") {
                         const std::string m = lower(v);

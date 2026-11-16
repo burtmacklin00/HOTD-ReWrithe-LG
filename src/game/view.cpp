@@ -215,10 +215,12 @@ bool GameView::cameraCut(const float* a, const float* b)
 // chapter clear (main.cpp viewPrefetch) and finishes it at the change (was the whole load, 0.4-1.5 s, in one frame)
 std::unique_ptr<GameView::Prepared> GameView::prepare(const std::string& regions, const std::string& dumps,
                                                       const std::string& texsets, int chapter, const std::string& pcDir,
-                                                      int blood, bool background)
+                                                      int blood, bool background, ModelMix mix)
 {
     auto p = std::make_unique<Prepared>();
     const uint64_t tStart = SDL_GetTicks();   // perf: the parts of the set-up (the "view:" line)
+    p->mix = mix;
+    p->mix.on = mix.on && !pcDir.empty();   // (mixmodels: Mixed needs the PC files; without them the arcade's alone)
     p->chapter = chapter;
     p->blood = blood;
     p->arcadeCfg = ArcadeConfig{regions, dumps, texsets, true, false};
@@ -299,16 +301,17 @@ std::unique_ptr<GameView::Prepared> GameView::prepare(const std::string& regions
         if (p->pcStage)
             layers(*p->pcStage);
     }
-    if (!p->pcStage)
+    // mixmodels: Models: Mixed draws from both stages (the arcade one for its rows and the PC gaps): both layered
+    if (!p->pcStage || p->mix.on)
         layers(*p->stage);
     p->ok = true;
     return p;
 }
 
 bool GameView::init(const std::string& regions, const std::string& dumps, const std::string& texsets, int chapter, std::string& err,
-                    const std::string& pcDir, int blood)
+                    const std::string& pcDir, int blood, ModelMix mix)
 {
-    return finish(prepare(regions, dumps, texsets, chapter, pcDir, blood), err);
+    return finish(prepare(regions, dumps, texsets, chapter, pcDir, blood, false, mix), err);
 }
 
 bool GameView::finish(std::unique_ptr<Prepared> p, std::string& err)
@@ -328,6 +331,18 @@ bool GameView::finish(std::unique_ptr<Prepared> p, std::string& err)
     skins_ = std::move(p->skins);
     stage_ = std::move(p->stage);
     pcStage_ = std::move(p->pcStage);
+    // mixmodels (#49): Models: Mixed (only with the PC stage loaded; else the arcade's alone, as before)
+    mix_ = p->mix;
+    mix_.on = mix_.on && pcStage_ != nullptr;
+    pcWorld_ = pcCat(kMixWorld);
+    arcadeDrawn_ = !pcStage_ || mix_.on;
+    if (mix_.on) {
+        partCats_ = std::make_unique<CreatureCategories>();
+        partCats_->build(anim_);
+        SDL_Log("view: Mixed models: players and humans %s, creatures %s, bosses %s, world %s, effects %s",
+                mix_.pcFor(kMixHumans) ? "PC" : "arcade", mix_.pcFor(kMixCreatures) ? "PC" : "arcade",
+                mix_.pcFor(kMixBosses) ? "PC" : "arcade", pcWorld_ ? "PC" : "arcade", mix_.pcFor(kMixEffects) ? "PC" : "arcade");
+    }
     // developer (weapons: the in-game models to pick): HOTD_DUMP_MODEL_NAMES=<file>: every model of the stage (id, name,
     // triangles, bounds) and each creature type's skeleton models
     if (const char* dump = std::getenv("HOTD_DUMP_MODEL_NAMES"))
@@ -353,6 +368,7 @@ bool GameView::finish(std::unique_ptr<Prepared> p, std::string& err)
                 for (int c = 0; c < 3; ++c)
                     renderer.rampStops[2 + s][k][c] = float(kFun[s][k][c]) / 255.0f;
     }
+    renderer.pcSortKeys = mix_.on;   // (mixmodels: the PC models' own sort keys, for the arcade world: draw)
     const uint64_t r0 = SDL_GetTicksNS();
     const bool rendererOk = renderer.init(err);
     const uint64_t rendererNs = SDL_GetTicksNS() - r0;
@@ -382,7 +398,7 @@ bool GameView::finish(std::unique_ptr<Prepared> p, std::string& err)
     staticWalls_ = 0;
     {
         const uint64_t w0 = SDL_GetTicksNS();
-        const StageData& sd = pcStage_ ? *pcStage_ : *stage_;
+        const StageData& sd = pcWorld_ ? *pcStage_ : *stage_;   // (mixmodels: the world's stage)
         std::set<uint32_t> worldKeys;
         for (const Placement& pl : sd.placements)
             worldKeys.insert(pl.modelKey);
@@ -466,7 +482,11 @@ bool GameView::finish(std::unique_ptr<Prepared> p, std::string& err)
         if (!pcStage_->textureSets.empty()) SDL_Log("PC textures: %s", pcStage_->textureSets[0].label.c_str());
         upload(*pcStage_);
         releaseCpu(*pcStage_);
-        releaseStageCpu(*stage_, ~0u);   // the arcade geometry is not drawn
+        if (mix_.on) {   // mixmodels: Models: Mixed draws the arcade rows (and the PC gaps) from the arcade stage
+            upload(*stage_);
+            releaseCpu(*stage_);
+        } else
+            releaseStageCpu(*stage_, ~0u);   // the arcade geometry is not drawn
     } else {
         if (pcSource_)
             SDL_Log("PC models: %s (the arcade models are drawn)", pcSource_->available() ? p->pcErr.c_str() : pcSource_->status().c_str());
@@ -480,9 +500,22 @@ bool GameView::finish(std::unique_ptr<Prepared> p, std::string& err)
             (unsigned long long)(SDL_GetTicks() - t1));
     const StageData* st[kSourceCount] = {pcStage_.get(), stage_.get()};
     SourceSelection sel;
-    sel.setAll(pcStage_ ? Source::PC : Source::Arcade);
+    sel.setAll(pcWorld_ ? Source::PC : Source::Arcade);
     world_ = resolveScene(st, sel);
-    if (pcStage_) {
+    if (mix_.on) {
+        // mixmodels: Mixed: the PC world keeps resolveScene's arcade pieces where the PC world lacks one (the fallback:
+        // nothing goes missing); the arcade world is the arcade's own pieces only (not the PC world's extra objects)
+        std::set<uint32_t> gaps;
+        std::vector<DrawItem> keep;
+        for (const DrawItem& it : world_)
+            if (pcWorld_ || it.stage == stage_.get()) {
+                keep.push_back(it);
+                if (pcWorld_ && it.stage == stage_.get()) gaps.insert(it.placement->id);
+            }
+        world_ = std::move(keep);
+        if (!gaps.empty())
+            SDL_Log("view: Mixed models: %zu world pieces the PC world lacks drawn from the arcade's", gaps.size());
+    } else if (pcStage_) {
         // model source PC: the PC's own models only (user rule "Assets"): resolveScene fills IDs the PC world lacks with
         // the arcade's; those are left out and logged (a gap to fix from the PC files, never an arcade model)
         std::set<uint32_t> gaps;
@@ -531,7 +564,7 @@ bool GameView::ensureExtra(int stage, const Runtime& rt)
     }
     // (only a failed load is not tried again: a loaded one can be needed again after another replaced it, the
     // cut-scene viewer's Replay of the staff roll: its scenes went dark, Chapter 3's world was not loaded back)
-    if (!r.a || (pcStage_ && pcSource_ && !r.p)) {
+    if (!r.a || (pcWorld_ && pcSource_ && !r.p)) {
         extraTried_.insert(stage);
         SDL_Log("view: chapter %d's %sworld for the attract: %s (drawn without it)", stage + 1, r.a ? "PC " : "", r.err.c_str());
         return false;
@@ -545,9 +578,9 @@ GameView::ExtraLoad GameView::extraWork(int stage, std::unique_ptr<StageData> a)
 {
     ExtraLoad r;
     r.a = std::move(a);
-    if (pcStage_ && pcSource_)
+    if (pcWorld_ && pcSource_)
         r.p = pcSource_->loadStage(stage, r.err);
-    else
+    if (!(pcWorld_ && pcSource_) || mix_.on)   // (mixmodels: Mixed draws from the arcade one too)
         markCoplanarLayersAll(r.a->models);   // (perf: on several threads)
     return r;
 }
@@ -565,13 +598,14 @@ void GameView::prefetchExtra(int stage, const Runtime& rt)
     if (prefetch_.valid())   // another one pending: dropped (the worker finishes first)
         prefetch_.get();
     prefetchStage_ = stage;
-    const bool pc = pcStage_ && pcSource_ && pcCfg_;
-    prefetch_ = std::async(std::launch::async, [stage, pc, ids = extraIds(rt), skins = extraSkins(), acfg = arcadeCfg_,
+    const bool pc = pcWorld_ && pcSource_ && pcCfg_;
+    const bool full = !pc || mix_.on;   // (mixmodels: Mixed draws the arcade stage's models too)
+    prefetch_ = std::async(std::launch::async, [stage, pc, full, ids = extraIds(rt), skins = extraSkins(), acfg = arcadeCfg_,
                                                 pcfg = pc ? *pcCfg_ : PcConfig{}]() {
         const uint64_t t0 = SDL_GetTicks();
         ExtraLoad r;
         ArcadeSource src(acfg);
-        if (!pc) {
+        if (full) {
             src.requestModels(stage, ids);
             src.requestSkins(stage, skins);
         }
@@ -580,7 +614,7 @@ void GameView::prefetchExtra(int stage, const Runtime& rt)
             return r;
         if (pc)
             r.p = PcSource(pcfg).loadStage(stage, r.err);
-        else
+        if (full)
             markCoplanarLayersAll(r.a->models, true);
         SDL_Log("view: chapter %d's world loaded ahead on a worker in %llu ms", stage + 1, (unsigned long long)(SDL_GetTicks() - t0));
         return r;
@@ -633,7 +667,7 @@ std::unique_ptr<StageData> GameView::loadExtraArcade(int stage, const Runtime& r
                     ids.push_back(n.model + k);
     for (uint32_t id = 1; id < 0x2000; ++id)   // and every other ID, as init (Curien's head 0x1D02 kyubatama_CT19a ...)
         ids.push_back(id);
-    if (!pcStage_) {
+    if (arcadeDrawn_) {   // (mixmodels: Mixed too)
         source_->requestModels(stage, ids);
         source_->requestSkins(stage, extraSkins());
     }
@@ -648,13 +682,16 @@ bool GameView::finishExtra(int stage, std::unique_ptr<StageData> a, std::unique_
     pcExtra_ = std::move(p);
     extraStage_ = stage;
     renderer.upload(pcExtra_ ? *pcExtra_ : *extra_);   // (the arcade models' decal layers: extraWork)
+    if (pcExtra_ && mix_.on)   // (mixmodels: Mixed draws the arcade rows from it too)
+        renderer.upload(*extra_);
     const StageData* st[kSourceCount] = {pcExtra_.get(), extra_.get()};
     SourceSelection sel;
     sel.setAll(pcExtra_ ? Source::PC : Source::Arcade);
     extraWorld_.clear();
     std::set<uint32_t> gaps;
     for (const DrawItem& it : resolveScene(st, sel))
-        if (!pcExtra_ || it.stage == pcExtra_.get())   // model source PC: the PC's own models only (as the chapter's)
+        // model source PC: the PC's own models only (as the chapter's); mixmodels: Mixed keeps the arcade's in the gaps
+        if (!pcExtra_ || mix_.on || it.stage == pcExtra_.get())
             extraWorld_.push_back(it);
         else
             gaps.insert(it.placement->id);
@@ -682,7 +719,7 @@ bool GameView::finishExtra(int stage, std::unique_ptr<StageData> a, std::unique_
 // 0-3, the models are the arcade's, or WORLDn.RBH cannot be read (then the chapter's PC world is drawn, as before)
 const StageData* GameView::pcAltFor(const Runtime& rt)
 {
-    if (!pcStage_ || !pcSource_ || std::getenv("HOTD_PC_NO_ALT_WORLD"))
+    if (!pcWorld_ || !pcSource_ || std::getenv("HOTD_PC_NO_ALT_WORLD"))   // (mixmodels: the World row)
         return nullptr;
     const int c = rt.mem.at<int8_t>(A::G::chapter);
     if (c < 4 || c > 6)
@@ -720,6 +757,86 @@ const StageData* GameView::pcAltFor(const Runtime& rt)
     SDL_Log("view: chapter byte %d draws the PC's WORLD%d.RBH (%zu objects) in %llu ms", c, c <= 5 ? 5 : 6, altWorld_.size(),
             (unsigned long long)(SDL_GetTicks() - t0));
     return pcAlt_.get();
+}
+
+namespace {
+// mixmodels: the effect models by ID (the arcade's names; the PC's are the same IDs): the blood sprays akabushu 0x6-0x23,
+// the shot flashes baaba / babababa / banhi 0x2D-0x53, the hits' marks chaji / chaku / chakuhi / chakumizu 0x6B-0xB4,
+// gbaaba 0x200-0x209, the Ebitans' vomit gee 0x20A-0x263, the blood mark over a shot hostage missshotita 0x3F5 / 0x3F6, the
+// splashes mizumodo 0x3F7-0x408, the gore nikubaan 0x46A-0x4A3, the shot debris tamahi 0x660 / 0x661, the rain's
+// splashes picha 0x9F2-0xA05
+bool effectModel(uint32_t id)
+{
+    static const uint32_t kRanges[][2] = {{0x6, 0x23}, {0x2D, 0x53}, {0x6B, 0xB4}, {0x200, 0x263}, {0x3F5, 0x408},
+                                          {0x46A, 0x4A3}, {0x660, 0x661}, {0x9F2, 0xA05}};
+    for (const auto& r : kRanges)
+        if (id >= r[0] && id <= r[1])
+            return true;
+    return false;
+}
+// mixmodels: the models the game draws without a body, by the arcade's name (the drawing routine in names.tsv): effects
+// (floor_blood_splat_task hitchia, dog_dust inukemu, hop_dust kemukeke, item_sparkle item_kira,
+// kind160_splash_anim mizuzuzu, hit_splash shoubushu, hostage_struck_mark's 0xA28 shashin,
+// body_drips_draw's drops sizukub), the creatures' own (bat_frame, the frogs, the Harrises' iron chain / ball,
+// flying_axe_frame's axe, kind5's hidden zombie, the Molbs and their shadows, the Ebitans' shadows, kind140's dropped
+// weapon, kind175's rat), the bosses' own effects (the Chariot's landing dust bakufuu, magician_part_effect_task's
+// gagii 0x1EB-0x1FF, magician_death_flash's bosssaigo) and Sophie lying by the fountain (sofi_d 0x621, kind17);
+// the rest is the world's (props, doors, items, the car)
+int namedCat(const std::string& n)
+{
+    static const char* const kEffects[] = {"hitchia", "inukemu", "kemukeke", "item_kira", "mizuzuzu", "shoubushu",
+                                           "shashin", "sizukub"};
+    static const char* const kCreatures[] = {"bat", "frog", "gfrog", "haris", "siriru_ono", "kageo", "mol_", "moly", "ebit",
+                                             "hndl_buki", "churun", "chu_dam"};
+    auto any = [&n](const auto& list) {
+        return std::any_of(std::begin(list), std::end(list), [&n](const char* p) { return n.rfind(p, 0) == 0; });
+    };
+    if (any(kEffects)) return kMixEffects;
+    if (any(kCreatures)) return kMixCreatures;
+    if (n.rfind("bakufuu", 0) == 0 || n.rfind("gagii", 0) == 0 || n.rfind("bosssaigo", 0) == 0) return kMixBosses;
+    if (n.rfind("sofi_d", 0) == 0) return kMixHumans;
+    return -1;
+}
+} // namespace
+
+// mixmodels (#49): a game-drawn model's row for Models: Mixed (game/model_mix.h)
+int GameView::mixCat(const Runtime& rt, const DrawModel& dm) const
+{
+    const uint32_t id = dm.model;
+    int c = kMixWorld;
+    const char* why = "world";
+    int type = -1;
+    if (dm.background) {
+        why = "sky";
+    } else if (effectModel(id)) {   // (before the body: a body draws its blood bursts and gore too)
+        c = kMixEffects, why = "effect";
+    } else if (id == 0x188 || id == 0x189 || (id >= 0x1D38 && id <= 0x1D3B)) {
+        // the opening car's seated players (player_char_props_draw: drive_1p / drive_2p, PC Mode's 0x1D38.. car models,
+        // port/game.h pm table): the character and its seat are one model, so the people's row (coordinator 2026-11-13:
+        // Rogan followed the World row)
+        c = kMixHumans, why = "car seat";
+    } else if (dm.bossPart != 0) {
+        c = kMixBosses, why = "boss part";
+    } else if (dm.body != 0 && rt.mem.mapped(dm.body + 0xCC)) {
+        type = rt.mem.at<int16_t>(dm.body + 0xCC);
+        c = mixCatOfType(type), why = "body";
+    } else if (partCats_) {
+        if (const std::optional<Category> pc = partCats_->of(id)) {
+            c = *pc == Category::Humans ? kMixHumans : *pc == Category::Bosses ? kMixBosses : kMixCreatures;
+            why = "part";
+        } else if (auto a = stage_->models.find(id); a != stage_->models.end()) {
+            if (const int n = namedCat(a->second.name); n >= 0)
+                c = n, why = "name";
+        }
+    }
+    if (static const bool log = std::getenv("HOTD_MIX_LOG") != nullptr; log && mixLogged_.insert(id).second) {
+        auto a = stage_->models.find(id);
+        static const char* const kName[kMixCats] = {"humans", "creatures", "bosses", "world", "effects"};
+        SDL_Log("mix: model %#x %s -> %s (%s, type %d, routine %#x, frame %llu)", id,
+                a != stage_->models.end() ? a->second.name.c_str() : "-", kName[c], why, type,
+                dm.task != 0 && rt.mem.mapped(dm.task) ? rt.mem.u32(dm.task) : 0u, (unsigned long long)rt.frameCount);
+    }
+    return c;
 }
 
 void GameView::logPcGap(uint32_t id, const char* what)
@@ -864,7 +981,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     items.reserve(world_.size());
     worldSubs_.clear();
     worldSubs_.reserve(world_.size() + 8);   // (+ the canal's extra water layers below)
-    if (!pcStage_) {   // glitch: uv_scroll_model 0x1E290's scrolling water (the canal layers 0x915-0x91C), v + frame % 1024 / 8
+    if (!pcWorld_) {   // glitch: uv_scroll_model 0x1E290's scrolling water (the canal layers 0x915-0x91C), v + frame % 1024 / 8
         const float f = float(rt.mem.u32(A::G::frame_counter) % 1024u) / 8.0f;
         std::map<uint32_t, std::array<float, 2>> scroll;
         for (uint32_t id = 0x915; id <= 0x91C; ++id) scroll[id] = {0.0f, f};
@@ -927,7 +1044,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     // PC models (the PC world's pieces by their IDs in the neighbouring zones' lists). Reach: HOTD_VR_ZONES (default 2)
     static const int aroundReach = std::getenv("HOTD_VR_ZONES") ? std::atoi(std::getenv("HOTD_VR_ZONES")) : 2;
     const bool vrWide = vrAround && !pcAlt && !useMemZone && aroundReach > 0 && zone >= 0 && zone < int(zoneIndices_.size());
-    const bool wideExtra = vrWide || (!pcStage_ && !pcAlt && !useMemZone && wideReach > 0 && zone >= 0 && zone < int(zoneIndices_.size()) &&
+    const bool wideExtra = vrWide || (!pcWorld_ && !pcAlt && !useMemZone && wideReach > 0 && zone >= 0 && zone < int(zoneIndices_.size()) &&
                                         float(width) * 3.0f > float(height) * 4.0f + 1.0f);
     const int reach = vrWide ? std::max(wideReach, aroundReach) : wideReach;
     // a world item in draw zone z's list (the arcade's by its placement index, the PC world's by its ID)
@@ -960,6 +1077,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     // vr3: a piece of any other zone far away (its nearest point past HOTD_VR_FAR units, default 400: 40 m) too: the
     // landmarks (Chapter 1's mansion seen back from the bridge); never one near you (a zone's alternate dressing of the
     // room you stand in). And one piece per place among the added ones (zones repeat pieces)
+    static const bool vrSideOld = std::getenv("HOTD_VR_SIDE_OLD") != nullptr;   // (vr141: comparisons: the vr3 rule)
     static const float aroundFar = std::getenv("HOTD_VR_FAR") ? float(std::atof(std::getenv("HOTD_VR_FAR"))) : 400.0f;
     std::vector<Place> aroundPlaced;
     auto samePlace = [](const Place& q, const Place& p) {
@@ -1001,9 +1119,14 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
             int side = 0;
             if (c[2] < -r || out(c[0], kHalfW) > r || out(-c[0], kHalfW) > r || out(c[1], kHalfH) > r || out(-c[1], kHalfH) > r)
                 side = 2;
-            else if (near && it.stage == stage_.get() &&
+            else if ((!vrSideOld || (near && it.stage == stage_.get())) &&
                      !(out(c[0], kHalfW) < -r && out(-c[0], kHalfW) < -r && out(c[1], kHalfH) < -r && out(-c[1], kHalfH) < -r))
-                side = 1;   // (across the 4:3 edge: the strips' rule)
+                side = 1;   // (across the 4:3 edge: the eyes draw its part outside the game camera's 4:3 frustum)
+            // vr141 (#78 "scenery pops in / out as you turn your head"): was the near zones' arcade pieces only, drawn
+            // under the zone (where it drew nothing, so under the sky outdoors: none): a piece crossing the 4:3 edge
+            // as the camera moved went from all of it to nothing beside you. Now any of them (PC pieces and the far
+            // landmarks too), drawn with the zone and clipped to outside the game camera's 4:3 frustum per pixel
+            // (Renderer: uGameVP), so what lies outside the arcade's view stays the same however the cameras turn
             if (side != 0) aroundPlaced.push_back(here);
             return side;
         }
@@ -1055,7 +1178,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
                 if (id != 0xFFFFFFFFu && id != it.placement->id) {
                     auto m = it.stage->models.find(id);
                     if (m == it.stage->models.end() || m->second.triangleCount() == 0) {
-                        if (pcStage_) logPcGap(id, "world model list");
+                        if (it.stage->source == Source::PC) logPcGap(id, "world model list");
                         continue;
                     }
                     Placement p = *it.placement;
@@ -1105,7 +1228,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     // title-2: that stage's world, loaded on first use (ensureExtra), its draw zone's placements, the texture set of
     // the area the scripts loaded (kind107: area 12) UNVERIFIED (teaser)
     // the custom Blood Color's blood rows (tintBloodRows): a changed colour rebuilds the translations below
-    const int xlatBlood = !rainbowBloodSettings().on && !pcStage_ ? bloodCustom_ : -1;
+    const int xlatBlood = !rainbowBloodSettings().on && arcadeDrawn_ ? bloodCustom_ : -1;
     if (xlatBlood != xlatBlood_) {
         xlatBlood_ = xlatBlood;
         colorRowsSerial_ = rt.colorRowsSerial - 1;
@@ -1197,10 +1320,18 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     std::vector<PullTop> pullTops;
     struct HeldDecal { size_t item; float c[3]; uint32_t model; };   // sinkvr: a flat model outside the shadows (the photograph)
     std::vector<HeldDecal> heldDecals;
-    auto addModel = [&](uint32_t id, const M34& w, const DrawModel& dm) {
+    // mixmodels (#49): the PC stage has model `id` (with polygons)
+    auto pcHas = [&](uint32_t id) {
+        if (!pcStage_) return false;
+        auto m = pcStage_->models.find(id);
+        return m != pcStage_->models.end() && m->second.triangleCount() > 0;
+    };
+    // cat: the item's row (Mixed: GameView::mixCat; else any, every row is the one source)
+    auto addModel = [&](uint32_t id, const M34& w, const DrawModel& dm, int cat) {
         // model source PC: the PC's model of the same ID (THOTD.EXE draws by ID too: geo_draw_model 0x43D7F8 ->
         // DAT_00d53080[id], filled by ID from CREAT1 / CREAT2 / WORLDn.RBH by 0x419CAC / 0x419CF4; an empty entry draws
-        // nothing), never the arcade's
+        // nothing), never the arcade's. mixmodels: Mixed, the row's source; a PC row's ID the PC files lack (the cut
+        // creatures, Sophie lying 0x621 ...) from the arcade's, so nothing goes missing
         if (id == 0)
             return;   // model 0: nothing (both versions)
         // developer (clips): HOTD_DEV_ONLY_TYPE=t draws no body but creatures of type t (the room stays; the people go)
@@ -1211,27 +1342,51 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         // and lifted by its table row), no longer from the texture area's sky list (that drew a second, unlifted copy)
         if (dm.background && (!sky || (std::getenv("HOTD_SKY_ONLY") && std::strtoul(std::getenv("HOTD_SKY_ONLY"), nullptr, 16) != id)))
             return;
-        const StageData* from = pcStage_ ? pcStage_.get() : stage_.get();
+        const bool wantPc = pcCat(cat);
+        const StageData* from = wantPc ? pcStage_.get() : stage_.get();
         // pcfix: past chapter 4 the PC's table holds that world file's objects (they win, as the world's over the
         // creatures'); the chapter's own world objects are not in it (the creatures still come from CREAT1 / CREAT2)
-        if (pcAlt) {
+        if (pcAlt && wantPc) {
             auto am = pcAlt->models.find(id);
             if (am != pcAlt->models.end() && am->second.triangleCount() > 0)
                 from = pcAlt;
             else if (pcWorldIds_.count(id)) {
-                logPcGap(id, "drawn by the game, not in this chapter's PC world file");
-                return;
+                if (!mix_.on) {
+                    logPcGap(id, "drawn by the game, not in this chapter's PC world file");
+                    return;
+                }
+                from = stage_.get();   // (mixmodels: the arcade's)
+            }
+        }
+        if (mix_.on && from == pcStage_.get() && !pcHas(id)) {
+            // Mixed Models > Arcade Extras (user 2026-11-13; ModelMix::extras): Off leaves out the two kinds the real PC
+            // draws nothing for: the arcade bodies' shadows (the shadow pass, the _DD models) and the Chariot's armour
+            // pieces (hyum_*_tore*); On (default): the arcade's, as every other gap. HOTD_MIX_FALLBACK_EXEMPT=1 (testing):
+            // Off whatever the setting
+            static const bool exempt = std::getenv("HOTD_MIX_FALLBACK_EXEMPT") && *std::getenv("HOTD_MIX_FALLBACK_EXEMPT") == '1';
+            if (exempt || !mix_.extras) {
+                auto a = stage_->models.find(id);
+                const std::string& n = a != stage_->models.end() ? a->second.name : std::string();
+                if (dm.shadow || (n.size() > 3 && n.compare(n.size() - 3, 3, "_DD") == 0) || n.find("_tore") != std::string::npos)
+                    return;
+            }
+            from = stage_.get();   // mixmodels: the PC model gap: the arcade's model
+            if (pcGaps_.insert(id).second) {
+                auto a = stage_->models.find(id);
+                SDL_Log("Mixed models: %#x (%s) has no PC model: the arcade's drawn", id,
+                        a != stage_->models.end() && !a->second.name.empty() ? a->second.name.c_str() : "-");
             }
         }
         // title-2: while another stage's world is drawn (the prologue's last scene), the arcade models it loaded
-        if (!pcStage_ && extra_ && extraVariant_ >= 0 && extra_->models.count(id) && extra_->models.at(id).triangleCount() > 0)
+        if (from == stage_.get() && arcadeDrawn_ && extra_ && extraVariant_ >= 0 && extra_->models.count(id) &&
+            extra_->models.at(id).triangleCount() > 0)
             from = extra_.get();
         // the cut-scene viewer's actors whose textures are in one area only (Runtime::actorAreas: Dr. Curien, the zombie
         // Sophie): that area's texture set: the scene's own when it is in that area, else from Chapter 4's stage (it has
         // every area; loaded once as the prologue's other world, ensureExtra) with the colour rows the game gives them
         // there (the Gallery's look: galleryLook). The scene's own sets are left as they are
         int actorSet = -1;
-        if (!pcStage_ && !rt.actorAreas.empty())
+        if (arcadeDrawn_ && from->source == Source::Arcade && !rt.actorAreas.empty())
             if (const auto aa = rt.actorAreas.find(id); aa != rt.actorAreas.end()) {
                 for (size_t i = 0; i < stage_->textureSets.size(); ++i)
                     if (aa->second == rt.textureArea && stage_->textureSets[i].romArea == aa->second)
@@ -1245,8 +1400,10 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
                             if (actorRowsSets_.insert(actorSet).second) {
                                 // (Survival Mode's cut creatures: their own looks, Runtime::actorAreaLook: area -> type)
                                 const auto al = rt.actorAreaLook.find(aa->second);
-                                const GalleryLook look = al != rt.actorAreaLook.end() ? galleryLook(al->second)
-                                                         : aa->second == 11 ? galleryLook(60) : aa->second == 12 ? galleryLook(78) : aa->second == 2 ? galleryLook(67) : GalleryLook{};
+                                GalleryLook look = al != rt.actorAreaLook.end() ? galleryLook(al->second)
+                                                   : aa->second == 11 ? galleryLook(60) : aa->second == 12 ? galleryLook(78) : aa->second == 2 ? galleryLook(67) : GalleryLook{};
+                                if (const auto ar = rt.actorAreaRows.find(aa->second); ar != rt.actorAreaRows.end())   // (fix141: an arena's creatures)
+                                    look.rows = ar->second;
                                 std::vector<uint8_t> xlat;
                                 source_->colorXlat(aa->second, parseColorRows(look.rows), xlat);
                                 renderer.updateXlat(*extra_, actorSet, xlat);
@@ -1268,7 +1425,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
                 id = kHermitFlyHeadModel;
         auto m = from->models.find(id);
         if (m == from->models.end() || m->second.triangleCount() == 0) {
-            if (pcStage_) logPcGap(id, "drawn by the game");
+            if (from->source == Source::PC) logPcGap(id, "drawn by the game");
             else if (missingModels_.insert(id).second)
                 SDL_Log("model %#x drawn by the game is not loaded", id);
             return;
@@ -1335,7 +1492,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
             static const char* push = std::getenv("HOTD_CAR_PUSH");   // (testing: another distance)
             // (leftovers: the PC's car (WORLD6's 0x950 / 0x951) is longer at the front: 8 still left its bumper over
             // the pillar; 20 hides it there and keeps the number plate over the floor; 28+ the floor starts to win)
-            d.push = push ? float(std::atof(push)) : pcStage_ ? 20.0f : 8.0f;
+            d.push = push ? float(std::atof(push)) : from->source == Source::PC ? 20.0f : 8.0f;
         }
         // Dr Curien's death (Chapter 4, before the Magician's fight): lying on his front, his shoulders and upper arms
         // (kyubkata* / kyubude*) cut through his coat's back (the chest, kyubmune00a 0x1D0B) from inside. The Model 2
@@ -1360,13 +1517,15 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
                        : rtn == A::F::shot_effect_debris && (dm.model == 0x660 || dm.model == 0x661) ? 3
                        : (dm.body != 0 || dm.bossPart != 0) && !blood ? 1 : 0;
         }
+        if (dm.body != 0)   // vr141: the creature (its parts, shadows, blood) for VR's fade-in
+            d.vrBody = dm.body;
         // pcsky (GitHub #55): the PC models keep the storm sky after the Magician explodes, as the real PC game does:
         // THOTD.EXE's death 0x4D1EE4 steps 0x12 / 0x13 are empty (the arcade's color_row_set rows 0 / 6 are not
         // there) and Chapter 4 event 4 has no SKYKD / SKYTB / TEXCHG after the fight (sky index 5, PN_skyuvst4a 0x1D20)
         // cosmods: Rainbow Blood's creature colour, for the body's own parts only (a splash or a pool drawn with a body
         // took that frame's body: its colour jumped every frame, user's clip 2026-11-03)
         d.bloodHue = dm.shadow ? -1.0f : dm.part != 0 ? creatureBloodHue(dm.body) : creatureBloodKeepsRows(dm.body) ? 6.0f : -1.0f;
-        if (rt.pcModels)   // (v1.3.1: each afterimage its own colour; the PC models: their texels tinted)
+        if (from->source == Source::PC)   // (v1.3.1: each afterimage its own colour; the PC models: their texels tinted)
             d.pcTint = magicianAfterimageItemWord(rt, dm.model, dm.task, true);
         else
             d.palOver = magicianAfterimageItemWord(rt, dm.model, dm.task);
@@ -1396,7 +1555,8 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
             // models: the researcher's legs over a railing, f29164). Floor decals keep their 0.3 dip.
             // HOTD_PC_FLOOR_PULL=1: the old pull (comparisons)
             static const bool pcPull = std::getenv("HOTD_PC_FLOOR_PULL") != nullptr;
-            const bool pcModel = d.stage->source == Source::PC && !pcPull;
+            // (mixmodels: Mixed: by the world: its ground decides, the PC's plain z-buffer or the arcade's sort stand-in)
+            const bool pcModel = (mix_.on ? pcWorld_ : d.stage->source == Source::PC) && !pcPull;
             d.floorPull = d.decal || dm.shadow ? 2 : pcModel ? 0 : 1;
             if (d.floorPull == 1) {
                 // only a model that stands (its bounds reach 6+ units over the floor): a body lying on the ground (the
@@ -1515,7 +1675,8 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
                 w.t[1] = dm.shadowFloor;
             }
         }
-        if (pcStage_) {
+        // (mixmodels: Mixed, when this item is drawn with the PC's model: its row on PC and the PC files have it)
+        if (pcStage_ && (!mix_.on || (pcCat(mixCat(rt, dm)) && pcHas(dm.model)))) {
             const uint32_t id = dm.model;
             // the shot flash (shot_effect_flash, baaba00a-09a 0x2D-0x36, player 1's frames: PC table 0x5F2EC0[0] = 0x2D
             // as the arcade's 0xCA738): THOTD.EXE 0x50BE08 scales it by 0.08 (0x5A7250), the arcade's 0x95140 by 0.1
@@ -1622,7 +1783,8 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         if (traceBlended && !own && (traceTask == 0 || dm.task == traceTask))
             std::fprintf(traceBlended, "%llu %.3f %X %X %.3f %.3f %.3f %.4f %.4f %.4f %.4f %.4f %.4f\n", (unsigned long long)rt.frameCount,
                          blendItems ? alpha : 1.0f, dm.task, dm.model, w.t[0], w.t[1], w.t[2], w.r[0], w.r[3], w.r[6], w.r[2], w.r[5], w.r[8]);
-        if (pcStage_) {
+        const int cat = mix_.on ? mixCat(rt, dm) : kMixWorld;   // (mixmodels: the item's row)
+        if (pcCat(cat)) {
             // the opening's car (kind 181): the PC's car routines (THOTD.EXE 0x496AE0 drive-in, 0x496BE0 brake, 0x496CFC
             // stop, 0x496DFC parked, 0x496E98 skipped) draw their own models where the arcade's draw others: the body
             // 0x1D36 where the arcade draws 0x94F (moving) / 0x951 (parked), the door 0x1D37 at (-9.13, 0, -9.76) on the
@@ -1639,22 +1801,22 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
                 continue;
             // (the shot flash's 0.8 scale and the blood mark's depth 1.1: worldOf)
             if (id == 0x94F || id == 0x951) {
-                addModel(0x1D36, w, dm);
+                addModel(0x1D36, w, dm, cat);
                 if (id == 0x94F) {
                     M34 door = w;
                     const float off[3] = {-9.1349f, 0.0f, -9.7636f};
                     for (int i = 0; i < 3; ++i)
                         door.t[i] = w.r[i * 3] * off[0] + w.r[i * 3 + 1] * off[1] + w.r[i * 3 + 2] * off[2] + w.t[i];
-                    addModel(0x1D37, door, dm);
+                    addModel(0x1D37, door, dm, cat);
                 }
                 continue;
             }
             if (id == 0x950) {
-                addModel(0x1D37, w, dm);
+                addModel(0x1D37, w, dm, cat);
                 continue;
             }
         }
-        addModel(dm.model, w, dm);
+        addModel(dm.model, w, dm, cat);
     }
     // ipolish: the Ragdoll mod's moving props (doors ...): the door-sized models the game drew this frame, outside any
     // body, placed as drawn (the newest frame's matrix): their standing triangles walls, the lying ones ground
@@ -1744,10 +1906,30 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     // out of B^-1 A)
     std::map<int, std::vector<size_t>> prevSkins;
     std::map<int, size_t> skinUsed;
-    if (blendItems && !pcStage_)
+    if (blendItems && arcadeDrawn_)
         for (size_t i = 0; i < prev->skinDraws.size(); ++i)
             prevSkins[prev->skinDraws[i].type].push_back(i);
-    for (const Runtime::SkinDraw& sd : pcStage_ ? kNoSkins : rt.skinDraws) {
+    // mixmodels (#49): Mixed: the skins of the types drawn with the arcade's parts: an arcade row's, and a PC row's
+    // whose parts the PC files lack (the cut creatures: their arcade parts, the fallback)
+    std::map<int, bool> skinArcade;
+    auto arcadeSkin = [&](int type) {
+        if (!mix_.on)
+            return true;
+        auto [it, fresh] = skinArcade.try_emplace(type, true);
+        if (fresh && pcCat(mixCatOfType(type))) {
+            const int t = type == Runtime::kSophieStrip ? 34 : type;
+            if (t >= 0 && t < anim_.typeCount())
+                for (const SkeletonNode& n : anim_.skeleton(t).nodes)
+                    if (n.model) {
+                        it->second = !pcHas(n.model);
+                        break;
+                    }
+        }
+        return it->second;
+    };
+    for (const Runtime::SkinDraw& sd : pcStage_ && !mix_.on ? kNoSkins : rt.skinDraws) {
+        if (!arcadeSkin(sd.type))
+            continue;
         auto sk = skins_.find(sd.type);
         if (sk == skins_.end() || used[sd.type] >= kSkinSlots)
             continue;
@@ -1822,6 +2004,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
             d.variant = skinSet;
         d.flat = sd.flat;   // magflash: the hit flash (skin_draw's header 0x802400)
         d.vrKind = 4;   // questsim: a creature's skin (the joints between its parts: VR's CPU aim ray tests it too)
+        if (sd.body != 0) d.vrBody = sd.body;   // (vr141: its fade-in)
         // sinkvr: a lying body's skins take its whole pull as its parts do (without it the dying researcher's chest
         // joint stayed under the opening's slab while his arms lay over it, Depth Buffer / VR)
         if (auto lf = lyingFloor.find(sd.body); sd.body != 0 && lf != lyingFloor.end()) {
@@ -1830,6 +2013,21 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         }
         items.push_back(d);
     }
+    // mixmodels (#49): Mixed: the depth order follows the world. The arcade polygons' sort keys (the Depth Buffer's key
+    // band, Arcade Sort) order the arcade polygons among themselves as the Model 2's sort does; the PC models had none,
+    // so in the arcade world the opening's PC zombie and researcher stayed behind the foreground slab their arcade
+    // models show over (only their shadows left). Arcade world: the PC models take sort keys of their own
+    // (Renderer::pcSortKeys, DrawItem::pcKeyed); PC world: the arcade models are drawn by their own depth (keyless), as
+    // the PC's plain z-buffer, in the whole depth range (under Arcade Sort, the default Draw Depth, the arcade sets'
+    // keyed range 0 .. 2^-8 put every arcade model in front of the PC world: Chapter 1's dog through the fountain's
+    // wall, coordinator's review). The floor pulls follow the world too (above)
+    if (mix_.on)
+        for (DrawItem& it : items) {
+            if (it.stage->source == Source::Arcade)
+                it.keyless = pcWorld_;
+            else
+                it.pcKeyed = !pcWorld_;
+        }
     if (std::getenv("HOTD_NO_CULL")) opt.cull = false;   // debugging
     if (std::getenv("HOTD_NO_MIP")) opt.mipmap = false;   // debugging
     if (std::getenv("HOTD_NO_LIGHT")) opt.lighting = false;   // debugging
@@ -1918,7 +2116,11 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     opt.grey = rt.greyPalette.on && !std::getenv("HOTD_NO_GREY");
     // (team: Options > Video > Transparency; 3 Auto: the arcade models dithered as the Model 2 draws them, the PC models
     // with clean edges)
-    opt.transparency = rt.transparency == 3 ? (pcStage_ ? 1 : 2) : rt.transparency;
+    opt.transparency = rt.transparency == 3 ? (pcStage_ && !mix_.on ? 1 : 2) : rt.transparency;
+    opt.transpAuto = rt.transparency == 3 && mix_.on;   // (mixmodels: Mixed: Auto per texture set, renderer.h)
+    // pcd3d (#79): Options > Video > PC Renderer: Direct3D = THOTD.EXE's Direct3D driver, bilinear on the 3D polygons
+    // (d3d_render_states_init 0x583A67 with the driver dialog's default d3d_opt_bilinear 1); PC texture sets only
+    opt.pcBilinear = rt.pcD3d;
     if (opt.grey)
         std::copy(&rt.greyPalette.sepia[0][0], &rt.greyPalette.sepia[0][0] + 64 * 3, &opt.sepia[0][0]);
     // cosmods: the Rainbow Blood mod (game/cosmods.h): the hue from the game's frame (the same picture at the same frame).
@@ -1929,7 +2131,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         const bool marked = pcStage_ && pcCfg_ && (pcCfg_->blood & PcConfig::kBloodRainbow);
         // the custom Blood Color (arcade models; user 2026-11-03): the same recolour in that one colour on the enemies'
         // painted wounds (entry 1023 below has it for the bursts and the gore; the PC pages are tinted at the load)
-        const int custom = !rb.on && !pcStage_ ? bloodCustom_ : -1;
+        const int custom = !rb.on && arcadeDrawn_ ? bloodCustom_ : -1;
         customWoundBlood() = custom;
         opt.rainbow = rb.on ? (rb.together ? 2 : 1) : marked ? 2 : custom >= 0 ? 3 : 0;
         opt.rainbowPhase = rb.on ? float(std::fmod(double(rt.frameCount) * rb.speed / 60.0, 1.0)) : 0.0f;
@@ -1942,7 +2144,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
             // arcade models: the blood entry takes the screens' own animated entry (palette_anim_copy: work RAM
             // 0x52066C + 2i -> entry 1017 - i), drawn through the colour rows as the screens are: the same colour
 
-            if (!pcStage_)
+            if (arcadeDrawn_)
                 opt.rainbowSync = 1009;   // (entry 8: the big screens behind Curien, matched by pictures)
         }
         // the colours: the game's own rainbow (user 2026-11-03: as the computer screens behind Curien in Chapter 4,
@@ -1963,7 +2165,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
         // painted wound, the people's and the bosses' too) cycle per pixel in the renderer, as the custom colour's
         // tintBloodRows recolours them; the arcade models only (the PC's blood is its marked texels)
         opt.bloodRowMask = 0;
-        if (rb.on && !pcStage_)
+        if (rb.on && arcadeDrawn_)
             for (int row : rt.bloodRows)
                 if (row >= 0 && row < 32) opt.bloodRowMask |= 1u << row;
     }
@@ -1977,7 +2179,7 @@ void GameView::draw(const Runtime& rt, int width, int height, const FrameSnapsho
     // while GGSET recoloured the faces (perf item 4, 2026-10-16). The PC models have their own blood pages.
     // palanim (2026-10-16): with it the game's own palette animation (Runtime::polyPaletteAnim: palette_animation 0x25310
     // + the vblank copy 0x24E90: entries 959, 984-1021 pulse / cycle; HOTD_NO_PALANIM = the loaded values)
-    if (!pcStage_) {
+    if (arcadeDrawn_) {   // (mixmodels: Mixed too)
         // display: the custom colour (experimental) as the entry's RGB555 (R in the low bits, as 0x801F red)
         const uint16_t custom = bloodCustom_ < 0 ? 0
             : uint16_t(0x8000u | ((unsigned(bloodCustom_) & 0xFF) >> 3) << 10 | ((unsigned(bloodCustom_) >> 8 & 0xFF) >> 3) << 5 |
@@ -2048,10 +2250,15 @@ bool GameView::placedItem(int slot, uint32_t id, const float rot[9], const float
 {
     if (slot < 0 || slot >= int(std::size(placed_)))
         return false;
-    const StageData* from = pcStage_ ? pcStage_.get() : stage_.get();
+    // (mixmodels: Mixed: the players' hands: the Players and Humans row, the arcade's where the PC files lack it)
+    const StageData* from = pcCat(kMixHumans) ? pcStage_.get() : stage_.get();
     if (!from)
         return false;
     auto m = from->models.find(id);
+    if (mix_.on && from != stage_.get() && (m == from->models.end() || m->second.triangleCount() == 0)) {
+        from = stage_.get();
+        m = from->models.find(id);
+    }
     if (m == from->models.end() || m->second.triangleCount() == 0)
         return false;
     Placement& p = placed_[slot];
@@ -2074,6 +2281,11 @@ bool GameView::hasModel(uint32_t id) const
     if (!from)
         return false;
     auto m = from->models.find(id);
+    // mixmodels: Mixed: the PC files' model, else the arcade's (the fallback draws it)
+    if (mix_.on && (m == from->models.end() || m->second.triangleCount() == 0)) {
+        from = stage_.get();
+        m = from->models.find(id);
+    }
     if (m == from->models.end() || m->second.triangleCount() == 0)
         return false;
     static std::set<uint32_t> logged;
