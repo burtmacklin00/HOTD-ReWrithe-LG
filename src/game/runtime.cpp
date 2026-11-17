@@ -1251,8 +1251,8 @@ void Runtime::lg_roulette_frame()
         }
         f->second.seen = frameCount;
         // (user 2026-11-17: what else could stop a stage: a zombie whose spot stays out of reach (behind a rail, its
-        // back turned) and an event waiting for it: after 20 s on the screen it takes hits anywhere, no ring)
-        if (frameCount - f->second.since > 1150)
+        // back turned) and an event waiting for it: after 12 s on the screen it takes hits anywhere, no ring (was 20 s))
+        if (frameCount - f->second.since > 690)
             continue;
         const uint32_t part = f->second.part;
         lgWeak_[body] = part;
