@@ -1239,7 +1239,7 @@ void Runtime::lg_roulette_frame()
                 }
             }
             lgWeakSeed_ = lgWeakSeed_ * 1664525u + 1013904223u;
-            lgWeakFixed_[body] = {big[(lgWeakSeed_ >> 16) % big.size()], type, frameCount};
+            lgWeakFixed_[body] = {big[(lgWeakSeed_ >> 16) % big.size()], type, frameCount, frameCount};
             if (std::getenv("HOTD_WEAK_LOG")) {   // (developer: each weak point chosen, its height up the body)
                 float top = -1e30f, bottom = 1e30f;
                 for (uint32_t q : v) { const float y = mem.at<port::a::BodyPart>(q).view_pos[1]; top = std::max(top, y), bottom = std::min(bottom, y); }
@@ -1250,6 +1250,10 @@ void Runtime::lg_roulette_frame()
             f = lgWeakFixed_.find(body);
         }
         f->second.seen = frameCount;
+        // (user 2026-11-17: what else could stop a stage: a zombie whose spot stays out of reach (behind a rail, its
+        // back turned) and an event waiting for it: after 20 s on the screen it takes hits anywhere, no ring)
+        if (frameCount - f->second.since > 1150)
+            continue;
         const uint32_t part = f->second.part;
         lgWeak_[body] = part;
         const port::a::BodyPart& bp = mem.at<port::a::BodyPart>(part);
@@ -1364,7 +1368,10 @@ bool Runtime::lgRocketTarget(const LgBody& b) const
     if (boss_on() || port::lgBossType(b.type) || !mem.mapped(b.body) || (mem.at<port::a::Obj>(b.body).flags & 1u) == 0)
         return false;   // (Boss Mode; a boss (by its type: boss_on() is Boss Mode only, user 2026-11-17); not shootable)
     const int t = b.type;
-    const bool human = t == 14 || t == 15 || t == 17 || (t >= 19 && t <= 23) || (t >= 25 && t <= 27);   // (Bot::isHuman)
+    // (Bot::isHuman's researchers / the second looks, and (user 2026-11-17, what else could stop a stage) the story's
+    // people: Rogan 2, G 13, Sophie 34, Dr. Curien 60, Sophie as a zombie 67: never blown up)
+    const bool human = t == 2 || t == 13 || t == 14 || t == 15 || t == 17 || (t >= 19 && t <= 23) || (t >= 25 && t <= 27) ||
+                       t == 34 || t == 60 || t == 67;
     return t >= 0 && t <= 0x7F && !human;
 }
 

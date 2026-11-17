@@ -459,7 +459,7 @@ public:
     // space centres); rebuilt each frame from the frame's draws (every 2 s another part)
     std::map<uint32_t, uint32_t> lgWeak_;
     // (user 2026-11-05: each zombie's weak point fixed from when it shows: body -> its part, the type, the frame last seen)
-    struct LgWeakFixed { uint32_t part; int type; uint64_t seen; };
+    struct LgWeakFixed { uint32_t part; int type; uint64_t seen; uint64_t since = 0; };   // (since: chosen at)
     std::map<uint32_t, LgWeakFixed> lgWeakFixed_;
     uint32_t lgWeakSeed_ = 0x57454B50u;
     struct LgRing { float x, y, z, r; };
