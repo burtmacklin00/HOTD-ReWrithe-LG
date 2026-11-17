@@ -1352,7 +1352,8 @@ void Runtime::lg_blast_hit(int player, const LgBody& b)
         coop4_hit_add(b.part, player);
         coop4_hit_add(b.body, player);
     }
-    if ((lgZombieType(b.type) || lgRocketTarget(b)) && mem.at<uint8_t>(0x543530) == 0 && mem.at<int16_t>(b.body + 0x70) > 1)
+    if ((lgZombieType(b.type) || lgRocketTarget(b)) && !port::lgBossType(b.type) && mem.at<uint8_t>(0x543530) == 0 &&
+        mem.at<int16_t>(b.body + 0x70) > 1)
         mem.at<int16_t>(b.body + 0x70) = 1;
 }
 
@@ -1360,8 +1361,8 @@ void Runtime::lg_blast_hit(int player, const LgBody& b)
 // (user 2026-11-16: the rocket blew up only some kinds: every creature now, the people never, the bosses as normal)
 bool Runtime::lgRocketTarget(const LgBody& b) const
 {
-    if (boss_on() || !mem.mapped(b.body) || (mem.at<port::a::Obj>(b.body).flags & 1u) == 0)
-        return false;   // (a boss fight; one not shootable: dying / a prop)
+    if (boss_on() || port::lgBossType(b.type) || !mem.mapped(b.body) || (mem.at<port::a::Obj>(b.body).flags & 1u) == 0)
+        return false;   // (Boss Mode; a boss (by its type: boss_on() is Boss Mode only, user 2026-11-17); not shootable)
     const int t = b.type;
     const bool human = t == 14 || t == 15 || t == 17 || (t >= 19 && t <= 23) || (t >= 25 && t <= 27);   // (Bot::isHuman)
     return t >= 0 && t <= 0x7F && !human;

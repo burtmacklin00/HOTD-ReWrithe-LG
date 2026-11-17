@@ -89,7 +89,7 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
         weapon_damage();
     // Light Gun Edition: Weak Point (user 2026-11-16: "double damage on the spots"): a frame whose hits took the glowing
     // part: the damage twice over, whatever the gun (each seat's tally and the total, after the guns' own damage)
-    if (lg_roulette && lgWeakHit_ && !boss_on()) {
+    if (lg_roulette && lgWeakHit_ && !boss_on() && !lgBossType(mem.at<Obj>(mem.u32(G::body_current)).type)) {
         for (int s = 0; s < (coop4_on() ? 4 : 2); ++s) {
             int16_t& t = mem.at<int16_t>(part_tally_at(s));
             if (t > 0) t = int16_t(std::min(0x7FFF, int(t) * 2));
@@ -101,7 +101,10 @@ template <class P> void Game<P>::enemy_part_hits(uint32_t obj)
     // Light Gun Edition: One Shot Kill (user 2026-11-16: a zombie going for a hostage took more than one shot: those
     // kinds take the damage in their own code, not enemy_check_death's): any hit's damage the whole life left, here
     // where every kind's damage is decided (not in a boss fight: the bosses as normal)
-    if (lg_one_hit && !boss_on() && mem.at<int16_t>(G::hit_damage) > 0 && int32_t(b.param) > mem.at<int16_t>(G::hit_damage))
+    // (user 2026-11-17: boss_on() is Boss Mode's game, not a boss fight: the story's bosses were one-shot too; now by
+    // the creature: never a boss)
+    if (lg_one_hit && !boss_on() && !lgBossType(b.type) && mem.at<int16_t>(G::hit_damage) > 0 &&
+        int32_t(b.param) > mem.at<int16_t>(G::hit_damage))
         mem.at<int16_t>(G::hit_damage) = int16_t(std::min<int32_t>(0x7FFF, int32_t(b.param)));
     const int32_t life = b.param;
     // PC: every killer chosen here is also the last killer

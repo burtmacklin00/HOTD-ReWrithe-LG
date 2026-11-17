@@ -18,6 +18,14 @@
 
 namespace hotd::port {
 
+// Light Gun Edition: the bosses' creature types (the Chariot 35 / 36 armour off, the Hangedman 50 and his skeletons 55 /
+// 69, the Hermit 64, the Magician 76): our mods leave them as the game made them (user 2026-11-17: a rocket at the start
+// of Chapter 2's fight killed the Hangedman before his phases and stopped the rail)
+inline bool lgBossType(int type)
+{
+    return type == 35 || type == 36 || type == 50 || type == 55 || type == 64 || type == 69 || type == 76;
+}
+
 // Light Gun Edition: the larger, human-shaped zombies' creature types (every zombie skeleton of THOTD.EXE's body list:
 // Sam, Neil, Cyril, Samson, Bentley and its variants, Simon, Gilmore, Harris, the Mummies, Robert, Burner, the cut
 // ones); not the dogs, Moody, Kage, Drake, Rubin, the monkeys, Ebitan, frogs, worms, spiders, bats. Weak Point's
