@@ -14,6 +14,7 @@
 // event's signal to come back, 202 captives fall; 253 ends the billboard.
 #include "port/game.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace hotd::port {
@@ -171,7 +172,23 @@ template <class P> void Game<P>::hangedman_hit(uint32_t obj)
     of<uint32_t>(obj, 0x58) = of<uint32_t>(obj, 0x58) & ~0x100u;
     if (mem.at<uint16_t>(G::players_in_game) == 2)
         mem.at<int16_t>(G::hit_damage) = int16_t(int32_t(float(mem.at<int16_t>(G::hit_damage)) * 0.8f));
-    of<uint16_t>(obj, 0x70) = uint16_t(of<uint16_t>(obj, 0x70) - mem.at<uint16_t>(G::hit_damage));
+    {
+        // Light Gun Edition (user 2026-11-17: "fire off the RPG at the very start of boss battle 2 ... he'll drop dead,
+        // the bats will be flying all about and rail will stop"): Chapter 2's fight (event 15) runs on hit-point
+        // shares, the bats called off below share 6, the flight below share 7; the arcade's guns can't cross both in
+        // one hit, a rocket or a Killer gun could (straight to 0: the death with the swarm still up, the event waiting
+        // for flag 197 forever). One hit stops just under the next share, as the other bosses' phases do
+        const int32_t before = of<int16_t>(obj, 0x70);
+        int32_t hp = before - int32_t(mem.at<uint16_t>(G::hit_damage));
+        if (mem.at<uint8_t>(G::event_index) == 15 && mem.at<uint8_t>(G::chapter) != 3) {
+            const int32_t s6 = hangedman_share(obj, 6), s7 = hangedman_share(obj, 7);
+            if (mem.at<uint8_t>(G::event_flags + 197) == 0 && before >= s6)
+                hp = std::max(hp, std::max(1, s6 - 1));
+            else if (before >= s7)
+                hp = std::max(hp, std::max(1, s7 - 1));
+        }
+        of<uint16_t>(obj, 0x70) = uint16_t(hp);
+    }
     if ((of<uint8_t>(obj, 0x324) & 0x10) == 0) {
         of<uint32_t>(obj, 0x58) = of<uint32_t>(obj, 0x58) | 0x10000000u;
         const uint8_t target = of<uint8_t>(obj, 0x2E8);
