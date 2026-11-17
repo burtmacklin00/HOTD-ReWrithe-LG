@@ -11,8 +11,9 @@
 ;
 ; Optional arguments (any order):
 ;   4x3 or 16x9   runs "2 - Display - 4x3.exe" / "2 - Display - 16x9.exe" first, e.g. "Launch HOTD ReWrithe.ahk" 4x3
-;   host          Online Co-op: the game hosts by itself, its join code copied to the clipboard (send it to your
-;                 friends; on the same network they need none); the game starts once a friend is in, more can join it
+;   host          Online Co-op (Link Play): the game opens the Link Play box: shoot 2 Players (1 per PC) or 4 Players
+;                 (2 per PC); it then hosts, its join code copied to the clipboard (send it to your friend; on the same
+;                 network they need none), and the game starts once the friend is in
 ;   join [code]   Online Co-op: joins a game on this network by itself, else the code (given here, or copied to the
 ;                 clipboard). "Launch HOTD ReWrithe - Link Play Host.ahk" / "... - Link Play Join.ahk" do the same.
 ;
@@ -23,7 +24,7 @@
 ;
 ; Other launchers build on this one (they set their own values, then #Include it), so a change here reaches them too:
 ;   "Launch HOTD ReWrithe - Debug.ahk"            Debug := true
-;   "Launch HOTD ReWrithe - Link Play Host.ahk"   LinkPlay := "host"   (online / same-network co-op: hosts by itself)
+;   "Launch HOTD ReWrithe - Link Play Host.ahk"   LinkPlay := "host"   (online / same-network co-op: the Link Play box)
 ;   "Launch HOTD ReWrithe - Link Play Join.ahk"   LinkPlay := "join"   (joins by itself)
 ;   a front-end's own launcher                    e.g. its gun set-up first, IgnorePads := true, EndCommand := "<a program>"
 ; Values they can set before the #Include: IgnorePads, CloseHotr, Debug (true / false), EndCommand (run at the end),
